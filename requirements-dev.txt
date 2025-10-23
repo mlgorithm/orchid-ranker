@@ -1,0 +1,15 @@
+# Developer conveniences mirroring `pip install orchid-ranker[dev,agentic,viz,preprocess]`
+numpy>=1.22
+pandas>=1.5
+scikit-learn>=1.1
+scipy>=1.9
+pyyaml>=6.0
+joblib>=1.2
+torch>=1.13
+matplotlib>=3.6
+tqdm>=4.60
+pytest>=7.0
+mypy>=1.4
+ruff>=0.1.5
+build>=1.0
+twine>=4.0

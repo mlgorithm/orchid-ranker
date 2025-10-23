@@ -1,0 +1,71 @@
+run:
+  dataset: ednet
+  rounds: 50
+
+datasets:
+  ednet:
+    paths:
+      base_dir: data/KT-processed
+      train: train.csv
+      val: val.csv
+      test: test.csv
+      side_information_users: side_information_users.csv
+      side_information_items: side_information_items.csv
+
+    # interactions produced by the EdNet preprocessing include a timestamp
+    interactions:
+      timestamp: true
+
+    # === Side-information schema (matches the EdNet preprocessing outputs) ===
+    # Users are per-learner aggregates (dominant platform/source + a few numerics)
+    users:
+      categorical: [
+        platform_pref,     # dominant platform per user
+        source_pref        # dominant content source per user
+      ]
+      numeric: [
+        mean_accuracy,          # overall accuracy
+        decayed_accuracy,       # recency-weighted accuracy
+        recent_accuracy_15d,    # last-15-day accuracy
+        activity_span_days,     # max(ts)-min(ts) in days
+        activity_velocity,      # interactions per day
+        total_interactions,     # total responses
+        recent_interactions_15d, # interactions in last 15 days
+        mean_elapsed_time,      # avg response time
+        std_elapsed_time,       # response-time variability
+        avg_inter_event_ms      # mean gap between events
+      ]
+
+    # Items carry content metadata + simple aggregates
+    items:
+      categorical: [
+        part,              # exam section / part (1..7 in EdNet)
+        tag_top,           # most frequent tag for the question
+        source,            # content source (if available)
+        platform           # platform tag for the item (if available)
+      ]
+      numeric: [
+        tag_count,               # number of unique tags
+        tag_diversity,           # distinct tags count
+        mean_elapsed_time,       # avg response time (ms)
+        difficulty,              # historical difficulty
+        decayed_accuracy,        # recency-weighted accuracy
+        difficulty_recency,      # difficulty via recent acc
+        recent_15d_interactions  # exposures in last 15 days
+      ]
+
+    # === Sanitization (used by the orchestrator via names → one-hots) ===
+    sensitive:
+      users:
+        # quasi-identifiers you may want to mute under strong privacy
+        categoricals: [platform_pref, source_pref]
+        numerics: []   # typically none; add if you deem activity_span_days identifying
+      items:
+        # generally safe to leave empty; include 'source' or 'platform' if needed
+        categoricals: []
+        numerics: []
+
+    # === Optional difficulty shaping used by seeding / ZPD band ===
+    difficulty:
+      mode: compute         # compute from correctness / elapsed_time aggregates
+      halflife_days: 45     # recency decay when computing item difficulty

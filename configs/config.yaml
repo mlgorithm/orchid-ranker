@@ -1,0 +1,64 @@
+version: 1
+
+run:
+  dataset: oulad
+  rounds: 10
+
+datasets:
+  oulad:
+    paths:
+      base_dir: ./data/oulad-processed
+      train: train.csv                  # columns: u,i,label,timestamp
+      val: val.csv                      # columns: u,i,label,timestamp
+      test: test.csv                    # columns: u,i,label,timestamp
+      side_information_users: side_information_users.csv
+      side_information_items: side_information_items.csv
+
+    interactions:
+      user_id: u
+      item_id: i
+      label: label
+      timestamp: timestamp              # numeric; days since course start (OULAD style)
+
+      # how to weight older interactions when estimating item difficulty
+      time_decay:
+        enabled: true
+        halflife: 30                    # “days”; weight = 0.5 ** ((t_max - t)/halflife)
+
+    users:
+      # side_information_users columns
+      categorical: ["gender","region","highest_education","imd_band","age_band","disability","final_result"]
+      numeric: ["num_of_prev_attempts","studied_credits"]
+      sensitive:
+        # what to sanitize from the profile BEFORE encoding each round
+        categoricals: ["region","age_band","disability"]
+        numerics: []                    # none by default; add if needed
+
+    items:
+      # side_information_items columns
+      categorical: ["activity_type","code_module","code_presentation"]
+      numeric: ["week_from","week_to","avg_clicks","duration"]
+      sensitive:
+        categoricals: []                # keep empty unless you want to mask/filter certain item attrs
+        numerics: []
+
+    privacy:
+      dp:
+        enabled: true
+        epsilon: 4.0
+        delta: 1e-5
+        max_grad_norm: 1.0
+      mia:
+        threshold: 0.7
+      sanitization:
+        allow_generalization: true
+      budget:
+        epsilon: 4.0
+
+    generalization:
+      # Example hierarchy (extend as you see fit)
+      region:
+        "EU": "EU"
+        "NA": "NA"
+        "ASIA": "ASIA"
+        "AFRICA": "AFRICA"

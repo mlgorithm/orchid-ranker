@@ -1,0 +1,25 @@
+# Template demonstrating the minimum configuration Orchid Ranker expects.
+run:
+  dataset: sample
+
+# You can keep multiple datasets in a single file.
+datasets:
+  sample:
+    paths:
+      base_dir: data/sample-processed
+      train: train.csv
+      val: val.csv
+      test: test.csv
+      side_information_users: side_information_users.csv
+      side_information_items: side_information_items.csv
+
+    interactions:
+      timestamp: true
+
+    users:
+      categorical: [cohort]
+      numeric: [mean_accuracy, activity_span_days]
+
+    items:
+      categorical: [module]
+      numeric: [difficulty]

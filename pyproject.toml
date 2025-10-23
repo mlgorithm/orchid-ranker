@@ -1,0 +1,71 @@
+[build-system]
+requires = ["setuptools>=64", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "orchid-ranker"
+version = "0.2.0.dev0"
+description = "Adaptive educational recommender toolkit with learner simulators, agentic orchestration, and preprocessing utilities."
+readme = "README.md"
+authors = [
+  {name = "Farhad Vadiee"}
+]
+license = {file = "LICENSE"}
+requires-python = ">=3.9"
+dependencies = [
+  "numpy>=1.22",
+  "pandas>=1.5",
+  "scikit-learn>=1.1",
+  "scipy>=1.9",
+  "pyyaml>=6.0",
+  "joblib>=1.2",
+  "torch>=1.13",
+]
+keywords = ["recommender-systems", "education", "privacy", "bandits", "simulation"]
+classifiers = [
+  "Programming Language :: Python :: 3",
+  "License :: OSI Approved :: MIT License",
+  "Intended Audience :: Developers",
+  "Intended Audience :: Science/Research",
+  "Topic :: Scientific/Engineering :: Artificial Intelligence",
+]
+
+[project.optional-dependencies]
+preprocess = [
+  "tqdm>=4.60",
+]
+viz = [
+  "matplotlib>=3.6",
+]
+agentic = [
+  "matplotlib>=3.6",
+  "tqdm>=4.60",
+]
+benchmarks = [
+  "implicit>=0.7",
+  "reclab>=0.2",
+]
+dev = [
+  "pytest>=7.0",
+  "mypy>=1.4",
+  "ruff>=0.1.5",
+  "build>=1.0",
+  "twine>=4.0",
+]
+
+[project.urls]
+Homepage = "https://github.com/farhad.vadiee/orchid-ranker"
+Source = "https://github.com/farhad.vadiee/orchid-ranker"
+
+[tool.setuptools]
+include-package-data = true
+
+[tool.setuptools.packages.find]
+where = ["src"]
+include = ["orchid_ranker", "orchid_ranker.*"]
+
+[project.scripts]
+orchid-preprocess = "orchid_ranker.preprocessing.cli:main"
+orchid-preprocess-ednet = "orchid_ranker.preprocessing.ednet:main"
+orchid-preprocess-oulad = "orchid_ranker.preprocessing.oulad:main"
+orchid-evaluate = "orchid_ranker.cli.evaluate:main"

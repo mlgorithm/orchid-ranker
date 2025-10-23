@@ -1,0 +1,232 @@
+seed: 42
+
+dataset:
+  name: oulad
+  difficulty_key: "difficulty"
+
+model:
+  name: TwoTower
+  lr: 0.001
+  emb_dim: 64
+  hidden: 128
+
+dp:
+  enabled: true
+  noise_multiplier: 1.2     # default σ; experiments can override
+  sample_rate: 0.02         # default q; experiments can override
+  delta: 1e-5
+  max_grad_norm: 1.0
+  accountant: "rdp"         # match paper’s accounting
+
+orchestrator:
+  rounds: 20
+  top_k_base: 5
+  zpd_margin: 0.12
+  min_candidates: 100
+  novelty_bonus: 0.10
+  mmr_lambda: 0.25
+  log_path: runs/agentic_log.jsonl
+  console: true
+  shuffle_users_each_round: true
+  privacy_mode: "standard"
+  share_signals: false
+  state_window_W: 50
+  uncertainty_window_H: 10
+  per_round_eps_target: 0.00   # default OFF; experiments set this
+
+experiments:
+
+experiments:
+
+  # ========= RQ1 BASELINE: NO DP LEARNING (ε = 0), OPEN FEATURES =========
+  - name: adaptive_open_nodp
+    save_dir: runs/rq1_oulad_n/adaptive_open_nodp
+    policy: { name: adaptive, dp_updates: false, policy_gain: 1.25,
+              exploration_bounds: [0.15, 0.65], diversity_bounds: [0.05, 0.50],
+              k_bounds: [2, 6], zpd_bounds: [0.08, 0.18] }
+    privacy: { mode: "standard", epsilon_total_global: 0.0, sanitize: 0 }
+    overrides: {}
+
+  - name: fixed_open_nodp
+    save_dir: runs/rq1_oulad_n/fixed_open_nodp
+    policy: { name: fixed, alpha: 0.30, lambda: 0.25, top_k: 4, zpd_width: 0.12, dp_updates: false }
+    privacy: { mode: "standard", epsilon_total_global: 0.0, sanitize: 0 }
+    overrides: {}
+
+  # ========= RQ1 UNDER DP (OPEN FEATURES). MATCHED ε FOR ADAPTIVE vs FIXED =========
+  # ε = 0.2
+  # - name: adaptive_open_dp_eps0_2
+  #   save_dir: runs/rq1/adaptive_open_dp_eps0_2
+  #   policy: { name: adaptive, dp_updates: true, exploration_bounds: [0.15, 0.60], diversity_bounds: [0.08, 0.50], k_bounds: [2, 6], zpd_bounds: [0.08, 0.18] }
+  #   privacy: { mode: "standard", epsilon_total_global: 0.2, sanitize: 0 }
+  #   overrides: { dp.noise_multiplier: 2.8, dp.sample_rate: 0.01, orchestrator.per_round_eps_target: 0.01 }
+
+  # - name: fixed_open_dp_eps0_2
+  #   save_dir: runs/rq1/fixed_open_dp_eps0_2
+  #   policy: { name: fixed, alpha: 0.30, lambda: 0.25, top_k: 4, zpd_width: 0.12, dp_updates: true }
+  #   privacy: { mode: "standard", epsilon_total_global: 0.2, sanitize: 0 }
+  #   overrides: { dp.noise_multiplier: 2.8, dp.sample_rate: 0.01, orchestrator.per_round_eps_target: 0.01 }
+
+  # # ε = 0.5
+  # - name: adaptive_open_dp_eps0_5
+  #   save_dir: runs/rq1/adaptive_open_dp_eps0_5
+  #   policy: { name: adaptive, dp_updates: true, exploration_bounds: [0.15, 0.60], diversity_bounds: [0.08, 0.50], k_bounds: [2, 6], zpd_bounds: [0.08, 0.18] }
+  #   privacy: { mode: "standard", epsilon_total_global: 0.5, sanitize: 0 }
+  #   overrides: { dp.noise_multiplier: 2.0, dp.sample_rate: 0.015, orchestrator.per_round_eps_target: 0.02 }
+
+  # - name: fixed_open_dp_eps0_5
+  #   save_dir: runs/rq1/fixed_open_dp_eps0_5
+  #   policy: { name: fixed, alpha: 0.30, lambda: 0.25, top_k: 4, zpd_width: 0.12, dp_updates: true }
+  #   privacy: { mode: "standard", epsilon_total_global: 0.5, sanitize: 0 }
+  #   overrides: { dp.noise_multiplier: 2.0, dp.sample_rate: 0.015, orchestrator.per_round_eps_target: 0.02 }
+
+  # # ε = 1.0
+  # - name: adaptive_open_dp_eps1_0
+  #   save_dir: runs/rq1/adaptive_open_dp_eps1_0
+  #   policy: { name: adaptive, dp_updates: true, exploration_bounds: [0.15, 0.65], diversity_bounds: [0.05, 0.50], k_bounds: [2, 6], zpd_bounds: [0.08, 0.18] }
+  #   privacy: { mode: "standard", epsilon_total_global: 1.0, sanitize: 0 }
+  #   overrides: { dp.noise_multiplier: 1.2, dp.sample_rate: 0.02,  orchestrator.per_round_eps_target: 0.03 }
+
+  # - name: fixed_open_dp_eps1_0
+  #   save_dir: runs/rq1/fixed_open_dp_eps1_0
+  #   policy: { name: fixed, alpha: 0.30, lambda: 0.25, top_k: 4, zpd_width: 0.12, dp_updates: true }
+  #   privacy: { mode: "standard", epsilon_total_global: 1.0, sanitize: 0 }
+  #   overrides: { dp.noise_multiplier: 1.2, dp.sample_rate: 0.02,  orchestrator.per_round_eps_target: 0.03 }
+
+  # # ε = 2.0
+  # - name: adaptive_open_dp_eps2_0
+  #   save_dir: runs/rq1/adaptive_open_dp_eps2_0
+  #   policy: { name: adaptive, dp_updates: true, exploration_bounds: [0.15, 0.65], diversity_bounds: [0.05, 0.50], k_bounds: [2, 6], zpd_bounds: [0.08, 0.18] }
+  #   privacy: { mode: "standard", epsilon_total_global: 2.0, sanitize: 0 }
+  #   overrides: { dp.noise_multiplier: 0.8, dp.sample_rate: 0.02,  orchestrator.per_round_eps_target: 0.05 }
+
+  # - name: fixed_open_dp_eps2_0
+  #   save_dir: runs/rq1/fixed_open_dp_eps2_0
+  #   policy: { name: fixed, alpha: 0.30, lambda: 0.25, top_k: 4, zpd_width: 0.12, dp_updates: true }
+  #   privacy: { mode: "standard", epsilon_total_global: 2.0, sanitize: 0 }
+  #   overrides: { dp.noise_multiplier: 0.8, dp.sample_rate: 0.02,  orchestrator.per_round_eps_target: 0.05 }
+
+  # # ========= RQ2: PRIVACY–UTILITY SWEEP FOR ADAPTIVE ONLY =========
+  # # --------- OPEN (sanitize=0) ---------
+  # - name: adaptive_open_dp_eps0_0
+  #   save_dir: runs/rq2/adaptive_open_dp_eps0_0
+  #   policy: { name: adaptive, dp_updates: false, exploration_bounds: [0.15, 0.60], diversity_bounds: [0.08, 0.50], k_bounds: [2, 6], zpd_bounds: [0.08, 0.18] }
+  #   privacy: { mode: "standard", epsilon_total_global: 0.0, sanitize: 0 }
+  #   overrides: {}
+
+  # - name: adaptive_open_dp_eps0_2_rq2
+  #   save_dir: runs/rq2/adaptive_open_dp_eps0_2
+  #   policy: { name: adaptive, dp_updates: true, exploration_bounds: [0.15, 0.60], diversity_bounds: [0.08, 0.50], k_bounds: [2, 6], zpd_bounds: [0.08, 0.18] }
+  #   privacy: { mode: "standard", epsilon_total_global: 0.2, sanitize: 0 }
+  #   overrides: { dp.noise_multiplier: 2.8, dp.sample_rate: 0.01, orchestrator.per_round_eps_target: 0.01 }
+
+  # - name: adaptive_open_dp_eps0_5_rq2
+  #   save_dir: runs/rq2/adaptive_open_dp_eps0_5
+  #   policy: { name: adaptive, dp_updates: true, exploration_bounds: [0.15, 0.60], diversity_bounds: [0.08, 0.50], k_bounds: [2, 6], zpd_bounds: [0.08, 0.18] }
+  #   privacy: { mode: "standard", epsilon_total_global: 0.5, sanitize: 0 }
+  #   overrides: { dp.noise_multiplier: 2.0, dp.sample_rate: 0.015, orchestrator.per_round_eps_target: 0.02 }
+
+  # - name: adaptive_open_dp_eps1_0_rq2
+  #   save_dir: runs/rq2/adaptive_open_dp_eps1_0
+  #   policy: { name: adaptive, dp_updates: true, exploration_bounds: [0.15, 0.65], diversity_bounds: [0.05, 0.50], k_bounds: [2, 6], zpd_bounds: [0.08, 0.18] }
+  #   privacy: { mode: "standard", epsilon_total_global: 1.0, sanitize: 0 }
+  #   overrides: { dp.noise_multiplier: 1.2, dp.sample_rate: 0.02,  orchestrator.per_round_eps_target: 0.03 }
+
+  # - name: adaptive_open_dp_eps2_0_rq2
+  #   save_dir: runs/rq2/adaptive_open_dp_eps2_0
+  #   policy: { name: adaptive, dp_updates: true, exploration_bounds: [0.15, 0.65], diversity_bounds: [0.05, 0.50], k_bounds: [2, 6], zpd_bounds: [0.08, 0.18] }
+  #   privacy: { mode: "standard", epsilon_total_global: 2.0, sanitize: 0 }
+  #   overrides: { dp.noise_multiplier: 0.8, dp.sample_rate: 0.02,  orchestrator.per_round_eps_target: 0.05 }
+
+  # # --------- STRONG (sanitize=1) ---------
+  # - name: adaptive_strong_dp_eps0_0
+  #   save_dir: runs/rq2/adaptive_strong_dp_eps0_0
+  #   policy: { name: adaptive, dp_updates: false, exploration_bounds: [0.15, 0.55], diversity_bounds: [0.10, 0.50], k_bounds: [2, 5], zpd_bounds: [0.08, 0.16] }
+  #   privacy: { mode: "strong", epsilon_total_global: 0.0, sanitize: 1 }
+  #   overrides: {}
+
+  # - name: adaptive_strong_dp_eps0_2
+  #   save_dir: runs/rq2/adaptive_strong_dp_eps0_2
+  #   policy: { name: adaptive, dp_updates: true, exploration_bounds: [0.15, 0.55], diversity_bounds: [0.10, 0.50], k_bounds: [2, 5], zpd_bounds: [0.08, 0.16] }
+  #   privacy: { mode: "strong", epsilon_total_global: 0.2, sanitize: 1 }
+  #   overrides: { dp.noise_multiplier: 2.8, dp.sample_rate: 0.01, orchestrator.per_round_eps_target: 0.01 }
+
+  # - name: adaptive_strong_dp_eps0_5
+  #   save_dir: runs/rq2/adaptive_strong_dp_eps0_5
+  #   policy: { name: adaptive, dp_updates: true, exploration_bounds: [0.15, 0.55], diversity_bounds: [0.10, 0.50], k_bounds: [2, 5], zpd_bounds: [0.08, 0.16] }
+  #   privacy: { mode: "strong", epsilon_total_global: 0.5, sanitize: 1 }
+  #   overrides: { dp.noise_multiplier: 2.0, dp.sample_rate: 0.015, orchestrator.per_round_eps_target: 0.02 }
+
+  # - name: adaptive_strong_dp_eps1_0
+  #   save_dir: runs/rq2/adaptive_strong_dp_eps1_0
+  #   policy: { name: adaptive, dp_updates: true, exploration_bounds: [0.15, 0.55], diversity_bounds: [0.10, 0.50], k_bounds: [2, 5], zpd_bounds: [0.08, 0.16] }
+  #   privacy: { mode: "strong", epsilon_total_global: 1.0, sanitize: 1 }
+  #   overrides: { dp.noise_multiplier: 1.2, dp.sample_rate: 0.02,  orchestrator.per_round_eps_target: 0.03 }
+
+  # - name: adaptive_strong_dp_eps2_0
+  #   save_dir: runs/rq2/adaptive_strong_dp_eps2_0
+  #   policy: { name: adaptive, dp_updates: true, exploration_bounds: [0.15, 0.55], diversity_bounds: [0.10, 0.50], k_bounds: [2, 5], zpd_bounds: [0.08, 0.16] }
+  #   privacy: { mode: "strong", epsilon_total_global: 2.0, sanitize: 1 }
+  #   overrides: { dp.noise_multiplier: 0.8, dp.sample_rate: 0.02,  orchestrator.per_round_eps_target: 0.05 }
+
+run:
+  dataset: oulad
+  rounds: 20
+
+datasets:
+  oulad:
+    paths:
+      base_dir: data/oulad-processed
+      train: train.csv
+      val: val.csv
+      test: test.csv
+      side_information_users: side_information_users.csv
+      side_information_items: side_information_items.csv
+
+    # interactions produced by the preprocessing already include a timestamp column
+    interactions:
+      timestamp: true
+
+    # === Side-information schema (matches the preprocessing outputs) ===
+    users:
+      categorical: [
+        gender,
+        region,
+        highest_education,
+        imd_band,
+        age_band,
+        disability,
+        final_result
+      ]
+      numeric: [
+        num_of_prev_attempts,
+        studied_credits
+      ]
+
+    items:
+      categorical: [
+        activity_type,
+        code_module,
+        code_presentation
+      ]
+      numeric: [
+        week_from,     # numeric offset (from VLE week)
+        duration,      # week_to - week_from
+        avg_clicks     # popularity proxy from VLE clicks
+      ]
+
+    # === Sanitization (used by the orchestrator via names → one-hots) ===
+    sensitive:
+      users:
+        # strong identifiers / protected attributes
+        categoricals: [region, age_band, disability, gender, imd_band]
+        numerics: []   # keep as [] unless you decide to mask studied_credits, etc.
+      items:
+        # generally none for OULAD; enable "code_presentation" here for very strong mode
+        categoricals: []
+        numerics: []
+
+    # === Optional difficulty shaping used by seeding / ZPD band ===
+    difficulty:
+      mode: compute         # compute from logs (fallback to 0.5 if missing)
+      halflife_days: 45     # recency decay on click/correct signals
