@@ -8,3 +8,4 @@
 - `customer_success/` – onboarding playbook, SLAs, pilot plan, solutions engineering rotation.
 - `gtm/` – messaging one-pager, blog template, license notes.
 - `compliance/` – data retention, incident response, FERPA/GDPR alignment.
+- `tutorials/` – full end-to-end walkthrough (`library_walkthrough.md`).

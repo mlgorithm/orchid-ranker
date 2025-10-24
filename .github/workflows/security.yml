@@ -22,7 +22,7 @@ jobs:
       - name: Generate SBOM
         run: |
           mkdir -p security-reports
-          cyclonedx-py --format json --output security-reports/sbom.json
+          cyclonedx-py environment --format json --output security-reports/sbom.json
         working-directory: ${{ github.workspace }}
       - name: Run pip-audit
         run: |

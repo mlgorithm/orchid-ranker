@@ -53,6 +53,7 @@ See `docs/api_support_policy.md` for the officially supported runtime matrix and
 ### Quickstart & Deployment
 
 - Follow `docs/quickstart.md` or run `python examples/quickstart.py` to generate sample data and train your first model.
+- Work through the full walkthrough in `docs/tutorials/library_walkthrough.md` for DP, observability, and simulation extras.
 
 ### Deployment quickstart
 
