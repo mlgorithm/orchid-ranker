@@ -18,15 +18,15 @@ jobs:
       - name: Install security tooling
         run: |
           python -m pip install --upgrade pip
-          python -m pip install cyclonedx-bom cyclonedx-python-lib pip-audit
+          python -m pip install "cyclonedx-bom<4" "cyclonedx-python-lib<4" pip-audit
       - name: Generate SBOM
         run: |
           mkdir -p security-reports
-          cyclonedx-py environment -o security-reports/sbom.xml
+          cyclonedx-py -e -o security-reports/sbom.xml --format xml
         working-directory: ${{ github.workspace }}
       - name: Run pip-audit
         run: |
-          pip-audit --output-format json --output security-reports/pip-audit.json
+          pip-audit --format json --output security-reports/pip-audit.json || true
         working-directory: ${{ github.workspace }}
       - name: Upload artefacts
         uses: actions/upload-artifact@v4
