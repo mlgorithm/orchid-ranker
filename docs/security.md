@@ -1,7 +1,7 @@
 # Security & Compliance Notes
 
 ## SBOM & Vulnerability Scanning
-- `cyclonedx-py environment --format json --output sbom.json` generates an SBOM for the active Python environment.
+- `cyclonedx-py environment -o sbom.json -F json` generates an SBOM for the active Python environment.
 - `pip-audit --output-format json --output pip-audit.json` checks Python packages for known CVEs.
 - GitHub workflow `.github/workflows/security.yml` now runs on every push/PR to `main` (in addition to manual dispatch) and uploads artefacts under `security-reports/`.
 
