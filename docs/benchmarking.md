@@ -67,3 +67,26 @@ orchid-evaluate \
 
 Runs the built-in metrics suite (Precision@5, Recall@5, MAP@10, NDCG@10) and
 supports basic hyper-parameter sweeps via repeated `--strategy` flags.
+
+## Performance profiling
+
+```bash
+python benchmarks/profile_strategies.py --strategies als,neural_mf,user_knn --users 400 --items 600 --interactions 20000
+```
+
+Generates synthetic data, times each strategy’s `fit()` and `recommend()` calls, and prints a latency summary (optionally exporting JSON for CI dashboards).
+
+### CI integration
+
+- Run the profiler with `--output` to persist metrics (e.g. `python benchmarks/profile_strategies.py --output ci/perf.json`).
+- Commit a baseline JSON and compare within CI (GitHub Actions, GitLab) to flag regressions above an agreed threshold.
+- Example GitHub Actions snippet:
+
+  ```yaml
+  - name: Profile strategies
+    run: python benchmarks/profile_strategies.py --strategies als,linucb,neural_mf --users 400 --items 600 --interactions 20000 --output perf.json
+  - name: Check regression
+    run: python scripts/check_perf_regression.py perf.json ci/baseline_perf.json --max-delta 0.1
+  ```
+
+Supply your own comparison script (`check_perf_regression.py`) to assert that latency increases remain within tolerance.

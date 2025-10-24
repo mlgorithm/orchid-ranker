@@ -3,7 +3,7 @@ import logging
 import pandas as pd
 import pytest
 
-from orchid_ranker import OrchidRecommender, configure_logging
+from orchid_ranker import OrchidRecommender, configure_logging, SUPPORTED_STRATEGIES
 
 
 def _dataset():
@@ -79,6 +79,24 @@ def test_neural_mf_recommender_outputs_scores():
     slate = rec.recommend(user_id=1, top_k=2)
     assert slate
     assert all(0.0 <= r.score <= 1.0 for r in slate)
+
+
+def test_unknown_strategy_is_rejected():
+    with pytest.raises(ValueError):
+        OrchidRecommender(strategy="does_not_exist")
+
+
+def test_supported_strategies_contains_user_knn():
+    assert "user_knn" in SUPPORTED_STRATEGIES
+
+
+def test_user_knn_recommender_returns_items():
+    data = _dataset()
+    rec = OrchidRecommender(strategy="user_knn", k=2)
+    rec.fit(data, rating_col="label")
+    slate = rec.recommend(user_id=1, top_k=2)
+    assert slate, "expected user_knn to produce a slate"
+    assert all(isinstance(item.item_id, int) for item in slate)
 
 
 def test_implicit_als_comparison():

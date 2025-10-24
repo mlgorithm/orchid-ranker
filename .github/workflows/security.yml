@@ -1,0 +1,35 @@
+name: security-audit
+
+on:
+  workflow_dispatch:
+  push:
+    branches: ["main"]
+  pull_request:
+    branches: ["main"]
+
+jobs:
+  security:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - name: Install security tooling
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install cyclonedx-bom pip-audit
+      - name: Generate SBOM
+        run: |
+          mkdir -p security-reports
+          cyclonedx-py --format json --output security-reports/sbom.json
+        working-directory: ${{ github.workspace }}
+      - name: Run pip-audit
+        run: |
+          pip-audit --output-format json --output security-reports/pip-audit.json
+        working-directory: ${{ github.workspace }}
+      - name: Upload artefacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: security-reports
+          path: security-reports/

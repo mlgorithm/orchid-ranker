@@ -14,6 +14,7 @@ from .baselines import (
     ImplicitALSBaseline,
     ImplicitBPRBaseline,
     LinUCBBaseline,
+    UserKNNBaseline,
     NeuralMatrixFactorizationBaseline,
     PopularityBaseline,
     RandomBaseline,
@@ -27,13 +28,25 @@ class Recommendation:
     score: float
 
 
+SUPPORTED_STRATEGIES: Tuple[str, ...] = (
+    "als",
+    "linucb",
+    "popularity",
+    "random",
+    "implicit_als",
+    "implicit_bpr",
+    "neural_mf",
+    "user_knn",
+)
+
+
 class OrchidRecommender:
     """Convenience wrapper offering a Surprise-like API.
 
     Parameters
     ----------
     strategy:
-        One of ``{"als", "linucb", "popularity", "random", "implicit_als", "implicit_bpr", "neural_mf"}``.
+        One of ``{"als", "linucb", "popularity", "random", "implicit_als", "implicit_bpr", "neural_mf", "user_knn"}``.
     device:
         Torch device string. Defaults to CPU.
     strategy_kwargs:
@@ -48,7 +61,12 @@ class OrchidRecommender:
         validate_inputs: bool = True,
         **strategy_kwargs,
     ) -> None:
-        self.strategy = strategy.lower()
+        normalised = strategy.lower()
+        if normalised not in SUPPORTED_STRATEGIES:
+            raise ValueError(
+                f"Unknown strategy '{strategy}'. Supported strategies: {', '.join(SUPPORTED_STRATEGIES)}"
+            )
+        self.strategy = normalised
         self.device = torch.device(device or ("cuda" if torch.cuda.is_available() else "cpu"))
         self.strategy_kwargs = strategy_kwargs
         self._validate_inputs = bool(validate_inputs)
@@ -173,10 +191,23 @@ class OrchidRecommender:
                 **self.strategy_kwargs,
             )
             self._baseline.fit(user_idx, item_idx, labels)
+        elif strategy == "user_knn":
+            matrix = np.zeros((num_users, num_items), dtype=np.float32)
+            counts = np.zeros((num_users, num_items), dtype=np.float32)
+            np.add.at(matrix, (user_idx, item_idx), labels.astype(np.float32))
+            np.add.at(counts, (user_idx, item_idx), 1.0)
+            non_zero = counts > 0
+            if np.any(non_zero):
+                matrix[non_zero] = matrix[non_zero] / counts[non_zero]
+            self._baseline = UserKNNBaseline(
+                matrix,
+                device=self.device,
+                k=int(self.strategy_kwargs.get("k", 20)),
+            )
         else:
             raise ValueError(
                 f"Unknown strategy '{self.strategy}'. Expected one of 'als', 'linucb', 'popularity', "
-                "'random', 'implicit_als', 'implicit_bpr', 'neural_mf'."
+                "'random', 'implicit_als', 'implicit_bpr', 'neural_mf', 'user_knn'."
             )
 
         self._logger.info("fitted strategy=%s users=%d items=%d", self.strategy, num_users, num_items)

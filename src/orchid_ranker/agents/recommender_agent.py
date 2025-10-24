@@ -14,7 +14,9 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
-from orchid_ranker.agents.simple_dp import SimpleDPConfig, SimpleDPAccountant, dp_sgd_step
+from orchid_ranker.agents.simple_dp import SimpleDPConfig, dp_sgd_step
+from orchid_ranker.dp_accountant import build_accountant
+from orchid_ranker.security import AuditLogger
 from orchid_ranker.agents.student_agent import ItemMeta
 
 # ---------------------------------------------------------------------
@@ -333,13 +335,10 @@ class TwoTowerRecommender(nn.Module):
             sample_rate=float(self.dp_cfg.get("sample_rate", 0.02)),
             delta=float(self.dp_cfg.get("delta", 1e-5)),
         )
-        self._dp_accountant = SimpleDPAccountant(
-            q=self.dp_settings.sample_rate,
-            sigma=self.dp_settings.noise_multiplier,
-            delta=self.dp_settings.delta,
-        )
+        self._dp_accountant = build_accountant(self.dp_engine, self.dp_settings)
         self.eps_cum = 0.0
         self.eps_last = 0.0
+        self._dp_steps_total = 0
 
         # Loss
         self.criterion = nn.BCEWithLogitsLoss(reduction="mean")
@@ -363,10 +362,17 @@ class TwoTowerRecommender(nn.Module):
         self.device = device
         self.per_user_only = False
         self.to(self.device)
+        self.audit_logger: Optional[AuditLogger] = None
+        self._audit_actor = "TwoTowerRecommender"
 
     # ---------------- helpers ----------------
     def _slot_for(self, user_id: int) -> str:
         return str(hash(user_id) % self.num_adapter_slots)
+
+    def attach_audit_logger(self, logger: AuditLogger, *, actor: str | None = None) -> None:
+        self.audit_logger = logger
+        if actor:
+            self._audit_actor = str(actor)
 
     def _apply_film(self, u_base: torch.Tensor, state_vec: torch.Tensor) -> torch.Tensor:
         gamma_beta = self.state_to_gate(state_vec)   # [B, 2H]
@@ -735,44 +741,24 @@ class TwoTowerRecommender(nn.Module):
             return
         sigma = float(self.dp_settings.noise_multiplier or 0.0)
         q     = float(self.dp_settings.sample_rate or 0.0)
-        delta = float(self.dp_settings.delta or 1e-5)
         if sigma <= 0.0 or q <= 0.0:
             self._dp_steps_budget = 0
             _d("DP begin: invalid sigma/q -> no budget")
             return
-        orders = getattr(self, "_rdp_orders", None)
-        if orders is None:
-            orders = [1.25, 1.5, 2, 3, 5, 8, 10, 16, 32, 64, 128, 256]
-            self._rdp_orders = orders
-        if not hasattr(self, "_rdp_cum"):
-            self._rdp_cum = [0.0 for _ in orders]
-
-        def _compute_rdp(q, noise_multiplier, steps, orders):
-            q2 = q * q
-            s2 = noise_multiplier * noise_multiplier
-            return [steps * (o * q2) / (2.0 * s2) for o in orders]
-
-        def _get_eps(orders, rdp, delta):
-            vals = []
-            log1d = np.log(1.0 / max(delta, 1e-12))
-            for o, r in zip(orders, rdp):
-                if o <= 1:
-                    continue
-                vals.append(r + log1d / (o - 1.0))
-            return float(min(vals)) if vals else float("inf")
-
-        eps_before = _get_eps(orders, self._rdp_cum, delta)
-
+        preview = self._dp_accountant.fork()
         steps = 0
         MAX_STEPS = 32
         while steps < MAX_STEPS:
-            rdp_after = [a + b for a, b in zip(self._rdp_cum, _compute_rdp(q, sigma, steps + 1, orders))]
-            eps_after = _get_eps(orders, rdp_after, delta)
-            if (eps_after - eps_before) > tgt:
+            inc, _ = preview.step(1)
+            if inc <= 0.0:
+                if inc == 0.0:
+                    steps += 1
+                break
+            if inc > tgt:
                 break
             steps += 1
 
-        self._dp_steps_budget = int(steps)
+        self._dp_steps_budget = max(0, steps)
         _d(f"DP begin: tgt_eps={tgt:.4f} -> steps_budget={self._dp_steps_budget}")
 
     @torch.no_grad()
@@ -961,33 +947,13 @@ class TwoTowerRecommender(nn.Module):
         # ----- DP accountant (RDP approx) -----
         eps_delta = 0.0
         if dp_enabled:
-            orders = getattr(self, "_rdp_orders", None)
-            if orders is None:
-                orders = [1.25, 1.5, 2, 3, 5, 8, 10, 16, 32, 64, 128, 256]
-                self._rdp_orders = orders
-
-            def _compute_rdp(q, noise_multiplier, steps, orders):
-                q2 = q * q
-                s2 = noise_multiplier * noise_multiplier
-                return [steps * (o * q2) / (2.0 * s2) for o in orders]
-
-            def _get_eps(orders, rdp, delta):
-                vals = []
-                log1d = np.log(1.0 / max(delta, 1e-12))
-                for o, r in zip(orders, rdp):
-                    if o <= 1:
-                        continue
-                    vals.append(r + log1d / (o - 1.0))
-                return float(min(vals)) if vals else float("inf")
-
-            if not hasattr(self, "_rdp_cum"):
-                self._rdp_cum = [0.0 for _ in orders]
-
-            rdp_inc = _compute_rdp(q=q, noise_multiplier=sigma, steps=int(steps_done), orders=orders)
-            self._rdp_cum = [a + b for a, b in zip(self._rdp_cum, rdp_inc)]
-            eps_now = _get_eps(orders, self._rdp_cum, delta=delta)
-            eps_delta = max(0.0, eps_now - eps_before)
-            self.eps_cum = float(eps_now)
+            eps_delta, self.eps_cum = self._dp_accountant.step(int(steps_done))
+            self._dp_steps_total += int(steps_done)
+            self.eps_last = eps_delta
+        else:
+            self.eps_cum = 0.0
+            self.eps_last = 0.0
+            self._dp_steps_total = 0
 
         rewards_np = y.detach().cpu().numpy()
 
@@ -1015,7 +981,7 @@ class TwoTowerRecommender(nn.Module):
             _d(f"update: done loss={loss_val:.4f} dp={'ON' if dp_enabled else 'OFF'} "
                f"eps+={eps_delta:.4f} eps_cum={getattr(self, 'eps_cum', 0.0):.4f}")
 
-        return {
+        stats_out = {
             "loss": float(loss_val),
             "epsilon_delta": float(eps_delta),
             "epsilon_cum": float(getattr(self, "eps_cum", 0.0)),
@@ -1023,6 +989,25 @@ class TwoTowerRecommender(nn.Module):
             "delta": (delta if dp_enabled else None),
             "sample_rate": (q if dp_enabled else None),
         }
+
+        if self.audit_logger is not None:
+            payload = {
+                "loss": stats_out["loss"],
+                "epsilon_delta": stats_out["epsilon_delta"],
+                "epsilon_cum": stats_out["epsilon_cum"],
+                "noise_multiplier": stats_out["noise_multiplier"],
+                "delta": stats_out["delta"],
+                "sample_rate": stats_out["sample_rate"],
+                "steps_total": getattr(self, "_dp_steps_total", 0),
+                "dp_enabled": bool(dp_enabled),
+            }
+            try:
+                self.audit_logger.log_event("dp_update", self._audit_actor, payload)
+            except Exception:
+                if _DEBUG_REC:
+                    _d("audit logger failed", payload)
+
+        return stats_out
 
     def _dp_update_per_sample(
         self,

@@ -1,0 +1,27 @@
+replicaCount: 1
+
+image:
+  repository: ghcr.io/your-org/orchid-ranker
+  tag: latest
+  pullPolicy: IfNotPresent
+
+service:
+  type: ClusterIP
+  port: 8000
+
+resources:
+  limits:
+    cpu: 500m
+    memory: 512Mi
+  requests:
+    cpu: 250m
+    memory: 256Mi
+
+env:
+  ORCHID_LOG_LEVEL: INFO
+  ORCHID_AUDIT_ENDPOINT: ""
+  ORCHID_AUDIT_API_KEY: ""
+
+metrics:
+  enabled: true
+  port: 9090

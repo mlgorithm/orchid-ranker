@@ -5,6 +5,7 @@ import argparse
 from pathlib import Path
 
 from .base import PreprocessorConfig, get_preprocessor, list_preprocessors
+from orchid_ranker.security import AccessControl
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="Run Orchid Ranker dataset preprocessors")
@@ -14,6 +15,12 @@ def main() -> None:
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--n-users", type=int, default=None)
     parser.add_argument("--extra", type=str, default=None, help="Optional key=value pairs, comma separated")
+    parser.add_argument(
+        "--role",
+        type=str,
+        default="ml_engineer",
+        help="Role requesting the operation (enforced via RBAC policy).",
+    )
     args = parser.parse_args()
 
     extra = {}
@@ -25,6 +32,8 @@ def main() -> None:
                 raise ValueError(f"Invalid extra parameter '{pair}' (expected key=value)")
             k, v = pair.split("=", 1)
             extra[k.strip()] = v.strip()
+
+    AccessControl().require(args.role, "preprocess")
 
     try:
         preprocessor = get_preprocessor(args.dataset)

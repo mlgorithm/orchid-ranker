@@ -318,6 +318,9 @@ class StudentAgent:
         sig = 1.0 / (1.0 + math.exp(-logit))
         return float(np.clip(self.c + (1.0 - self.c - self.s) * sig, 0.0, 1.0))
 
+        self._last_items_meta: Optional[Dict[int, Any]] = None
+        self._last_action_ids: List[int] = []
+
     def _apply_forgetting(self) -> None:
         # decay knowledge a bit each round
         if self.knowledge_mode == "scalar":
@@ -560,6 +563,80 @@ class StudentAgent:
             _p(f"user={self.user_id} reward: acc={acc:.3f} -> r={r:.3f} "
                f"(F={self.fatigue:.3f}, E={self.engagement:.3f})")
         return r
+
+    # ------------------------------------------------------------------
+    # Legacy compatibility API (act/update)
+    # ------------------------------------------------------------------
+
+    def act(
+        self,
+        decision: Dict[str, Any],
+        items_meta: Optional[Dict[int, Any]] = None,
+    ) -> Dict[int, int]:
+        """
+        Backwards-compatible hook for legacy experiments expecting ``act``.
+
+        Parameters
+        ----------
+        decision:
+            Dictionary containing an ``"accepted"`` list (legacy format). Any
+            missing list yields an empty interaction.
+        items_meta:
+            Optional per-item metadata mapping. Dict values may already be
+            ``ItemMeta`` instances or plain dictionaries with ``difficulty`` /
+            ``skills`` keys.
+
+        Returns
+        -------
+        Dict[int, int]
+            Binary feedback per accepted item (1=correct, 0=incorrect).
+        """
+
+        accepted = decision.get("accepted") or decision.get("accepted_ids") or []
+        accepted_ids = [int(i) for i in accepted]
+        self._last_items_meta = items_meta
+        self._last_action_ids = accepted_ids
+
+        feedback: Dict[int, int] = {}
+        for item in accepted_ids:
+            meta = self._coerce_meta(items_meta, item)
+            diff = float(meta.difficulty) if meta is not None else float(self.item_difficulty[item])
+            theta = self._ability_scalar(item, items_meta)
+            p_correct = self._prob_correct_3pl(theta, diff)
+            feedback[item] = int(self.rng.rand() < p_correct)
+
+        return feedback
+
+    def update(
+        self,
+        feedback: Dict[int, int],
+        items_meta: Optional[Dict[int, Any]] = None,
+    ) -> None:
+        """
+        Legacy post-act update. Applies learning updates and latent adjustments
+        using the provided feedback (previously produced by :meth:`act`).
+        """
+
+        if items_meta is None:
+            items_meta = self._last_items_meta
+
+        items_meta = items_meta or {}
+        accepted_ids = list(feedback.keys()) if feedback else list(self._last_action_ids)
+
+        for item in accepted_ids:
+            meta = self._coerce_meta(items_meta, item)
+            diff = float(meta.difficulty) if meta is not None else float(self.item_difficulty[item])
+            theta = self._ability_scalar(item, items_meta)
+            correct = int(feedback.get(item, 0))
+            p_correct = self._prob_correct_3pl(theta, diff)
+            self._apply_learning_update(item, correct, p_correct, items_meta)
+
+        if accepted_ids:
+            self.recent.extend(accepted_ids)
+
+        self._history.append(dict(feedback))
+        self._apply_forgetting()
+        self._update_latents_after_round(dict(feedback), items_meta)
 
 
 class StudentAgentFactory:

@@ -38,6 +38,27 @@ pip install orchid-ranker[agentic,viz,preprocess,benchmarks]
 - `viz` adds plotting dependencies.
 - `preprocess` installs CLI preprocessing extras.
 - `benchmarks` installs optional competitor libraries (`implicit`, `reclab`).
+ - `agentic` now bundles Opacus for production-grade DP accounting.
+
+### Support policy
+
+See `docs/api_support_policy.md` for the officially supported runtime matrix and versioning commitments.
+
+| Component | Supported versions | Notes |
+|-----------|-------------------|-------|
+| Python    | 3.9 – 3.13         | Verified in CI across CPython builds |
+| PyTorch   | 1.13 – 2.9         | Primary focus on 2.x for GPU optimisations |
+| OS        | Ubuntu 22.04, macOS 14+, Windows Server 2022 | Windows coverage targets CPU paths |
+
+### Quickstart & Deployment
+
+- Follow `docs/quickstart.md` or run `python examples/quickstart.py` to generate sample data and train your first model.
+
+### Deployment quickstart
+
+- Build the container image with `docker build -t orchid-ranker .` (see `Dockerfile`).
+- Kubernetes users can install via `helm install orchid ./deploy/helm/orchid-ranker` and configure audit forwarding/metrics through the supplied values.
+- Terraform users should reference the module guidance in `deploy/terraform/README.md` or wrap the Helm chart in their own release module.
 
 ## Quick start
 
@@ -72,6 +93,7 @@ item_features = (
 strategies = [
     ("linucb", {"alpha": 1.5, "item_features": item_features}),
     ("als", {"epochs": 5}),
+    ("user_knn", {"k": 25}),
     ("popularity", {}),
     ("random", {}),
 ]
@@ -271,6 +293,12 @@ Results are written under the `runs/` folder (summary CSVs plus per-round metric
   best-effort casting when integrating with legacy pipelines.
 - Use `configure_logging(level="INFO")` to emit structured logs compatible
   with enterprise observability platforms.
+- Enforce role-based access on CLI preprocessors with `--role` and capture DP
+  audit trails via the `AuditLogger` exposed in `orchid_ranker.security`.
+- Review `docs/security.md` and `docs/compliance/` for SBOM guidance, incident
+  response playbook, and retention policies when preparing enterprise rollouts.
+- Expose Prometheus metrics via `orchid_ranker.start_metrics_server()` or export with `orchid_ranker.export_metrics()`. Integrate Snowflake/BigQuery/S3 data sources and MLflow tracking via `orchid_ranker.connectors` classes.
+- For onboarding/support workflows, see `docs/customer_success/` (playbooks, SLAs, pilot plan) and the seeded notebooks under `examples/notebooks/`.
 - See `docs/benchmarking.md` for CLI recipes that compare Orchid against
   Surprise, implicit, and ReCLaB baselines.
 - Leverage `orchid_ranker.evaluation` (Precision@K, MAP@10, NDCG@10, calibration)

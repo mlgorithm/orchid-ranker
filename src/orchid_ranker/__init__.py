@@ -14,9 +14,23 @@ from .visualization import (
     plot_knowledge_trajectory,
 )
 from .experiments import RankingExperiment
-from .recommender import OrchidRecommender, Recommendation
+from .recommender import OrchidRecommender, Recommendation, SUPPORTED_STRATEGIES
 from .dp import get_dp_config
 from .logging import configure_logging
+from .security import AccessControl, DEFAULT_POLICY, AuditLogger
+from .connectors import (
+    SnowflakeConnector,
+    BigQueryConnector,
+    S3StreamConnector,
+    MLflowTracker,
+)
+from .observability import (
+    metrics_registry,
+    start_metrics_server,
+    record_training,
+    export_metrics,
+    metrics_content_type,
+)
 
 __all__ = [
     "__version__",
@@ -41,4 +55,17 @@ __all__ = [
     "plot_knowledge_trajectory",
     "OrchidRecommender",
     "Recommendation",
+    "SUPPORTED_STRATEGIES",
+    "AccessControl",
+    "DEFAULT_POLICY",
+    "AuditLogger",
+    "SnowflakeConnector",
+    "BigQueryConnector",
+    "S3StreamConnector",
+    "MLflowTracker",
+    "metrics_registry",
+    "start_metrics_server",
+    "record_training",
+    "export_metrics",
+    "metrics_content_type",
 ]

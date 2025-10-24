@@ -1,0 +1,37 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "orchid-ranker.fullname" . }}
+  labels:
+    {{- include "orchid-ranker.labels" . | nindent 4 }}
+spec:
+  replicas: {{ .Values.replicaCount }}
+  selector:
+    matchLabels:
+      {{- include "orchid-ranker.selectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "orchid-ranker.selectorLabels" . | nindent 8 }}
+    spec:
+      containers:
+        - name: orchid-ranker
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          ports:
+            - containerPort: {{ .Values.service.port }}
+              name: http
+            - containerPort: {{ .Values.metrics.port }}
+              name: metrics
+          env:
+            - name: ORCHID_LOG_LEVEL
+              value: {{ .Values.env.ORCHID_LOG_LEVEL | quote }}
+            - name: ORCHID_AUDIT_ENDPOINT
+              value: {{ .Values.env.ORCHID_AUDIT_ENDPOINT | quote }}
+            - name: ORCHID_AUDIT_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "orchid-ranker.fullname" . }}-secrets
+                  key: auditApiKey
+          resources:
+            {{- toYaml .Values.resources | nindent 12 }}

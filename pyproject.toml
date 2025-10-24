@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "orchid-ranker"
-version = "0.2.0.dev0"
+version = "0.2.0"
 description = "Adaptive educational recommender toolkit with learner simulators, agentic orchestration, and preprocessing utilities."
 readme = "README.md"
 authors = [
@@ -40,6 +40,16 @@ viz = [
 agentic = [
   "matplotlib>=3.6",
   "tqdm>=4.60",
+  "opacus>=1.5",
+]
+observability = [
+  "prometheus-client>=0.16",
+]
+connectors = [
+  "snowflake-connector-python>=3.0",
+  "google-cloud-bigquery>=3.11",
+  "boto3>=1.28",
+  "mlflow>=2.14",
 ]
 benchmarks = [
   "implicit>=0.7",
@@ -51,6 +61,7 @@ dev = [
   "ruff>=0.1.5",
   "build>=1.0",
   "twine>=4.0",
+  "prometheus-client>=0.16",
 ]
 
 [project.urls]

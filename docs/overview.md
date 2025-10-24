@@ -6,7 +6,7 @@ entry points quickly.
 
 ## Recommenders
 - `orchid_ranker.OrchidRecommender`: Surprise-style API with strategies such as
-  `als`, `neural_mf`, `implicit_als`, `implicit_bpr`, `linucb`, `popularity`, and `random`.
+  `als`, `neural_mf`, `implicit_als`, `implicit_bpr`, `linucb`, `user_knn`, `popularity`, and `random`.
 - `orchid_ranker.recommender.Recommendation`: lightweight dataclass returned by
   `recommend()`.
 
@@ -22,6 +22,15 @@ entry points quickly.
 - `orchid_ranker.dp.get_dp_config`: fetch ready-made DP presets.
 - `orchid_ranker.agents.simple_dp`: minimalist DP-SGD utilities for experimental
   use; see `docs/privacy.md` for limitations.
+- `orchid_ranker.dp_accountant.build_accountant`: factory for per-sample and
+  Opacus-backed privacy accountants.
+- `orchid_ranker.security`: role-based access control (`AccessControl`) and
+  JSONL audit logging (`AuditLogger`).
+
+## Connectors & Observability
+- `orchid_ranker.connectors`: optional integrations with Snowflake, BigQuery, S3, and MLflow.
+- `orchid_ranker.observability`: Prometheus registry helpers (`start_metrics_server`, `record_training`, `export_metrics`).
+- Deployment artefacts: Dockerfile, Helm chart (`deploy/helm`), and Terraform reference (`deploy/terraform`).
 
 ## Automation helpers
 - `tests/`: run `pytest` for quick regressions (see `requirements-dev.txt`).

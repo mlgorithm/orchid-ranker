@@ -1,8 +1,10 @@
 import torch
+import pytest
 
 from orchid_ranker.dp import get_dp_config, DP_PRESETS
-from orchid_ranker.agents.simple_dp import SimpleDPAccountant
+from orchid_ranker.agents.simple_dp import SimpleDPConfig
 from orchid_ranker.agents.recommender_agent import TwoTowerRecommender
+from orchid_ranker.dp_accountant import build_accountant
 
 
 def test_dp_config_known_presets_round_trip():
@@ -12,7 +14,8 @@ def test_dp_config_known_presets_round_trip():
 
 
 def test_dp_accountant_monotonicity():
-    accountant = SimpleDPAccountant(q=0.05, sigma=1.2, delta=1e-5)
+    cfg = SimpleDPConfig(enabled=True, sample_rate=0.05, noise_multiplier=1.2, delta=1e-5)
+    accountant = build_accountant("per_sample", cfg)
     _, eps0 = accountant.step(0)
     assert eps0 == 0.0
 
@@ -62,3 +65,13 @@ def test_dp_per_sample_update_executes():
 
     assert "loss" in stats
     assert stats["epsilon_cum"] >= 0.0
+
+
+def test_opacus_accountant_available_when_installed():
+    pytest.importorskip("opacus")
+    cfg = SimpleDPConfig(enabled=True, sample_rate=0.05, noise_multiplier=1.0, delta=1e-5)
+    accountant = build_accountant("opacus", cfg)
+    incr1, eps1 = accountant.step(5)
+    incr2, eps2 = accountant.step(5)
+    assert incr1 >= 0.0 and incr2 >= 0.0
+    assert eps2 >= eps1 >= 0.0
