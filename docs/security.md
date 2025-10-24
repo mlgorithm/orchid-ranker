@@ -1,8 +1,8 @@
 # Security & Compliance Notes
 
 ## SBOM & Vulnerability Scanning
-- `cyclonedx-py environment -o sbom.xml` generates an SBOM for the active Python environment (CycloneDX XML by default).
-- `pip-audit --output-format json --output pip-audit.json` checks Python packages for known CVEs.
+- `cyclonedx-py environment -o sbom.xml` generates an SBOM for the active Python environment (CycloneDX XML). Requires `cyclonedx-bom` and `cyclonedx-python-lib` packages.
+- `pip-audit --output-format json --output pip-audit.json` checks Python packages for known CVEs (installs `pip-audit`).
 - GitHub workflow `.github/workflows/security.yml` now runs on every push/PR to `main` (in addition to manual dispatch) and uploads artefacts under `security-reports/`.
 
 ## Role-Based Access Control
