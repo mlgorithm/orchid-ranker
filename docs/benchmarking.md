@@ -171,3 +171,21 @@ Generates synthetic data, times each strategy’s `fit()` and `recommend()` call
   ```
 
 Supply your own comparison script (`check_perf_regression.py`) to assert that latency increases remain within tolerance.
+
+## Agentic benchmarks
+
+Synthetic fixed vs adaptive:
+```bash
+PYTHONPATH=src python benchmarks/run_agentic_adaptive.py --rounds 80 --users 16 --items 64 --top-k 6
+```
+Optional Funk guidance:
+```bash
+PYTHONPATH=src python benchmarks/run_agentic_adaptive.py --rounds 80 --users 16 --items 64 --top-k 6 --funk-candidates --funk-pool 48
+```
+
+MovieLens 100K fixed vs adaptive:
+```bash
+PYTHONPATH=src python benchmarks/run_agentic_ml100k.py --rounds 80 --top-users 400 --top-items 800 --top-k 6 --dim 32 --funk-candidates
+```
+Add `--funk-distill` to include the Funk auxiliary loss or omit `--funk-candidates`
+to run without MF-guided recall.

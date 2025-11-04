@@ -176,6 +176,13 @@ PYTHONPATH=src python benchmarks/run_agentic_adaptive.py --rounds 80 --users 16 
   --funk-candidates --funk-pool 48
 ```
 
+- MovieLens 100K fixed vs adaptive (MF-derived features):
+
+```bash
+PYTHONPATH=src python benchmarks/run_agentic_ml100k.py \
+  --rounds 80 --top-users 400 --top-items 800 --top-k 6 --dim 32 --funk-candidates
+```
+
 - sklearn digits variant (CPU-safe):
 
 ```bash
