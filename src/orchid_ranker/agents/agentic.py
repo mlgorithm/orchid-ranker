@@ -50,6 +50,22 @@ class MultiConfig:
     console: bool = True
     console_user: bool = True
     policy_gain: float = 1.0
+    # Training augmentation knobs (adaptive only)
+    train_on_all_shown: bool = False  # if True, treat shown-but-not-accepted as negatives
+    train_steps_per_round: int = 1    # extra gradient steps per user-round
+    # Warmup (adaptive only): collect batches for the first N rounds,
+    # then pretrain the student for `warmup_steps` passes before online updates
+    warmup_rounds: int = 0
+    warmup_steps: int = 1
+    warmup_top_k_boost: int = 0
+    warmup_diversity_scale: float = 1.0  # multiply mmr_lambda and novelty_bonus during warmup
+    warmup_preloop: bool = False  # if True, run a pseudo-labeled warmup before online rounds
+    # FunkSVD-style distillation (optional auxiliary guidance)
+    funk_distill: bool = False
+    funk_lambda: float = 0.3
+    # Use FunkSVD candidate generation (top-N) before agentic re-rank
+    use_funk_candidates: bool = False
+    funk_pool_size: int = 0  # 0 => use min_candidates
 
 @dataclass
 class UserCtx:
@@ -186,6 +202,8 @@ class MultiUserOrchestrator:
         if self._is_adaptive:
             for ux in self.users:
                 self._policy_state[int(ux.user_id)] = self._init_policy_state()
+            # buffer to accumulate warmup batches
+            self._warmup_buffer: list[dict] = []
 
         # ----- Paper-aligned State (EWMA + uncertainty scalar) -----
         # Per-user EWMA estimates: k_hat and e_hat
@@ -605,6 +623,108 @@ class MultiUserOrchestrator:
             except Exception:
                 self.logger = None
 
+        # ---------- optional pre-loop warmup (pseudo-labels) ----------
+        if is_adaptive and int(self.cfg.warmup_rounds) > 0 and bool(getattr(self.cfg, "warmup_preloop", False)):
+            try:
+                from orchid_ranker.baselines import ExplicitMFBaseline
+                # Decide show count and boosted top-k
+                base_k = int(self.cfg.top_k_base)
+                boost = int(self.cfg.warmup_top_k_boost)
+                top_k_warm = max(1, base_k + boost)
+                show_cnt = min(int(max(top_k_warm * 2, base_k * 2)), int(self.cfg.min_candidates))
+                # scale down diversity during preloop
+                scale = float(self.cfg.warmup_diversity_scale)
+                scale = max(0.0, min(scale, 1.0))
+                core = self.rec.teacher if hasattr(self.rec, "teacher") else self.rec
+                mmr_saved = float(getattr(core, "mmr_lambda", 0.25)) if hasattr(core, "mmr_lambda") else None
+                nov_saved = float(getattr(core, "novelty_bonus", 0.10)) if hasattr(core, "novelty_bonus") else None
+                if hasattr(core, "mmr_lambda"):
+                    core.mmr_lambda = float(mmr_saved) * scale
+                if hasattr(core, "novelty_bonus"):
+                    core.novelty_bonus = float(nov_saved) * scale
+
+                # collect batches across warmup_rounds x users
+                pre_batches: list[dict] = []
+                _uids: list[int] = []
+                _iids: list[int] = []
+                _labs: list[float] = []
+                for _wr in range(int(self.cfg.warmup_rounds)):
+                    for ux in self.users:
+                        uid = int(ux.user_id)
+                        user_ids = torch.tensor([uid], dtype=torch.long, device=self.device)
+                        state_vec = torch.tensor([[self._khat[uid], 0.0, 0.5, self._ehat[uid]]], dtype=torch.float32, device=self.device)
+                        # sample show_cnt candidate positions
+                        all_pos = torch.arange(self.item_matrix.shape[0], dtype=torch.long, device=self.device)
+                        perm = torch.randperm(all_pos.numel(), device=self.device)
+                        cand_pos = all_pos.index_select(0, perm[:show_cnt])
+                        logits = self.rec.infer(
+                            user_vec=self.rec.user_matrix[uid].unsqueeze(0) if hasattr(self.rec, "user_matrix") else None,
+                            item_matrix=self.item_matrix,
+                            user_ids=user_ids,
+                            item_ids=cand_pos,
+                            state_vec=state_vec,
+                        )
+                        chosen_pos, _ = self.rec.decide(
+                            logits=logits,
+                            top_k=top_k_warm,
+                            item_ids=cand_pos,
+                            user_id=uid,
+                            engagement=float(self._ehat[uid]),
+                            trust=0.5,
+                            difficulty_map=self._difficulty_map,
+                            knowledge=float(self._khat[uid]),
+                            zpd_delta=float(self.cfg.zpd_margin),
+                        )
+                        chosen_set = set(int(p) for p in chosen_pos)
+                        # Build labels: positives for chosen slate, negatives for other shown items
+                        labels = []
+                        items = []
+                        for p in cand_pos.tolist():
+                            items.append(int(p))
+                            labels.append(1.0 if int(p) in chosen_set else 0.0)
+                        batch = {
+                            "user_ids": user_ids.expand(len(items)),
+                            "item_ids": torch.tensor(items, dtype=torch.long, device=self.device),
+                            "labels": torch.tensor(labels, dtype=torch.float32, device=self.device),
+                            "item_matrix": self.item_matrix,
+                            "state_vec": state_vec.expand(len(items), -1),
+                        }
+                        pre_batches.append(batch)
+                        # accumulate for MF fit
+                        _uids.extend([uid] * len(items))
+                        _iids.extend(items)
+                        _labs.extend(labels)
+                # Train student over collected pseudo-labeled batches
+                steps = max(1, int(self.cfg.warmup_steps))
+                # Fit a small MF (Funk) on the same pseudo labels for distillation
+                funk = ExplicitMFBaseline(num_users=len(self.users), num_items=int(self.item_matrix.shape[0]), device=torch.device("cpu"), emb_dim=32, epochs=10, lr=5e-3, weight_decay=1e-4)
+                funk.fit(_uids, _iids, _labs)
+                self._funk_model = funk
+                use_distill = bool(getattr(self.cfg, "funk_distill", False))
+                lam = float(getattr(self.cfg, "funk_lambda", 0.3))
+                for _ in range(steps):
+                    for b in pre_batches:
+                        bb = dict(b)
+                        if use_distill and self._funk_model is not None:
+                            try:
+                                ds = self._funk_model.infer(user_ids=bb["user_ids"].to(torch.device("cpu")), item_ids=bb["item_ids"].to(torch.device("cpu")))
+                                bb["distill_scores"] = ds.view(-1).to(self.device)
+                                bb["distill_lambda"] = lam
+                            except Exception:
+                                pass
+                        self.rec.train_step(bb)
+                # Restore diversity knobs and sync teacher from student
+                if mmr_saved is not None and hasattr(core, "mmr_lambda"):
+                    core.mmr_lambda = mmr_saved
+                if nov_saved is not None and hasattr(core, "novelty_bonus"):
+                    core.novelty_bonus = nov_saved
+                with torch.no_grad():
+                    if hasattr(self.rec, "teacher") and hasattr(self.rec, "student"):
+                        for t_param, s_param in zip(self.rec.teacher.parameters(), self.rec.student.parameters()):
+                            t_param.data.copy_(s_param.data)
+            except Exception:
+                pass
+
         # Per-user seen sets and embedding histories (for novelty/serendipity)
         seen_by_user = {int(ux.user_id): set() for ux in self.users}
         emb_hist_by_user = {int(ux.user_id): [] for ux in self.users}   # list of torch tensors (item reps)
@@ -675,7 +795,20 @@ class MultiUserOrchestrator:
                 # ---- candidate sampling (optionally deterministic per round) ----
                 cand_pos_all = self.item_ids_pos
                 Kmin = int(self.cfg.min_candidates)
-                if cand_pos_all.numel() > Kmin:
+                # Optional: Funk-based candidate generation (top-N per user)
+                if bool(getattr(self.cfg, "use_funk_candidates", False)) and hasattr(self, "_funk_model") and (self._funk_model is not None):
+                    try:
+                        pool_n = int(getattr(self.cfg, "funk_pool_size", 0)) or Kmin
+                        # score all items for this user via Funk model (CPU)
+                        u_cpu = torch.tensor([uid], dtype=torch.long)
+                        all_items_cpu = torch.arange(self.item_matrix.shape[0], dtype=torch.long)
+                        ds = self._funk_model.infer(user_ids=u_cpu, item_ids=all_items_cpu).view(-1)
+                        order = torch.argsort(ds, descending=True)
+                        top_idx = order[:pool_n].to(self.device)
+                        cand_pos = top_idx.long()
+                    except Exception:
+                        cand_pos = cand_pos_all[:Kmin]
+                elif cand_pos_all.numel() > Kmin:
                         # Optional persistent cache (shared across modes within a run directory)
                         used_cache = False
                         cache_enabled = bool(getattr(self.cfg, "persistent_pool", False))
@@ -762,6 +895,22 @@ class MultiUserOrchestrator:
                     self._apply_policy(params)
                     top_k = int(params.top_k)
                     zpd_delta = float(params.zpd_delta)
+                    # Warmup scheduling: boost top-k and scale down diversity/novelty
+                    if int(r) < int(self.cfg.warmup_rounds):
+                        top_k = int(top_k + int(self.cfg.warmup_top_k_boost))
+                        try:
+                            scale = float(self.cfg.warmup_diversity_scale)
+                            scale = max(0.0, min(scale, 1.0))
+                        except Exception:
+                            scale = 1.0
+                        try:
+                            core = self.rec.teacher if hasattr(self.rec, "teacher") else self.rec
+                            if hasattr(core, "mmr_lambda"):
+                                core.mmr_lambda = float(getattr(core, "mmr_lambda", 0.25)) * scale
+                            if hasattr(core, "novelty_bonus"):
+                                core.novelty_bonus = float(getattr(core, "novelty_bonus", 0.10)) * scale
+                        except Exception:
+                            pass
                 else:
                     top_k = int(self.cfg.top_k_base)
                     zpd_delta = float(self.cfg.zpd_margin)
@@ -987,17 +1136,49 @@ class MultiUserOrchestrator:
 
                 # ---- online training step ----
                 if fb:
-                    pos = [self.id2pos[i] for i in fb.keys() if i in self.id2pos]
-                    if pos:
+                    # Build training batch: accepted positives and (optionally) shown negatives
+                    all_pos_idx: list[int] = []
+                    all_labels: list[float] = []
+                    # accepted as positives (correctness as label)
+                    for p in [self.id2pos[i] for i in fb.keys() if i in self.id2pos]:
+                        all_pos_idx.append(p)
+                        all_labels.append(float(fb[self.pos2id[p]]))
+                    if self.cfg.train_on_all_shown:
+                        # add shown-but-not-accepted as zeros
+                        accepted_set = set(accepted_ids)
+                        for ext in chosen_item_ids:
+                            if ext not in accepted_set and ext in self.id2pos:
+                                all_pos_idx.append(int(self.id2pos[ext]))
+                                all_labels.append(0.0)
+                    if all_pos_idx:
+                        item_tensor = torch.tensor(all_pos_idx, dtype=torch.long, device=self.device)
+                        label_tensor = torch.tensor(all_labels, dtype=torch.float32, device=self.device)
                         batch = {
-                            "user_ids": user_ids.expand(len(pos)),
-                            "item_ids": torch.tensor(pos, dtype=torch.long, device=self.device),
-                            "labels": torch.tensor([fb[self.pos2id[p]] for p in pos], dtype=torch.float32, device=self.device),
+                            "user_ids": user_ids.expand(len(all_pos_idx)),
+                            "item_ids": item_tensor,
+                            "labels": label_tensor,
                             "item_matrix": self.item_matrix,
-                            "state_vec": state_vec.expand(len(pos), -1),
+                            "state_vec": state_vec.expand(len(all_pos_idx), -1),
                         }
                         if hasattr(self.rec, "train_step") and callable(self.rec.train_step):
-                            self.rec.train_step(batch)
+                            # During warmup, accumulate; otherwise train now
+                            if self._is_adaptive and int(r) < int(self.cfg.warmup_rounds):
+                                try:
+                                    self._warmup_buffer.append(batch)
+                                except Exception:
+                                    pass
+                            else:
+                                # attach distillation if available
+                                try:
+                                    if bool(getattr(self.cfg, "funk_distill", False)) and hasattr(self, "_funk_model") and self._funk_model is not None:
+                                        ds = self._funk_model.infer(user_ids=batch["user_ids"].to(torch.device("cpu")), item_ids=batch["item_ids"].to(torch.device("cpu")))
+                                        batch["distill_scores"] = ds.view(-1).to(self.device)
+                                        batch["distill_lambda"] = float(getattr(self.cfg, "funk_lambda", 0.3))
+                                except Exception:
+                                    pass
+                                steps = max(1, int(self.cfg.train_steps_per_round))
+                                for _ in range(steps):
+                                    self.rec.train_step(batch)
 
             # round-level metrics
             acc_rate = (correct_total / max(1, accept_total)) if accept_total else 0.0
@@ -1056,6 +1237,24 @@ class MultiUserOrchestrator:
                             "mean_trust": float(mean_t),
                         },
                     })
+                except Exception:
+                    pass
+
+            # ---------- end of warmup: pretrain student over accumulated batches ----------
+            if self._is_adaptive and int(r) + 1 == int(self.cfg.warmup_rounds):
+                try:
+                    steps = max(1, int(self.cfg.warmup_steps))
+                    if hasattr(self.rec, "train_step") and callable(self.rec.train_step) and self._warmup_buffer:
+                        for _ in range(steps):
+                            for b in self._warmup_buffer:
+                                self.rec.train_step(b)
+                        # hard sync teacher <- student after warmup
+                        try:
+                            with torch.no_grad():
+                                for t_param, s_param in zip(self.rec.teacher.parameters(), self.rec.student.parameters()):
+                                    t_param.data.copy_(s_param.data)
+                        except Exception:
+                            pass
                 except Exception:
                     pass
 
@@ -1184,4 +1383,3 @@ class MultiUserOrchestrator:
             self.logger.log(record)
         except Exception:
             pass
-

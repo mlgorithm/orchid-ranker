@@ -12,7 +12,8 @@ The toolkit grew out of experiments with the EdNet and OULAD datasets and now bu
   simulators, recommender policies, and the multi-user orchestration
   loop;
 - ready-to-use baseline recommenders plus an `OrchidRecommender`
-  high-level API that feels similar to `surprise`; and
+  high-level API that feels similar to `surprise` (now including an
+  explicit MF/FunkSVD-style baseline); and
 - utilities for running offline experiments similar to those used in the
   associated LAK'26 studies.
 
@@ -94,6 +95,7 @@ item_features = (
 strategies = [
     ("linucb", {"alpha": 1.5, "item_features": item_features}),
     ("als", {"epochs": 5}),
+    ("explicit_mf", {"epochs": 20, "emb_dim": 64}),
     ("user_knn", {"k": 25}),
     ("popularity", {}),
     ("random", {}),
@@ -138,6 +140,47 @@ print(summary)
 
 See the `experiments/` directory for end-to-end experiment scripts and the
 `runs/` folder for generated reports.
+
+### Apples-to-apples benchmarks
+
+- Explicit ratings (Orchid vs Surprise SVD):
+
+```bash
+PYTHONPATH=src python benchmarks/compare_surprise.py \
+  --train tmp/ml100k_explicit/train.csv \
+  --test tmp/ml100k_explicit/test.csv \
+  --rating-col rating \
+  --orchid-strategy explicit_mf \
+  --orchid-epochs 20 \
+  --orchid-emb 64
+```
+
+- Implicit top‑K (binary, filter_seen, multi-seed):
+
+```bash
+PYTHONPATH=src python benchmarks/eval_implicit.py --seeds 11 13 17 --top-users 400 --top-items 800 --k 10
+```
+
+### Agentic (adaptive) benchmarks
+
+- Fixed vs Adaptive (synthetic) with warmup/replay:
+
+```bash
+PYTHONPATH=src python benchmarks/run_agentic_adaptive.py --rounds 80 --users 16 --items 64 --top-k 6
+```
+
+- Optional Funk-guided candidates/distillation for adaptive:
+
+```bash
+PYTHONPATH=src python benchmarks/run_agentic_adaptive.py --rounds 80 --users 16 --items 64 --top-k 6 \
+  --funk-candidates --funk-pool 48
+```
+
+- sklearn digits variant (CPU-safe):
+
+```bash
+PYTHONPATH=src python benchmarks/run_agentic_sklearn_digits.py --rounds 40 --users 64 --top-k 5 --dim 8
+```
 
 ## Dataset format at a glance
 

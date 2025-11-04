@@ -43,8 +43,9 @@ def _load_frame(path: Path) -> pd.DataFrame:
     return frame
 
 
-def _train_orchid(df: pd.DataFrame, rating_col: str) -> OrchidRecommender:
-    model = OrchidRecommender(strategy="als", epochs=8)
+def _train_orchid(df: pd.DataFrame, rating_col: str, *, strategy: str = "als", **kwargs) -> OrchidRecommender:
+    """Train an Orchid model. Default remains ALS; pass strategy="explicit_mf" for ratings."""
+    model = OrchidRecommender(strategy=strategy, **kwargs)
     model.fit(df, rating_col=rating_col)
     return model
 
@@ -97,6 +98,9 @@ def parse_args(argv: Optional[list[str]] = None) -> argparse.Namespace:
     parser.add_argument("--test", required=True, type=Path, help="Path to test CSV")
     parser.add_argument("--rating-col", default="label", help="Name of the rating/label column")
     parser.add_argument("--output", type=Path, help="Optional JSON file to write metrics")
+    parser.add_argument("--orchid-strategy", default="als", help="Orchid strategy to use (e.g., explicit_mf, als)")
+    parser.add_argument("--orchid-epochs", type=int, default=10, help="Epochs for Orchid model")
+    parser.add_argument("--orchid-emb", type=int, default=64, help="Embedding dim for Orchid model (if applicable)")
     return parser.parse_args(argv)
 
 
@@ -111,7 +115,14 @@ def main(argv: Optional[list[str]] = None) -> int:
     if rating_col not in test_df.columns:
         raise ValueError(f"{rating_col!r} not found in test data")
 
-    orchid = _train_orchid(train_df, rating_col)
+    # Train Orchid with requested strategy
+    orchid = _train_orchid(
+        train_df,
+        rating_col,
+        strategy=args.orchid_strategy,
+        epochs=args.orchid_epochs,
+        emb_dim=args.orchid_emb,
+    )
     surprise_model = _train_surprise(train_df, rating_col)
     if surprise_model is None:
         print("Surprise is not installed. Install with `pip install surprise` to enable competitor comparison.")

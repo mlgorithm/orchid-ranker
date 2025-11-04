@@ -32,6 +32,87 @@ python benchmarks/compare_surprise.py \
 
 Prints RMSE for Orchid Ranker's ALS baseline alongside Surprise's SVD.
 
+## Apples-to-apples — Explicit ratings (Orchid vs Surprise)
+
+Use the updated comparison script to run Orchid's new explicit MF baseline against Surprise SVD on the same split:
+
+```bash
+# Prepare a quick ML-100K explicit split
+PYTHONPATH=src python - <<'PY'
+from surprise import Dataset
+import numpy as np, pandas as pd
+from pathlib import Path
+ml = Dataset.load_builtin('ml-100k', prompt=False)
+raw = ml.raw_ratings
+df = pd.DataFrame(raw, columns=['user_id','item_id','rating','timestamp']).astype({'user_id':int,'item_id':int,'rating':float})
+msk = np.random.default_rng(123).random(len(df)) < 0.8
+train, test = df[msk], df[~msk]
+u, i = set(train.user_id), set(train.item_id)
+test = test[test.user_id.isin(u) & test.item_id.isin(i)]
+out = Path('tmp/ml100k_explicit'); out.mkdir(parents=True, exist_ok=True)
+train[['user_id','item_id','rating']].to_csv(out/'train.csv', index=False)
+test[['user_id','item_id','rating']].to_csv(out/'test.csv', index=False)
+print('wrote', out)
+PY
+
+# Compare: Orchid explicit MF vs Surprise SVD
+PYTHONPATH=src python benchmarks/compare_surprise.py \
+  --train tmp/ml100k_explicit/train.csv \
+  --test tmp/ml100k_explicit/test.csv \
+  --rating-col rating \
+  --orchid-strategy explicit_mf \
+  --orchid-epochs 20 \
+  --orchid-emb 64
+```
+
+This prints RMSE for both models. In our local run, `explicit_mf` beat SVD with a modest config.
+
+## Apples-to-apples — Implicit top-K (binary, filter_seen)
+
+Run the multi-seed implicit benchmark that enforces a shared candidate set and filter_seen for all models:
+
+```bash
+PYTHONPATH=src python benchmarks/eval_implicit.py --seeds 11 13 17 --top-users 400 --top-items 800 --k 10
+```
+
+It reports mean±std for P@10/Recall@10/NDCG@10 across:
+- Orchid `implicit_als`, `implicit_bpr`, and a couple of `neural_mf` (BPR) configs
+- Surprise SVD used as a ranking proxy (trained on binary labels)
+- Popularity
+
+Outputs are persisted to `tmp/reports/implicit_results.{json,csv}` for CI consumption.
+
+## CI integration (explicit + implicit)
+
+- Add a simple CI step to run both apples-to-apples checks and persist results:
+
+```yaml
+- name: Apples-to-apples explicit (ML-100K)
+  run: |
+    PYTHONPATH=src python benchmarks/compare_surprise.py \
+      --train tmp/ml100k_explicit/train.csv \
+      --test tmp/ml100k_explicit/test.csv \
+      --rating-col rating \
+      --orchid-strategy explicit_mf \
+      --orchid-epochs 20 \
+      --orchid-emb 64 \
+      --output tmp/reports/explicit_results.json
+
+- name: Apples-to-apples implicit (ML-100K)
+  run: |
+    PYTHONPATH=src python benchmarks/eval_implicit.py --seeds 11 13 17 --top-users 400 --top-items 800 --k 10
+
+- name: Archive benchmark artifacts
+  uses: actions/upload-artifact@v4
+  with:
+    name: orchid-benchmarks
+    path: |
+      tmp/reports/explicit_results.*
+      tmp/reports/implicit_results.*
+```
+
+You can add a small checker to compare JSON metrics against a known baseline and fail the workflow if deltas exceed thresholds.
+
 ## Implicit comparison
 
 ```bash

@@ -6,7 +6,8 @@ entry points quickly.
 
 ## Recommenders
 - `orchid_ranker.OrchidRecommender`: Surprise-style API with strategies such as
-  `als`, `neural_mf`, `implicit_als`, `implicit_bpr`, `linucb`, `user_knn`, `popularity`, and `random`.
+  `explicit_mf` (FunkSVD-style explicit MF), `als`, `neural_mf` (with `loss="bce"|"bpr"|"softmax"`),
+  `implicit_als`, `implicit_bpr`, `linucb`, `user_knn`, `popularity`, and `random`.
 - `orchid_ranker.recommender.Recommendation`: lightweight dataclass returned by
   `recommend()`.
 
@@ -14,7 +15,11 @@ entry points quickly.
 - `orchid_ranker.agents.MultiUserOrchestrator`: primary orchestrator coordinating
   simulated learners and recommenders.
 - `orchid_ranker.agents.MultiConfig`: configuration dataclass controlling
-  adaptive policy bounds and privacy toggles.
+  adaptive policy bounds and privacy toggles. New knobs include warmup controls
+  (`warmup_preloop`, `warmup_rounds`, `warmup_steps`, `warmup_top_k_boost`,
+  `warmup_diversity_scale`), training augmentation (`train_on_all_shown`,
+  `train_steps_per_round`), and optional Funk integration (`funk_distill`,
+  `funk_lambda`, `use_funk_candidates`, `funk_pool_size`).
 - `orchid_ranker.agents.StudentAgent`: behavioural simulator used for agentic
   evaluation loops.
 

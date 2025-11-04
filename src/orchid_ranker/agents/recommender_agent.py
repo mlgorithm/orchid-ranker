@@ -1184,6 +1184,17 @@ class TwoTowerRecommender(nn.Module):
         )
 
         loss = torch.nn.functional.binary_cross_entropy_with_logits(logits, labels)
+        # Optional Funk-style distillation: encourage tower scores to match auxiliary MF scores
+        distill = batch.get("distill_scores")
+        lam = float(batch.get("distill_lambda", 0.0)) if "distill_lambda" in batch else 0.0
+        if distill is not None and lam > 0.0:
+            try:
+                # Ensure shape match; interpret distill as probabilities in [0,1]
+                distill_t = distill.to(self.device).view_as(logits)
+                probs = torch.sigmoid(logits)
+                loss = loss + lam * torch.nn.functional.mse_loss(probs, distill_t)
+            except Exception:
+                pass
         self.optimizer.zero_grad(set_to_none=True)
         loss.backward()
         if getattr(self, "dp_settings", None) and self.dp_settings.enabled:
@@ -1204,10 +1215,18 @@ class DualRecommender:
       - student: trainable (updated by train_step / update)
     """
 
-    def __init__(self, teacher, student, device=None):
+    def __init__(self, teacher, student, device=None, *, warm_start: bool = False, replay_size: int = 0, replay_steps: int = 0):
         self.teacher = teacher
         self.student = student
         self.device  = device or getattr(student, "device", torch.device("cpu"))
+        # Optional: start teacher from student params to reduce cold-start gap
+        if warm_start:
+            try:
+                with torch.no_grad():
+                    for t_param, s_param in zip(self.teacher.parameters(), self.student.parameters()):
+                        t_param.data.copy_(s_param.data)
+            except Exception:
+                pass
 
         # mirror common knobs onto both so orchestrator can set once
         self._novelty_bonus = getattr(student, "novelty_bonus", 0.0)
@@ -1221,6 +1240,11 @@ class DualRecommender:
         self._sync_knobs()
 
         _d(f"DualRec init: blend_inc={self._blend_increment} teacher_ema={self._teacher_ema}")
+
+        # Lightweight replay buffer for additional per-call updates
+        from collections import deque
+        self._replay_buf = deque(maxlen=int(replay_size)) if int(replay_size) > 0 else None
+        self._replay_steps = int(replay_steps)
 
     # ---------- small utils ----------
     def _ensure_recent_map(self):
@@ -1401,6 +1425,18 @@ class DualRecommender:
         """
         if hasattr(self.student, "train_step") and callable(self.student.train_step):
             out = self.student.train_step(batch)
+            # push to replay and perform extra small updates
+            if self._replay_buf is not None:
+                try:
+                    self._replay_buf.append(batch)
+                except Exception:
+                    pass
+                for _ in range(max(0, self._replay_steps)):
+                    try:
+                        b = self._replay_buf[0]
+                        self.student.train_step(b)
+                    except Exception:
+                        break
             self._after_student_update()
             if _DEBUG_REC:
                 _d(f"DualRec.train_step: loss={out.get('loss') if isinstance(out, dict) else out}")

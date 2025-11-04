@@ -11,6 +11,7 @@ import torch
 
 from .baselines import (
     ALSBaseline,
+    ExplicitMFBaseline,
     ImplicitALSBaseline,
     ImplicitBPRBaseline,
     LinUCBBaseline,
@@ -30,6 +31,7 @@ class Recommendation:
 
 SUPPORTED_STRATEGIES: Tuple[str, ...] = (
     "als",
+    "explicit_mf",
     "linucb",
     "popularity",
     "random",
@@ -140,6 +142,15 @@ class OrchidRecommender:
         strategy = self.strategy
         if strategy == "als":
             self._baseline = ALSBaseline(num_users, num_items, device=self.device, **self.strategy_kwargs)
+            self._baseline.fit(user_idx, item_idx, labels)
+        elif strategy == "explicit_mf":
+            # Treat provided labels as explicit 1–5 (or real) ratings and optimise MSE
+            self._baseline = ExplicitMFBaseline(
+                num_users=num_users,
+                num_items=num_items,
+                device=self.device,
+                **self.strategy_kwargs,
+            )
             self._baseline.fit(user_idx, item_idx, labels)
         elif strategy == "popularity":
             popularity = interactions.groupby(item_col)[rating_col].mean().to_dict()
