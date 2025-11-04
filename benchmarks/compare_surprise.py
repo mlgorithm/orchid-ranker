@@ -69,26 +69,31 @@ def _rmse(actual: np.ndarray, predicted: np.ndarray) -> float:
 
 def evaluate(models: dict[str, object], test_df: pd.DataFrame, rating_col: str) -> dict[str, float]:
     metrics: dict[str, float] = {}
+    user_ids = test_df["user_id"].to_list()
+    item_ids = test_df["item_id"].to_list()
+    actual = test_df[rating_col].to_numpy(dtype=float)
     for name, model in models.items():
         if model is None:
             metrics[name] = float("nan")
             continue
-        preds = []
-        for row in test_df.itertuples(index=False):
+        if name == "orchid":
             try:
-                if name == "orchid":
-                    preds.append(model.predict(int(row.user_id), int(row.item_id)))
-                else:
-                    preds.append(model.predict(str(row.user_id), str(row.item_id)).est)
+                preds = model.predict_many(user_ids, item_ids)
             except Exception:
-                preds.append(np.nan)
+                preds = np.full(len(actual), np.nan, dtype=float)
+        else:
+            preds = []
+            for u, i in zip(user_ids, item_ids):
+                try:
+                    preds.append(model.predict(str(u), str(i)).est)
+                except Exception:
+                    preds.append(np.nan)
+            preds = np.asarray(preds, dtype=float)
         mask = ~np.isnan(preds)
-        actual = test_df.loc[mask, rating_col].to_numpy()
-        predicted = np.asarray(preds)[mask]
-        if actual.size == 0:
+        if not mask.any():
             metrics[name] = float("nan")
         else:
-            metrics[name] = _rmse(actual, predicted)
+            metrics[name] = _rmse(actual[mask], preds[mask])
     return metrics
 
 

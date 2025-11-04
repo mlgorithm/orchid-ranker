@@ -103,10 +103,11 @@ def evaluate_once(train_df: pd.DataFrame, test_df: pd.DataFrame, k: int = 10) ->
     als.fit(train[["user_id", "item_id", "label"]], rating_col="label")
     slates = {}
     for u in user_rel.keys():
-        cands = [i for i in items if i not in seen.get(u, set())]
-        scores = [(als.predict(u, i), i) for i in cands]
-        scores.sort(key=lambda x: x[0], reverse=True)
-        slates[u] = [i for _, i in scores[:k]]
+        seen_items = seen.get(u, set())
+        cands = [i for i in items if i not in seen_items]
+        scores = als.predict_many([u] * len(cands), cands)
+        top_indices = np.argpartition(-scores, k - 1)[:k]
+        slates[u] = [cands[idx] for idx in top_indices[np.argsort(-scores[top_indices])]]
     results["implicit_als"] = precision_recall_ndcg_at_k(user_rel, slates, k)
 
     # Orchid implicit BPR
@@ -114,10 +115,11 @@ def evaluate_once(train_df: pd.DataFrame, test_df: pd.DataFrame, k: int = 10) ->
     bpr.fit(train[["user_id", "item_id", "label"]], rating_col="label")
     slates = {}
     for u in user_rel.keys():
-        cands = [i for i in items if i not in seen.get(u, set())]
-        scores = [(bpr.predict(u, i), i) for i in cands]
-        scores.sort(key=lambda x: x[0], reverse=True)
-        slates[u] = [i for _, i in scores[:k]]
+        seen_items = seen.get(u, set())
+        cands = [i for i in items if i not in seen_items]
+        scores = bpr.predict_many([u] * len(cands), cands)
+        top_indices = np.argpartition(-scores, k - 1)[:k]
+        slates[u] = [cands[idx] for idx in top_indices[np.argsort(-scores[top_indices])]]
     results["implicit_bpr"] = precision_recall_ndcg_at_k(user_rel, slates, k)
 
     # Orchid Neural MF with BPR (two light configs)
@@ -125,20 +127,22 @@ def evaluate_once(train_df: pd.DataFrame, test_df: pd.DataFrame, k: int = 10) ->
     nmf3.fit(train[["user_id", "item_id", "label"]], rating_col="label")
     slates = {}
     for u in user_rel.keys():
-        cands = [i for i in items if i not in seen.get(u, set())]
-        scores = [(nmf3.predict(u, i), i) for i in cands]
-        scores.sort(key=lambda x: x[0], reverse=True)
-        slates[u] = [i for _, i in scores[:k]]
+        seen_items = seen.get(u, set())
+        cands = [i for i in items if i not in seen_items]
+        scores = nmf3.predict_many([u] * len(cands), cands)
+        top_indices = np.argpartition(-scores, k - 1)[:k]
+        slates[u] = [cands[idx] for idx in top_indices[np.argsort(-scores[top_indices])]]
     results["neural_mf_bpr_e3"] = precision_recall_ndcg_at_k(user_rel, slates, k)
 
     nmf5 = OrchidRecommender(strategy="neural_mf", loss="bpr", epochs=5, emb_dim=64, hidden=(128, 64))
     nmf5.fit(train[["user_id", "item_id", "label"]], rating_col="label")
     slates = {}
     for u in user_rel.keys():
-        cands = [i for i in items if i not in seen.get(u, set())]
-        scores = [(nmf5.predict(u, i), i) for i in cands]
-        scores.sort(key=lambda x: x[0], reverse=True)
-        slates[u] = [i for _, i in scores[:k]]
+        seen_items = seen.get(u, set())
+        cands = [i for i in items if i not in seen_items]
+        scores = nmf5.predict_many([u] * len(cands), cands)
+        top_indices = np.argpartition(-scores, k - 1)[:k]
+        slates[u] = [cands[idx] for idx in top_indices[np.argsort(-scores[top_indices])]]
     results["neural_mf_bpr_e5"] = precision_recall_ndcg_at_k(user_rel, slates, k)
 
     # Orchid Neural MF with sampled softmax (stronger implicit baseline)
@@ -146,10 +150,11 @@ def evaluate_once(train_df: pd.DataFrame, test_df: pd.DataFrame, k: int = 10) ->
     nmf_sm.fit(train[["user_id", "item_id", "label"]], rating_col="label")
     slates = {}
     for u in user_rel.keys():
-        cands = [i for i in items if i not in seen.get(u, set())]
-        scores = [(nmf_sm.predict(u, i), i) for i in cands]
-        scores.sort(key=lambda x: x[0], reverse=True)
-        slates[u] = [i for _, i in scores[:k]]
+        seen_items = seen.get(u, set())
+        cands = [i for i in items if i not in seen_items]
+        scores = nmf_sm.predict_many([u] * len(cands), cands)
+        top_indices = np.argpartition(-scores, k - 1)[:k]
+        slates[u] = [cands[idx] for idx in top_indices[np.argsort(-scores[top_indices])]]
     results["neural_mf_softmax_e5_k20"] = precision_recall_ndcg_at_k(user_rel, slates, k)
 
     return results

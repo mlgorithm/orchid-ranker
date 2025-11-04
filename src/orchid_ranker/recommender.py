@@ -230,7 +230,7 @@ class OrchidRecommender:
         if self._baseline is None:
             raise RuntimeError("Recommender has not been fit yet")
 
-        item_tensor = torch.tensor(candidate_idx, dtype=torch.long, device=self.device)
+        item_tensor = torch.as_tensor(candidate_idx, dtype=torch.long, device=self.device)
         kwargs = {"item_ids": item_tensor}
         if hasattr(self._baseline, "user_matrix") or isinstance(self._baseline, ALSBaseline):
             user_tensor = torch.tensor([user_idx], dtype=torch.long, device=self.device)
@@ -247,6 +247,37 @@ class OrchidRecommender:
         item_idx = self._item2idx[item_id]
         score = self._scores_for_user(user_idx, [item_idx])[0].detach().cpu().item()
         return float(score)
+
+    def predict_many(self, user_ids: Sequence[int], item_ids: Sequence[int]) -> np.ndarray:
+        """Vectorised prediction for matching sequences of user_ids and item_ids.
+
+        Parameters
+        ----------
+        user_ids: sequence of user identifiers (length N)
+        item_ids: sequence of item identifiers (length N)
+
+        Returns
+        -------
+        numpy.ndarray of shape (N,) with float32 scores.
+        """
+        if len(user_ids) != len(item_ids):
+            raise ValueError("user_ids and item_ids must have the same length")
+        if not user_ids:
+            return np.zeros(0, dtype=np.float32)
+
+        try:
+            user_idx = np.asarray([self._user2idx[int(u)] for u in user_ids], dtype=np.int64)
+            item_idx = np.asarray([self._item2idx[int(i)] for i in item_ids], dtype=np.int64)
+        except KeyError as exc:
+            raise KeyError("Unknown user_id or item_id in predict_many") from exc
+
+        outputs = np.empty(len(user_idx), dtype=np.float32)
+        for u in np.unique(user_idx):
+            mask = np.where(user_idx == u)[0]
+            candidates = item_idx[mask].tolist()
+            scores = self._scores_for_user(int(u), candidates).detach().cpu().numpy().astype(np.float32)
+            outputs[mask] = scores
+        return outputs
 
     # ------------------------------------------------------------------
     def recommend(

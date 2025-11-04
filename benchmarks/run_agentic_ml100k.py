@@ -34,7 +34,12 @@ from orchid_ranker.agents.student_agent import StudentAgent
 from orchid_ranker.baselines import ExplicitMFBaseline
 
 
+def stage(msg: str) -> None:
+    print(f"[agentic-ml100k] {msg}", flush=True)
+
+
 def load_ml100k(top_users: int, top_items: int, seed: int) -> tuple[pd.DataFrame, pd.DataFrame]:
+    stage(f"Loading MovieLens 100K split (top_users={top_users}, top_items={top_items})")
     ml = Dataset.load_builtin("ml-100k", prompt=False)
     raw = ml.raw_ratings
     frame = pd.DataFrame(raw, columns=["user_id", "item_id", "rating", "timestamp"])
@@ -46,6 +51,7 @@ def load_ml100k(top_users: int, top_items: int, seed: int) -> tuple[pd.DataFrame
     mask = rng.random(len(frame)) < 0.8
     train_df = frame[mask].copy()
     test_df = frame[~mask].copy()
+    del frame
 
     uids = train_df["user_id"].value_counts().head(top_users).index
     iids = train_df["item_id"].value_counts().head(top_items).index
@@ -55,6 +61,7 @@ def load_ml100k(top_users: int, top_items: int, seed: int) -> tuple[pd.DataFrame
 
 
 def build_embeddings(train_df: pd.DataFrame, dim: int) -> tuple[np.ndarray, np.ndarray, dict[int, int], dict[int, int]]:
+    stage("Fitting Funk-style explicit MF for warm-start embeddings")
     user_ids = sorted(train_df["user_id"].unique())
     item_ids = sorted(train_df["item_id"].unique())
     uid2idx = {uid: idx for idx, uid in enumerate(user_ids)}
@@ -115,18 +122,21 @@ def run_once(args) -> dict:
 
     user_emb, item_emb, uid2idx, iid2idx = build_embeddings(train_df, args.dim)
     U, W, pos2id, id2pos, item_ids_pos, meta = build_simulation_matrices(train_df, user_emb, item_emb, uid2idx, iid2idx, args.dim, device)
+    del train_df, user_emb, item_emb
 
     users = []
     for uid, idx in uid2idx.items():
-        sa = StudentAgent(user_id=uid, seed=args.seed + uid)
+        sa = StudentAgent(user_id=uid, seed=int(args.seed + uid))
         users.append(UserCtx(user_id=uid, user_idx=idx, student=sa, user_vec=U[idx : idx + 1]))
 
     num_users = len(uid2idx)
     num_items = len(iid2idx)
 
+    stage("Building fixed recommender")
     fixed = TwoTowerRecommender(num_users, num_items, args.dim, args.dim, hidden=64, emb_dim=32, device=str(device), dp_cfg={"enabled": False})
     fixed.user_matrix = U.clone().to(device)
 
+    stage("Building adaptive (teacher/student) recommender")
     teacher = TwoTowerRecommender(num_users, num_items, args.dim, args.dim, hidden=64, emb_dim=32, device=str(device), dp_cfg={"enabled": False}, use_bootts=True, ts_heads=16)
     student = TwoTowerRecommender(num_users, num_items, args.dim, args.dim, hidden=64, emb_dim=32, device=str(device), dp_cfg={"enabled": False}, use_bootts=True, ts_heads=16)
     student.blend_increment = 0.3
@@ -139,7 +149,7 @@ def run_once(args) -> dict:
         rounds=args.rounds,
         top_k_base=args.top_k,
         min_candidates=num_items,
-        console=False,
+        console=True,
         console_user=False,
         deterministic_pool=True,
         persistent_pool=True,
@@ -171,7 +181,11 @@ def run_once(args) -> dict:
         device=device,
         mode_label="fixed",
     )
-    orch_fixed.run()
+    if args.skip_fixed:
+        stage("Skipping fixed orchestrator as requested")
+    else:
+        stage("Running fixed orchestrator")
+        orch_fixed.run()
 
     cfg_adapt = MultiConfig(**{**base_cfg, "log_path": str(args.log_dir / "adaptive.jsonl")})
     orch_adapt = MultiUserOrchestrator(
@@ -187,6 +201,7 @@ def run_once(args) -> dict:
         device=device,
         mode_label="adaptive",
     )
+    stage("Running adaptive orchestrator")
     orch_adapt.run()
 
     import pandas as pd
@@ -203,7 +218,11 @@ def run_once(args) -> dict:
                 rows.append({k: m.get(k) for k in ["accept_rate", "accuracy", "novelty_rate", "serendipity", "mean_knowledge"]})
         return pd.DataFrame(rows)
 
-    fx = load(args.log_dir / "fixed.jsonl").mean(numeric_only=True).to_dict()
+    stage("Summarizing results")
+    if args.skip_fixed:
+        fx = {}
+    else:
+        fx = load(args.log_dir / "fixed.jsonl").mean(numeric_only=True).to_dict()
     ad = load(args.log_dir / "adaptive.jsonl").mean(numeric_only=True).to_dict()
     return {"fixed": fx, "adaptive": ad}
 
@@ -211,15 +230,15 @@ def run_once(args) -> dict:
 def parse_args(argv: Optional[list[str]] = None) -> argparse.Namespace:
     p = argparse.ArgumentParser(description="Agentic fixed vs adaptive benchmark on MovieLens 100K")
     p.add_argument("--rounds", type=int, default=80)
-    p.add_argument("--top-users", type=int, default=400)
-    p.add_argument("--top-items", type=int, default=800)
+    p.add_argument("--top-users", type=int, default=200)
+    p.add_argument("--top-items", type=int, default=400)
     p.add_argument("--top-k", dest="top_k", type=int, default=6)
-    p.add_argument("--dim", type=int, default=32)
+    p.add_argument("--dim", type=int, default=24)
     p.add_argument("--seed", type=int, default=42)
     p.add_argument("--log-dir", type=Path, default=Path("runs/agentic-ml100k"))
     # Warmup scheduling knobs
-    p.add_argument("--warmup-rounds", type=int, default=10)
-    p.add_argument("--warmup-steps", type=int, default=3)
+    p.add_argument("--warmup-rounds", type=int, default=8)
+    p.add_argument("--warmup-steps", type=int, default=2)
     p.add_argument("--warmup-top-k-boost", type=int, default=2)
     p.add_argument("--warmup-diversity-scale", type=float, default=0.3)
     # Funk options
@@ -227,11 +246,23 @@ def parse_args(argv: Optional[list[str]] = None) -> argparse.Namespace:
     p.add_argument("--funk-pool", type=int, default=0)
     p.add_argument("--funk-distill", action="store_true")
     p.add_argument("--funk-lambda", type=float, default=0.2)
+    p.add_argument("--quick", action="store_true", help="Run a lightweight configuration (smaller users/items/rounds)")
+    p.add_argument("--full", action="store_true", help="Force full configuration even if quick mode is on")
+    p.add_argument("--skip-fixed", action="store_true", help="Skip running the fixed orchestrator")
+    p.add_argument("--quick", action="store_true", help="Run a lightweight configuration (smaller users/items/rounds)")
     return p.parse_args(argv)
 
 
 def main(argv: Optional[list[str]] = None) -> int:
     args = parse_args(argv)
+    if args.quick and not args.full:
+        stage("Quick mode enabled: reducing rounds/users/items/dimension for faster execution")
+        args.rounds = min(args.rounds, 25)
+        args.top_users = min(args.top_users, 120)
+        args.top_items = min(args.top_items, 240)
+        args.dim = min(args.dim, 16)
+        args.warmup_rounds = min(args.warmup_rounds, 5)
+        args.warmup_steps = min(args.warmup_steps, 2)
     args.log_dir.mkdir(parents=True, exist_ok=True)
     out = run_once(args)
     print("Fixed means:", out["fixed"])
@@ -241,4 +272,3 @@ def main(argv: Optional[list[str]] = None) -> int:
 
 if __name__ == "__main__":
     raise SystemExit(main())
-

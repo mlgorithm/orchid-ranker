@@ -182,6 +182,7 @@ PYTHONPATH=src python benchmarks/run_agentic_adaptive.py --rounds 80 --users 16 
 PYTHONPATH=src python benchmarks/run_agentic_ml100k.py \
   --rounds 80 --top-users 400 --top-items 800 --top-k 6 --dim 32 --funk-candidates
 ```
+Add `--quick` to run a much lighter configuration (smaller user/item subsets and rounds).
 
 - sklearn digits variant (CPU-safe):
 

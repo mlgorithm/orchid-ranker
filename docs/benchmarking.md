@@ -188,4 +188,5 @@ MovieLens 100K fixed vs adaptive:
 PYTHONPATH=src python benchmarks/run_agentic_ml100k.py --rounds 80 --top-users 400 --top-items 800 --top-k 6 --dim 32 --funk-candidates
 ```
 Add `--funk-distill` to include the Funk auxiliary loss or omit `--funk-candidates`
-to run without MF-guided recall.
+to run without MF-guided recall. Use `--quick` for a lightweight smoke run (25 rounds,
+smaller user/item subsets).
