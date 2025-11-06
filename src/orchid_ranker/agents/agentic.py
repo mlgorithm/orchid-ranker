@@ -1,8 +1,11 @@
 """Primary agentic orchestration utilities for Orchid Ranker."""
 from __future__ import annotations
 
+import json
 import math
 import random
+import time
+from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
@@ -35,6 +38,8 @@ class MultiConfig:
     mmr_lambda: float = 0.25
     log_path: Optional[str] = None
     console: bool = True
+    timing_log_path: Optional[str] = None
+    timing_rounds: int = 0
     shuffle_users_each_round: bool = True
 
     # privacy flags (left here for compatibility with prior code)
@@ -110,6 +115,55 @@ class OnlineState:
         return dict(self._state.get(int(uid), dict(knowledge=0.5, fatigue=0.2, trust=0.5, engagement=0.6, uncertainty=0.5)))
 
 
+class _TimingRecorder:
+    def __init__(self, path: Optional[str | Path], max_rounds: int):
+        self._max_rounds = max(0, int(max_rounds or 0))
+        self._path = Path(path) if path else None
+        self.enabled = self._path is not None and self._max_rounds > 0
+        if self.enabled:
+            self._path.parent.mkdir(parents=True, exist_ok=True)
+        self._current_entry: Optional[dict] = None
+        self._written = 0
+
+    def begin(self, round_idx: int) -> None:
+        if not self.enabled or self._written >= self._max_rounds:
+            self._current_entry = None
+            return
+        self._current_entry = {"round": int(round_idx), "phases": {}, "start": time.perf_counter()}
+
+    @contextmanager
+    def phase(self, name: str):
+        if not self._current_entry:
+            yield
+            return
+        start = time.perf_counter()
+        try:
+            yield
+        finally:
+            elapsed = time.perf_counter() - start
+            phases = self._current_entry.setdefault("phases", {})
+            phases[name] = phases.get(name, 0.0) + elapsed
+
+    def finish(self, extras: Optional[dict] = None) -> None:
+        if not self._current_entry:
+            return
+        entry = self._current_entry
+        entry["total"] = time.perf_counter() - entry.pop("start", time.perf_counter())
+        if extras:
+            entry["metrics"] = extras
+        self._write(entry)
+        self._current_entry = None
+
+    def _write(self, entry: dict) -> None:
+        if not self.enabled or self._path is None:
+            return
+        with self._path.open("a", encoding="utf-8") as handle:
+            handle.write(json.dumps(entry) + "\n")
+        self._written += 1
+        if self._written >= self._max_rounds:
+            self.enabled = False
+
+
 # ------------------------------------------------------------------------------------
 # Orchestrator
 # ------------------------------------------------------------------------------------
@@ -162,6 +216,15 @@ class MultiUserOrchestrator:
 
         # JSONL logger
         self.logger = JSONLLogger(Path(self.cfg.log_path) if self.cfg.log_path else Path("runs/run.jsonl"))
+
+        timing_rounds = int(getattr(self.cfg, "timing_rounds", 0) or 0)
+        timing_path = getattr(self.cfg, "timing_log_path", None)
+        if timing_rounds > 0 and not timing_path and self.cfg.log_path:
+            try:
+                timing_path = str(Path(self.cfg.log_path).with_suffix(".timing.jsonl"))
+            except Exception:
+                timing_path = None
+        self._timing = _TimingRecorder(timing_path, timing_rounds)
 
         # Popularity (online) — exposures & accepts (by ext item id)
         self._pop_expose: Dict[int, int] = {}
@@ -752,6 +815,7 @@ class MultiUserOrchestrator:
 
         # ---------- main loop ----------
         for r in range(1, rounds + 1):
+            self._timing.begin(r)
             # round accumulators
             shown_total = 0
             accept_total = 0
@@ -792,23 +856,24 @@ class MultiUserOrchestrator:
                 # state vector for the recommender
                 state_vec = torch.tensor([[k_val, f_val, t_val, e_val]], dtype=torch.float32, device=self.device)
 
-                # ---- candidate sampling (optionally deterministic per round) ----
-                cand_pos_all = self.item_ids_pos
-                Kmin = int(self.cfg.min_candidates)
-                # Optional: Funk-based candidate generation (top-N per user)
-                if bool(getattr(self.cfg, "use_funk_candidates", False)) and hasattr(self, "_funk_model") and (self._funk_model is not None):
-                    try:
-                        pool_n = int(getattr(self.cfg, "funk_pool_size", 0)) or Kmin
-                        # score all items for this user via Funk model (CPU)
-                        u_cpu = torch.tensor([uid], dtype=torch.long)
-                        all_items_cpu = torch.arange(self.item_matrix.shape[0], dtype=torch.long)
-                        ds = self._funk_model.infer(user_ids=u_cpu, item_ids=all_items_cpu).view(-1)
-                        order = torch.argsort(ds, descending=True)
-                        top_idx = order[:pool_n].to(self.device)
-                        cand_pos = top_idx.long()
-                    except Exception:
-                        cand_pos = cand_pos_all[:Kmin]
-                elif cand_pos_all.numel() > Kmin:
+                with self._timing.phase("candidate_sampling"):
+                    # ---- candidate sampling (optionally deterministic per round) ----
+                    cand_pos_all = self.item_ids_pos
+                    Kmin = int(self.cfg.min_candidates)
+                    # Optional: Funk-based candidate generation (top-N per user)
+                    if bool(getattr(self.cfg, "use_funk_candidates", False)) and hasattr(self, "_funk_model") and (self._funk_model is not None):
+                        try:
+                            pool_n = int(getattr(self.cfg, "funk_pool_size", 0)) or Kmin
+                            # score all items for this user via Funk model (CPU)
+                            u_cpu = torch.tensor([uid], dtype=torch.long)
+                            all_items_cpu = torch.arange(self.item_matrix.shape[0], dtype=torch.long)
+                            ds = self._funk_model.infer(user_ids=u_cpu, item_ids=all_items_cpu).view(-1)
+                            order = torch.argsort(ds, descending=True)
+                            top_idx = order[:pool_n].to(self.device)
+                            cand_pos = top_idx.long()
+                        except Exception:
+                            cand_pos = cand_pos_all[:Kmin]
+                    elif cand_pos_all.numel() > Kmin:
                         # Optional persistent cache (shared across modes within a run directory)
                         used_cache = False
                         cache_enabled = bool(getattr(self.cfg, "persistent_pool", False))
@@ -852,9 +917,9 @@ class MultiUserOrchestrator:
                                     np.save(str(cache_file), idxs.detach().cpu().numpy())
                                 except Exception:
                                     pass
-                else:
-                    cand_pos = cand_pos_all
-                cand_item_ids = cand_pos.long().to(self.device)
+                    else:
+                        cand_pos = cand_pos_all
+                    cand_item_ids = cand_pos.long().to(self.device)
 
                 # ---- user tensors ----
                 user_ids = torch.tensor([uid], dtype=torch.long, device=self.device)
@@ -864,13 +929,14 @@ class MultiUserOrchestrator:
                     user_vec = None  # let model fetch internally
 
                 # ---- score BEFORE decide ----
-                logits = self.rec.infer(
-                    user_vec=user_vec,
-                    item_matrix=self.item_matrix,
-                    user_ids=user_ids,
-                    item_ids=cand_item_ids,
-                    state_vec=state_vec,
-                )
+                with self._timing.phase("tower_infer"):
+                    logits = self.rec.infer(
+                        user_vec=user_vec,
+                        item_matrix=self.item_matrix,
+                        user_ids=user_ids,
+                        item_ids=cand_item_ids,
+                        state_vec=state_vec,
+                    )
 
                 # ---- choose slate ----
                 params = None
@@ -915,17 +981,18 @@ class MultiUserOrchestrator:
                     top_k = int(self.cfg.top_k_base)
                     zpd_delta = float(self.cfg.zpd_margin)
 
-                sel_pos, _ = self.rec.decide(
-                    logits=logits,
-                    top_k=top_k,
-                    item_ids=cand_item_ids,
-                    user_id=uid_ext,
-                    engagement=e_val,
-                    trust=t_val,
-                    difficulty_map=self._difficulty_map,
-                    knowledge=k_val,
-                    zpd_delta=zpd_delta,
-                )
+                with self._timing.phase("decide"):
+                    sel_pos, _ = self.rec.decide(
+                        logits=logits,
+                        top_k=top_k,
+                        item_ids=cand_item_ids,
+                        user_id=uid_ext,
+                        engagement=e_val,
+                        trust=t_val,
+                        difficulty_map=self._difficulty_map,
+                        knowledge=k_val,
+                        zpd_delta=zpd_delta,
+                    )
 
                 chosen_item_positions = sel_pos
                 chosen_item_ids = [int(self.pos2id[int(p)]) for p in chosen_item_positions]
@@ -946,11 +1013,12 @@ class MultiUserOrchestrator:
                     item_reps = None
 
                 # ---- simulate student interaction ----
-                out = ux.student.interact(
-                    recommended_ids=chosen_item_ids,
-                    items_meta=self.item_meta_by_id,
-                    rng_explain_prob=0.15,
-                )
+                with self._timing.phase("student_interact"):
+                    out = ux.student.interact(
+                        recommended_ids=chosen_item_ids,
+                        items_meta=self.item_meta_by_id,
+                        rng_explain_prob=0.15,
+                    )
 
                 accepted_ids = list(out.get("accepted_ids", []) or [])
                 fb = dict(out.get("feedback", {}) or {})
@@ -1177,8 +1245,9 @@ class MultiUserOrchestrator:
                                 except Exception:
                                     pass
                                 steps = max(1, int(self.cfg.train_steps_per_round))
-                                for _ in range(steps):
-                                    self.rec.train_step(batch)
+                                with self._timing.phase("train_step"):
+                                    for _ in range(steps):
+                                        self.rec.train_step(batch)
 
             # round-level metrics
             acc_rate = (correct_total / max(1, accept_total)) if accept_total else 0.0
@@ -1242,21 +1311,30 @@ class MultiUserOrchestrator:
 
             # ---------- end of warmup: pretrain student over accumulated batches ----------
             if self._is_adaptive and int(r) + 1 == int(self.cfg.warmup_rounds):
-                try:
-                    steps = max(1, int(self.cfg.warmup_steps))
-                    if hasattr(self.rec, "train_step") and callable(self.rec.train_step) and self._warmup_buffer:
-                        for _ in range(steps):
-                            for b in self._warmup_buffer:
-                                self.rec.train_step(b)
-                        # hard sync teacher <- student after warmup
-                        try:
-                            with torch.no_grad():
-                                for t_param, s_param in zip(self.rec.teacher.parameters(), self.rec.student.parameters()):
-                                    t_param.data.copy_(s_param.data)
-                        except Exception:
-                            pass
-                except Exception:
-                    pass
+                with self._timing.phase("warmup_sync"):
+                    try:
+                        steps = max(1, int(self.cfg.warmup_steps))
+                        if hasattr(self.rec, "train_step") and callable(self.rec.train_step) and self._warmup_buffer:
+                            for _ in range(steps):
+                                for b in self._warmup_buffer:
+                                    self.rec.train_step(b)
+                            # hard sync teacher <- student after warmup
+                            try:
+                                with torch.no_grad():
+                                    for t_param, s_param in zip(self.rec.teacher.parameters(), self.rec.student.parameters()):
+                                        t_param.data.copy_(s_param.data)
+                            except Exception:
+                                pass
+                    except Exception:
+                        pass
+
+            self._timing.finish({
+                "shown": int(shown_total),
+                "accepted": int(accept_total),
+                "accuracy": float(acc_rate),
+                "accept_rate": float(accept_rate),
+                "novelty_rate": float(novelty_rate),
+            })
 
         return {"epsilon_cum": float(eps_cum)}
 

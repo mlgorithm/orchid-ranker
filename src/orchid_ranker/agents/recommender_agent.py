@@ -16,6 +16,7 @@ import torch.nn.functional as F
 
 from orchid_ranker.agents.simple_dp import SimpleDPConfig, dp_sgd_step
 from orchid_ranker.dp_accountant import build_accountant
+from orchid_ranker.native.fast_score import fast_score
 from orchid_ranker.security import AuditLogger
 from orchid_ranker.agents.student_agent import ItemMeta
 
@@ -195,6 +196,7 @@ class TwoTowerRecommender(nn.Module):
         sigma_min: float = 0.05,
         item_bias: bool = True,
         device: str = "cpu",
+        use_native_scoring: bool = False,
         **kwargs,
     ):
         super().__init__()
@@ -214,6 +216,7 @@ class TwoTowerRecommender(nn.Module):
         self.sigma_min = float(max(1e-6, sigma_min))
         self.item_bias_enabled = bool(item_bias)
         self._extra_kwargs = dict(kwargs) if kwargs else {}
+        self.use_native_scoring = bool(use_native_scoring)
 
         _d(f"TwoTower init users={num_users} items={num_items} Du={user_dim} Di={item_dim} "
            f"H={hidden} D={emb_dim} state_dim={state_dim} mmr={mmr_lambda} nov={novelty_bonus} lr={lr}")
@@ -443,7 +446,7 @@ class TwoTowerRecommender(nn.Module):
         I = torch.nn.functional.normalize(I, dim=-1)
 
         # logits + per-user temp/bias
-        logits = u @ I.T  # [B,K]
+        logits = fast_score(u, I, use_native=self.use_native_scoring)  # [B,K]
         tau = torch.clamp(self.user_temp(user_ids.to(dev)), 0.25, 4.0)
         b_u = self.user_bias(user_ids.to(dev))
         logits = logits / tau + b_u

@@ -17,11 +17,19 @@ import random
 from pathlib import Path
 from typing import Optional
 
+import sys
+
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
+SRC_PATH = PROJECT_ROOT / "src"
+if SRC_PATH.is_dir() and str(SRC_PATH) not in sys.path:
+    sys.path.insert(0, str(SRC_PATH))
+
 import numpy as np
 import torch
 
 from orchid_ranker import MultiConfig, MultiUserOrchestrator, StudentAgentFactory, UserCtx
 from orchid_ranker.agents.recommender_agent import TwoTowerRecommender
+from orchid_ranker.utils import select_device
 
 
 def _build_students(num_users: int, knowledge_dim: int, device: torch.device) -> tuple[list[UserCtx], torch.Tensor]:
@@ -40,7 +48,7 @@ def _build_item_matrix(num_items: int, item_dim: int, device: torch.device) -> t
     return matrix, ids, mapping
 
 
-def _build_recommender(num_users: int, num_items: int, dim: int, device: torch.device) -> TwoTowerRecommender:
+def _build_recommender(num_users: int, num_items: int, dim: int, device: torch.device, native: bool) -> TwoTowerRecommender:
     rec = TwoTowerRecommender(
         num_users=num_users,
         num_items=num_items,
@@ -52,6 +60,7 @@ def _build_recommender(num_users: int, num_items: int, dim: int, device: torch.d
         dp_cfg={"enabled": False},
         mmr_lambda=0.1,
         novelty_bonus=0.05,
+        use_native_scoring=native,
     )
     rec.eval()
     return rec
@@ -64,6 +73,8 @@ def parse_args(argv: Optional[list[str]] = None) -> argparse.Namespace:
     parser.add_argument("--items", type=int, default=12, help="Number of synthetic items")
     parser.add_argument("--log-path", type=Path, default=Path("runs/agentic-smoke.jsonl"), help="Where to write the JSONL log")
     parser.add_argument("--seed", type=int, default=42, help="Seed for reproducibility")
+    parser.add_argument("--device", type=str, default="auto", choices=["auto", "cuda", "mps", "cpu"], help="Device to run the smoke test on")
+    parser.add_argument("--native-score", action="store_true", help="Use the optional native fast_score kernel when available")
     return parser.parse_args(argv)
 
 
@@ -73,14 +84,16 @@ def main(argv: Optional[list[str]] = None) -> int:
     np.random.seed(args.seed)
     torch.manual_seed(args.seed)
 
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    device_choice = select_device(getattr(args, "device", "auto"))
+    print(f"[agentic-smoke] Using device: {device_choice.name} ({device_choice.reason})")
+    device = device_choice.torch_device
 
     users, user_matrix = _build_students(args.users, knowledge_dim=4, device=device)
     item_matrix, pos2id, id2pos = _build_item_matrix(args.items, item_dim=4, device=device)
     item_ids_pos = torch.arange(args.items, device=device)
     item_meta = {iid: {"difficulty": float(np.random.rand())} for iid in pos2id}
 
-    recommender = _build_recommender(args.users, args.items, dim=4, device=device)
+    recommender = _build_recommender(args.users, args.items, dim=4, device=device, native=args.native_score)
     recommender.user_matrix = user_matrix.clone().to(device)
 
     cfg = MultiConfig(
