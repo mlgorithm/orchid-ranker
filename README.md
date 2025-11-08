@@ -38,6 +38,11 @@ pip install orchid-ranker[agentic,viz,preprocess,benchmarks]
 - `agentic` brings in optional experiment helpers.
 - `viz` adds plotting dependencies.
 - `preprocess` installs CLI preprocessing extras.
+
+## Enterprise readiness
+
+- See `docs/enterprise_runbook.md` for release checklists, CI smoke tests, monitoring guidance, and rollout strategy.
+- To sanity-check the SafeSwitch non-regression gate on every release, run `./scripts/ci_safe_smoke.sh` (which wraps the ML-100K safe smoke scenario).
 - `benchmarks` installs optional competitor libraries (`implicit`, `reclab`).
  - `agentic` now bundles Opacus for production-grade DP accounting.
 
