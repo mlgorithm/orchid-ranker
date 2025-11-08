@@ -6,6 +6,7 @@ This runbook summarizes the operational knobs we currently support when deployin
 
 1. `pytest` — run `python -m pytest` (includes native scoring and SafeSwitch unit tests).
 2. Safe smoke scenario — `./scripts/ci_safe_smoke.sh runs/ci-safe-smoke`. This runs a 60×120 MovieLens slice with `--safe-eb --safe-eb-dr`, verifies the SafeSwitch telemetry, and completes in under 2 minutes on CPU/MPS hardware.
+3. GitHub Actions — `.github/workflows/ci.yaml` runs both steps above automatically on every push/PR so regressions are caught before release.
 
 Embed both steps in CI to block regressions. The smoke run ensures the non-regression gate is wired each release.
 
@@ -24,6 +25,7 @@ Embed both steps in CI to block regressions. The smoke run ensures the non-regre
 ## 4. Packaging & distribution
 
 - Versioned builds — update `pyproject.toml` and tag releases; build with `python -m build` and publish via your internal package index.
+- Use `scripts/bump_version.sh [major|minor|patch]` to bump the semantic version string safely before tagging a release.
 - Docker — use the benchmark scripts as entrypoints (e.g., `python benchmarks/run_agentic_ml100k.py ...`) in your CI images to validate GPU/MPS compatibility.
 
 ## 5. Rollout strategy
