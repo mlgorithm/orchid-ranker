@@ -1,6 +1,6 @@
 # Tutorial: Running Safe Mode Benchmarks
 
-This walk-through shows how to:
+This walk-through (see also `docs/tutorials/safe_mode.ipynb` for an interactive version) shows how to:
 
 1. Run the standard agentic benchmark on MovieLens 100K.
 2. Exercise the SafeSwitch-DR gate via the safe smoke script.
