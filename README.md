@@ -44,6 +44,14 @@ pip install orchid-ranker[agentic,viz,benchmarks]
 - Prefer notebooks? Open `docs/tutorials/safe_mode.ipynb` to run the same workflow interactively (baseline run, safe smoke script, telemetry visualization).
 - `benchmarks` installs optional competitor libraries (`implicit`, `reclab`).
  - `agentic` now bundles Opacus for production-grade DP accounting.
+- Additional guides:
+  - Dataset ingestion schema: `docs/tutorial_data_ingestion.md`
+  - Pareto/PC-EB controller: `docs/tutorial_pc_eb.md`
+  - Differential privacy deep dive: `docs/tutorial_dp.md`
+  - Observability & monitoring: `docs/tutorial_observability.md`
+  - Performance tuning: `docs/performance_playbook.md`
+  - Connectors & deployment: `docs/connectors_deployment.md`
+  - Secure deployment walkthrough: `docs/security_walkthrough.md`
 
 ### Support policy
 
