@@ -188,6 +188,7 @@ class MultiUserOrchestrator:
         mode_label: str = "fixed",
         sanitize_user_cols_idx: List[int] = None,
         sanitize_item_cols_idx: List[int] = None,
+        safe_gate=None,
     ):
         self.rec = rec
         self.users = list(users)
@@ -205,6 +206,7 @@ class MultiUserOrchestrator:
         self._sanitize_user_cols_idx = sanitize_user_cols_idx or []
         self._sanitize_item_cols_idx = sanitize_item_cols_idx or []
         self._mode_label = str(mode_label)
+        self._safe_gate = safe_gate
 
         # difficulty map by ext item id
         self._difficulty_map: Dict[int, float] = {}
@@ -669,6 +671,11 @@ class MultiUserOrchestrator:
         rounds = int(self.cfg.rounds)
         is_adaptive = hasattr(self.rec, "teacher") and hasattr(self.rec, "student")
         mode_label = "adaptive (teacher+student)" if is_adaptive else "fixed (single model)"
+        if self._safe_gate and not is_adaptive:
+            print("[orchestrator] Safe gate requested but recommender is not adaptive; disabling gate.")
+            self._safe_gate = None
+        if self._safe_gate and is_adaptive:
+            print("[orchestrator] SafeSwitchDR enabled: non-regression guard active.")
 
         # DP owner: student if adaptive, otherwise the single model
         dp_owner = self.rec.student if is_adaptive else self.rec
@@ -816,6 +823,11 @@ class MultiUserOrchestrator:
         # ---------- main loop ----------
         for r in range(1, rounds + 1):
             self._timing.begin(r)
+            serve_policy = "adaptive" if self._is_adaptive else self._mode_label
+            gate_prob = 1.0
+            if self._safe_gate and self._is_adaptive:
+                use_adaptive, gate_prob = self._safe_gate.decide()
+                serve_policy = "adaptive" if use_adaptive else "teacher"
             # round accumulators
             shown_total = 0
             accept_total = 0
@@ -830,6 +842,9 @@ class MultiUserOrchestrator:
             n_users = 0
             sum_accept_at4 = 0.0
             n_users_accept_at4 = 0
+            teacher_pred_sum = 0.0
+            adaptive_pred_sum = 0.0
+            pred_count = 0
 
             # shuffle users per config
             order = list(range(len(self.users)))
@@ -928,15 +943,30 @@ class MultiUserOrchestrator:
                 else:
                     user_vec = None  # let model fetch internally
 
-                # ---- score BEFORE decide ----
+                infer_kwargs = dict(
+                    user_vec=user_vec,
+                    item_matrix=self.item_matrix,
+                    user_ids=user_ids,
+                    item_ids=cand_item_ids,
+                    state_vec=state_vec,
+                )
+
+                teacher_logits = None
+                adaptive_logits = None
                 with self._timing.phase("tower_infer"):
-                    logits = self.rec.infer(
-                        user_vec=user_vec,
-                        item_matrix=self.item_matrix,
-                        user_ids=user_ids,
-                        item_ids=cand_item_ids,
-                        state_vec=state_vec,
-                    )
+                    if self._is_adaptive and self._safe_gate is not None:
+                        teacher_logits = self.rec.infer_policy("teacher", **infer_kwargs)
+                        adaptive_logits = self.rec.infer(**infer_kwargs)
+                        logits = adaptive_logits if serve_policy != "teacher" else teacher_logits
+                    else:
+                        logits = self.rec.infer(**infer_kwargs)
+                        if self._is_adaptive and serve_policy == "teacher":
+                            teacher_logits = self.rec.infer_policy("teacher", **infer_kwargs)
+
+                if self._is_adaptive and self._safe_gate is not None and teacher_logits is not None and adaptive_logits is not None:
+                    pred_count += 1
+                    teacher_pred_sum += torch.sigmoid(teacher_logits).mean().item()
+                    adaptive_pred_sum += torch.sigmoid(adaptive_logits).mean().item()
 
                 # ---- choose slate ----
                 params = None
@@ -981,9 +1011,15 @@ class MultiUserOrchestrator:
                     top_k = int(self.cfg.top_k_base)
                     zpd_delta = float(self.cfg.zpd_margin)
 
+                decider = self.rec
+                logits_for_decide = logits
+                if serve_policy == "teacher" and self._is_adaptive:
+                    decider = self.rec.teacher
+                    logits_for_decide = teacher_logits if teacher_logits is not None else logits
+
                 with self._timing.phase("decide"):
-                    sel_pos, _ = self.rec.decide(
-                        logits=logits,
+                    sel_pos, _ = decider.decide(
+                        logits=logits_for_decide,
                         top_k=top_k,
                         item_ids=cand_item_ids,
                         user_id=uid_ext,
@@ -1203,7 +1239,7 @@ class MultiUserOrchestrator:
                 )
 
                 # ---- online training step ----
-                if fb:
+                if fb and not (self._is_adaptive and serve_policy == "teacher"):
                     # Build training batch: accepted positives and (optionally) shown negatives
                     all_pos_idx: list[int] = []
                     all_labels: list[float] = []
@@ -1263,6 +1299,23 @@ class MultiUserOrchestrator:
             # update epsilon cumulative (if available)
             eps_cum = float(getattr(dp_owner, "eps_cum", eps_cum))
 
+            gate_info = None
+            if self._safe_gate and self._is_adaptive:
+                qa_pred = adaptive_pred_sum / max(pred_count, 1) if pred_count else 0.0
+                qf_pred = teacher_pred_sum / max(pred_count, 1) if pred_count else qa_pred
+                accepts_per_user = accept_total / max(1, len(self.users))
+                served_adaptive = serve_policy != "teacher"
+                self._safe_gate.update(
+                    served_adaptive,
+                    acc_rate,
+                    accepts_per_user,
+                    qa_pred,
+                    qf_pred,
+                    gate_prob,
+                )
+                gate_info = {"serve_policy": serve_policy, "p_used": gate_prob}
+                gate_info.update(self._safe_gate.telemetry())
+
             # ---------- console round summary ----------
             if self.cfg.console:
                 print(
@@ -1291,6 +1344,7 @@ class MultiUserOrchestrator:
                             "max_grad_norm": float(dp_max_grad),
                             "epsilon_cum": float(eps_cum),
                         },
+                        "safe_gate": gate_info,
                         "metrics": {
                             "shown": int(shown_total),
                             "accepted": int(accept_total),

@@ -33,6 +33,7 @@ from orchid_ranker import MultiConfig, MultiUserOrchestrator, UserCtx
 from orchid_ranker.agents.recommender_agent import DualRecommender, TwoTowerRecommender
 from orchid_ranker.agents.student_agent import StudentAgent
 from orchid_ranker.baselines import ExplicitMFBaseline
+from orchid_ranker.safety import SafeSwitchDR, SafeSwitchDRConfig
 from orchid_ranker.utils import select_device
 
 LOG_LEVELS = {"none": 0, "error": 1, "warn": 2, "info": 3}
@@ -201,6 +202,21 @@ def run_once(args) -> dict:
     for rec in (fixed, teacher, student):
         rec.user_matrix = U.clone().to(device)
 
+    safe_gate = None
+    if getattr(args, "safe_eb", False) or getattr(args, "safe_eb_dr", False):
+        safe_gate = SafeSwitchDR(
+            SafeSwitchDRConfig(
+                delta=0.01,
+                p_min=float(args.safe_eb_pmin),
+                p_max=1.0,
+                step_up=float(args.safe_eb_pstep),
+                step_down=0.5,
+                u_max=1.0,
+                a_max=float(args.top_k),
+                accept_floor=float(args.safe_eb_accept_floor),
+            )
+        )
+
     base_cfg = dict(
         rounds=args.rounds,
         top_k_base=args.top_k,
@@ -285,6 +301,7 @@ def run_once(args) -> dict:
         cfg=cfg_adapt,
         device=device,
         mode_label="adaptive",
+        safe_gate=safe_gate,
     )
     _run_with_profile("adaptive", orch_adapt.run)
 

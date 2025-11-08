@@ -1271,6 +1271,21 @@ class DualRecommender:
         allowed = {k: v for k, v in kwargs.items() if k in sig.parameters}
         return fn(**allowed)
 
+    def _infer_component(self, component: str, **kwargs):
+        model = self.teacher if component == "teacher" else self.student
+        fn = getattr(model, "infer", None)
+        if callable(fn):
+            return self._call_with_supported_args(fn, **kwargs)
+        return self._call_with_supported_args(model.think, **kwargs)
+
+    def infer_policy(self, policy: str = "adaptive", **kwargs):
+        pol = (policy or "adaptive").lower()
+        if pol == "teacher":
+            return self._infer_component("teacher", **kwargs)
+        if pol in {"student", "adaptive_student"}:
+            return self._infer_component("student", **kwargs)
+        return self.infer(**kwargs)
+
     def _after_student_update(self) -> None:
         self._student_weight = float(min(1.0, self._student_weight + self._blend_increment))
         tau = float(self._teacher_ema)
