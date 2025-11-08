@@ -16,8 +16,9 @@ Use `--timing-log` + `--timing-rounds` on benchmarks to profile hot spots withou
 
 - Reduce `min_candidates` when reranking costs dominate.
 - Enable `--native-score` to keep matmuls on-device.
-- Use `--torch-compile` on CUDA (PyTorch 2.x+) for tower models.
+- Use `--torch-compile` on CUDA (PyTorch 2.x+) for tower models; skip on MPS until supported.
 - Vectorize MMR and bandit bonuses (already implemented) and avoid `.cpu()` conversions in loops.
+- Reduce logging frequency (`log_flush_every`) during perf tests.
 
 ## 4. Interpreting timing JSONL
 

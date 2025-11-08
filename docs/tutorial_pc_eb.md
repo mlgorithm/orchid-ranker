@@ -47,7 +47,10 @@ orch = SafeAgenticOrchestrator(
 ## 4. Running a scenario
 
 ```python
-summary = orch.run_rounds(num_rounds=20)
+from orchid_ranker.pc_api import RankingAPI  # implement interface returning slates
+
+api = RankingAPI.from_orchestrator(existing_orchestrator)
+summary = orch.run(num_rounds=20, ranking_api=api)
 print(summary.metrics)
 ```
 
@@ -59,4 +62,5 @@ print(summary.metrics)
 
 ## 6. Visualization
 
-Use the included notebook `docs/tutorials/pc_eb.ipynb` to visualize mix probabilities, dual variables, and constraint satisfaction.
+- Use the notebook `docs/tutorials/pc_eb.ipynb` to plot mix probabilities, dual variables, and constraint violations.
+- Export telemetry via `orch.export_logs(path)` and visualize with pandas/matplotlib.

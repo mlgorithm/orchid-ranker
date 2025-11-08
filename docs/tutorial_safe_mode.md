@@ -68,3 +68,11 @@ The script fails if the `safe_gate` block is missing, ensuring releases keep the
 - Increase `--rounds` / `--top-users` to run longer safe experiments once you have a GPU-equipped machine.
 - Enable `--native-score` to exercise the optional C++ scoring kernel.
 - Use `--timing-log ... --timing-rounds 5` to capture phase-level latency for performance investigations.
+- Continue with:
+  - Dataset ingestion guide: `docs/tutorial_data_ingestion.md`
+  - Pareto/PC-EB controller: `docs/tutorial_pc_eb.md`
+  - Differential privacy deep dive: `docs/tutorial_dp.md`
+  - Observability and dashboards: `docs/tutorial_observability.md`
+  - Performance tuning: `docs/performance_playbook.md`
+  - Connectors & deployment: `docs/connectors_deployment.md`
+  - Secure deployment walkthrough: `docs/security_walkthrough.md`

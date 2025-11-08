@@ -50,11 +50,24 @@ datasets:
 import pandas as pd
 
 raw = pd.read_parquet("logs.parquet")
-# Map user/item ids
-raw['u'] = raw['user_guid'].astype('category').cat.codes
-raw['i'] = raw['content_id'].astype('category').cat.codes
-raw[['u','i','label','timestamp']].to_csv('data/my_dataset/train.csv', index=False)
+
+# Train/val/test split
+train = raw.sample(frac=0.7, random_state=42)
+val = raw.drop(train.index).sample(frac=0.5, random_state=42)
+test = raw.drop(train.index.union(val.index))
+
+def export_split(df, path):
+    df = df.copy()
+    df["u"] = df["user_guid"].astype("category").cat.codes
+    df["i"] = df["content_id"].astype("category").cat.codes
+    df[["u", "i", "label", "timestamp"]].to_csv(path, index=False)
+
+export_split(train, "data/my_dataset/train.csv")
+export_split(val, "data/my_dataset/val.csv")
+export_split(test, "data/my_dataset/test.csv")
 ```
+
+Generate side-information tables in a similar fashion (groupby aggregations for users, join metadata for items).
 
 ## 5. Loading the dataset
 
@@ -64,7 +77,17 @@ loader = DatasetLoader(config_path="configs/my_dataset.yaml")
 train_df = loader.train_df
 ```
 
-## 6. Common issues
+## 6. Schema validation helper
+
+```python
+from orchid_ranker.data import validate_schema
+
+validate_schema("configs/my_dataset.yaml")
+```
+
+This checks file paths, required columns, and feature types before running experiments.
+
+## 7. Common issues
 
 | Symptom | Cause | Fix |
 | --- | --- | --- |

@@ -8,11 +8,16 @@ Run benchmarks with `--timing-log runs/foo/timing.jsonl --timing-rounds 5`. Each
 
 ```python
 from orchid_ranker.observability import MetricsServer
+
 server = MetricsServer(port=9000)
+server.register_round_metrics()
 server.start()
+
+# Later
+server.stop()
 ```
 
-Expose counters such as `orchid_round_latency_ms` and scrape from Prometheus.
+Add the endpoint (`/metrics`) to your Prometheus scrape config.
 
 ## 3. Sample Grafana dashboard
 
@@ -27,4 +32,9 @@ Expose counters such as `orchid_round_latency_ms` and scrape from Prometheus.
 
 ## 5. Log shipping
 
-Use `scripts/ship_audit_logs.py` (coming soon) or a simple `fluent-bit` sidecar to forward JSONL logs to your SIEM.
+Forward JSONL logs via `fluent-bit` or a lightweight Python shipper:
+
+```python
+from orchid_ranker.logging import stream_jsonl
+stream_jsonl(\"runs/ml100k-safe/adaptive.jsonl\", target=\"https://siem.example/input\")
+```
