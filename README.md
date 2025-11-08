@@ -43,7 +43,7 @@ pip install orchid-ranker[agentic,viz,preprocess,benchmarks]
 
 - See `docs/enterprise_runbook.md` for release checklists, CI smoke tests, monitoring guidance, and rollout strategy.
 - To sanity-check the SafeSwitch non-regression gate on every release, run `./scripts/ci_safe_smoke.sh` (which wraps the ML-100K safe smoke scenario).
-- For a hands-on tutorial showing how to run the adaptive vs fixed benchmark, safe smoke run, and inspect telemetry, consult `docs/tutorial_safe_mode.md` (coming soon).
+- For a hands-on tutorial showing how to run the adaptive vs fixed benchmark, safe smoke run, and inspect telemetry, see `docs/tutorial_safe_mode.md`.
 - `benchmarks` installs optional competitor libraries (`implicit`, `reclab`).
  - `agentic` now bundles Opacus for production-grade DP accounting.
 
