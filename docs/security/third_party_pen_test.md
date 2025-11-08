@@ -5,7 +5,7 @@
 - Assess RBAC, audit logging, differential privacy safeguards, and deployment configurations.
 
 ## Scope
-- Python package and CLI surfaces (preprocessing, agentic experiments, evaluator).
+- Python package and CLI surfaces (agentic experiments, evaluator).
 - API surface area when embedded into customer platforms (documented in integration guide).
 - Infrastructure templates (containers, deployment manifests) once available in Phase 3.
 

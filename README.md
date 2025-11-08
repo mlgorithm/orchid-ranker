@@ -1,13 +1,10 @@
 # Orchid Ranker
 
 Orchid Ranker is an adaptive educational recommender toolkit that pairs
-rich dataset preprocessing pipelines with a modular slate orchestration
-engine, learner simulators, and a plug-and-play recommender class you can
+a modular slate orchestration engine, learner simulators, and a plug-and-play recommender class you can
 drop straight into your product (much like `surprise`’s algorithms).
-The toolkit grew out of experiments with the EdNet and OULAD datasets and now bundles:
+The toolkit grew out of large-scale tutoring experiments and now bundles:
 
-- preprocessing utilities (`orchid_ranker.preprocessing`) that transform
-  raw learner interaction logs into feature-rich CSV bundles;
 - agent modules (`orchid_ranker.agents`) implementing student
   simulators, recommender policies, and the multi-user orchestration
   loop;
@@ -32,12 +29,12 @@ pip install orchid-ranker
 You can opt into extra functionality when installing from PyPI:
 
 ```bash
-pip install orchid-ranker[agentic,viz,preprocess,benchmarks]
+pip install orchid-ranker[agentic,viz,benchmarks]
 ```
 
 - `agentic` brings in optional experiment helpers.
 - `viz` adds plotting dependencies.
-- `preprocess` installs CLI preprocessing extras.
+- `benchmarks` installs optional competitor libraries (`implicit`, `reclab`).
 
 ## Enterprise readiness
 
@@ -129,24 +126,15 @@ print("ALS predicted relevance:", als_rec.predict(user_id=1, item_id=10))
 ### Running adaptive vs. baseline experiments
 
 ```python
-from orchid_ranker.preprocessing import preprocess_ednet
 from orchid_ranker.experiments import RankingExperiment
 
-# 1) Preprocess your raw EdNet dump
-preprocess_ednet(
-    base_path="/path/to/raw/u-files",
-    content_path="/path/to/content",
-    output_path="./data/ednet-processed",
-)
-
-# 2) Run a quick comparison with the experiment driver
-runner = RankingExperiment("configs/ednet.yaml", dataset="ednet", cohort_size=16)
+# Assuming you have prepared CSVs + YAML config (see "Dataset format")
+runner = RankingExperiment("configs/my_dataset.yaml", dataset="my_dataset", cohort_size=16)
 summary = runner.run_many(["adaptive", "fixed", "linucb", "als"], dp_enabled=False)
 print(summary)
 ```
 
-See the `experiments/` directory for end-to-end experiment scripts and the
-`runs/` folder for generated reports.
+See the `experiments/` directory for complete scripts and the `runs/` folder for generated reports/logs.
 
 ### Apples-to-apples benchmarks
 
@@ -302,14 +290,6 @@ model = TwoTowerRecommender(..., dp_cfg=dp_cfg)
 
 Run them via `runner.run_many([...])` and everyone will report the same summary metrics.
 
-
-To replicate the full battery of adaptive vs fixed comparisons on EdNet and OULAD run:
-
-```bash
-python experiments-sac/run_all.py
-```
-
-Results are written under the `runs/` folder (summary CSVs plus per-round metrics).
 
 ## Automated checks
 

@@ -14,7 +14,7 @@
 
 ## Phase 2 – Security & Privacy Foundations (Weeks 6‑12)
 - ✅ Integrated Opacus-backed DP accountant and extended privacy documentation/threat model notes.
-- ✅ Added role-based access enforcement to preprocessing CLI and JSONL audit logging hooks for DP updates.
+- ✅ Added role-based access enforcement to ingestion utilities and JSONL audit logging hooks for DP updates.
 - ✅ Drafted compliance artefacts (data retention, incident response, FERPA/GDPR alignment) and SIEM shipping utility.
 - ✅ Automated CycloneDX SBOM generation and pip-audit scanning via GitHub workflow.
 - ✅ Added environment-driven audit log forwarding for SIEM integration and documented pen-test preparation playbook.

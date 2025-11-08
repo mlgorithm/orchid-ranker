@@ -31,9 +31,6 @@ classifiers = [
 ]
 
 [project.optional-dependencies]
-preprocess = [
-  "tqdm>=4.60",
-]
 viz = [
   "matplotlib>=3.6",
 ]
@@ -76,7 +73,4 @@ where = ["src"]
 include = ["orchid_ranker", "orchid_ranker.*"]
 
 [project.scripts]
-orchid-preprocess = "orchid_ranker.preprocessing.cli:main"
-orchid-preprocess-ednet = "orchid_ranker.preprocessing.ednet:main"
-orchid-preprocess-oulad = "orchid_ranker.preprocessing.oulad:main"
 orchid-evaluate = "orchid_ranker.cli.evaluate:main"

@@ -6,12 +6,12 @@ Owner: Product Management (Farhad Vadiee) with Engineering Leads
 ## 1. Architecture & Codebase Review
 
 **Current State**
-- Monorepo-style Python package under `src/orchid_ranker`, structured around preprocessing, recommender baselines, adaptive agentic simulator, and CLI tooling.
+- Monorepo-style Python package under `src/orchid_ranker`, structured around recommender baselines, adaptive agentic simulator, and CLI tooling.
 - Adaptive stack (`agents/`) depends on PyTorch 2.x features; agentic experiments run entirely in-process with JSONL logging.
-- Packaging via `pyproject.toml` with extras for preprocessing, viz, agentic experiments, and benchmarks; no separate microservices or deployment manifests yet.
+- Packaging via `pyproject.toml` with extras for viz, agentic experiments, and benchmarks; no separate microservices or deployment manifests yet.
 
 **Identified Gaps**
-- No consolidated architecture diagram describing data flow (preprocess → offline experiments → live integration).
+- No consolidated architecture diagram describing data flow (ingest → offline experiments → live integration).
 - Deployment guidance is limited; lacks containerization/Helm/Terraform references.
 - Differential privacy integration relies on custom implementation without external validation notes.
 
@@ -29,7 +29,7 @@ Owner: Product Management (Farhad Vadiee) with Engineering Leads
 
 **Identified Gaps**
 - No GPU CI or matrix build presently documented (Phase 1 still to wire into automation).
-- Lack of integration tests covering preprocessing pipelines and experiment orchestration end-to-end with real datasets.
+- Lack of integration tests covering dataset ingestion and experiment orchestration end-to-end with real datasets.
 - Performance guardrails rely on manual JSON comparisons; no automated check script committed.
 
 **Next Actions**

@@ -17,8 +17,8 @@
 - Provide sample notebooks from `examples/` demonstrating recommender fitting and evaluation.
 
 ## Week 2 – Dataset Ingestion
-- Assist customer with preprocessing pipeline (`orchid-preprocess` CLI or direct module use).
-- Validate schema using `orchid_ranker.preprocessing` validators.
+- Assist customer with mapping their dataset to the required CSV/YAML schema (see “Dataset format” in the README).
+- Validate column types and feature availability via lightweight pandas checks or the experiment loader.
 - Configure RBAC roles aligned to customer team (see `orchid_ranker.security`).
 
 ## Week 3 – Experimentation
