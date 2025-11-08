@@ -206,3 +206,33 @@ If you just need to verify the SafeSwitch-DR gate on ML-100K without waiting for
 ```
 
 It runs the adaptive policy only (fixed is skipped) on a 60×120 slice for 5 rounds with `--safe-eb --safe-eb-dr`, and writes both the standard JSONL metrics and per-phase timings to the provided log directory. This configuration completes well under two minutes even on CPU/MPS laptops and is suitable for CI gates.
+
+### Interpreting SafeSwitch telemetry
+
+Every `round_summary` entry in the JSONL log contains a `safe_gate` block when `--safe-eb` is on:
+
+```json
+{
+  "type": "round_summary",
+  "round": 5,
+  "safe_gate": {
+    "serve_policy": "teacher",
+    "p_used": 0.05,
+    "t": 5,
+    "mean": -10.1,
+    "rad": 5.0,
+    "lcb": -15.1,
+    "acc_lcb": -2.3,
+    "p": 0.05
+  },
+  ...
+}
+```
+
+- `serve_policy`: which policy actually served the slate (`teacher` or `adaptive`).
+- `p_used`: mix probability for the just-completed round.
+- `lcb`: DR uplift lower confidence bound; once this turns positive, the gate ramps `p` up.
+- `acc_lcb`: acceptance-rate lower bound (per user); if it dips below the configured floor, the gate falls back to the teacher (p=0).
+- `p`: current probability that the next round will use the adaptive policy.
+
+Plotting `lcb`, `acc_lcb`, and `p` over time makes it easy to demonstrate the non-regression guarantee.

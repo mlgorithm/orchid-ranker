@@ -40,3 +40,20 @@ Embed both steps in CI to block regressions. The smoke run ensures the non-regre
 - Slow rounds? Use the timing JSONL to see whether candidate sampling, tower inference, or training dominates. Adjust `min_candidates`, enable `--native-score`, or reduce `train_steps_per_round` in smoke/CI runs.
 
 For deeper integration (custom telemetry, policy APIs, or DP accountants), contact the maintainer listed in `pyproject.toml`.
+
+## 7. Security & compliance checklist
+
+| Item | Status | Notes |
+| --- | --- | --- |
+| Threat model for DP/telemetry | 🔲 TODO | Document data flows (training logs, telemetry exports). |
+| DP parameter guidance | 🔲 TODO | Provide recommended `sigma`, `sample_rate`, `per_round_eps_target` for typical deployments. |
+| Secrets management | 🔲 TODO | Define how API keys / DP noise seeds are stored (e.g., Vault, KMS). |
+| Audit logging | 🔲 TODO | Integrate `orchid_ranker.security.AuditLogger` with enterprise SIEM. |
+| Pen-test / security review | 🔲 TODO | Schedule annual review; capture findings here. |
+| Compliance alignment | 🔲 TODO | Map modules to SOC2/GDPR controls; document retention policies. |
+
+## 8. Monitoring dashboards
+
+- **SafeSwitch dashboard:** track `gate.p_used`, `gate.lcb`, and `gate.acc_lcb` per scenario. Alert if `p_used` stays at 0 for >N rounds or if `acc_lcb` < floor.
+- **Latency dashboard:** ingest timing JSONL (`candidate_sampling`, `tower_infer`, `decide`, `student_interact`, `train_step`, `warmup_sync`) into Prometheus/Grafana. Set SLOs per phase.
+- **DP budget dashboard:** display `eps_cum` and per-round `dp` metrics from the JSONL logs; alert if budget exceeds thresholds.
