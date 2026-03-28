@@ -10,6 +10,7 @@ import logging
 import math
 import os
 import random
+import warnings
 from collections import defaultdict
 from dataclasses import dataclass
 from pathlib import Path
@@ -17,6 +18,13 @@ from typing import Any, Dict, List, Optional, Tuple
 
 import numpy as np
 import torch
+
+warnings.warn(
+    "orchid_ranker.contrib.legacy_orchestrator is deprecated and will be removed in v0.4.0. "
+    "Use orchid_ranker.agents.agentic.MultiUserOrchestrator instead.",
+    DeprecationWarning,
+    stacklevel=2,
+)
 
 from orchid_ranker.agents.recommender_agent import (
     JSONLLogger,

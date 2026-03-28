@@ -26,20 +26,21 @@ def validate_interactions_frame(
         raise ValidationError("Interactions dataframe is empty.")
 
     cols = set(interactions.columns)
-    missing = (required_columns or REQUIRED_INTERACTION_COLUMNS) - cols
+    check_cols = required_columns or REQUIRED_INTERACTION_COLUMNS
+    missing = set(check_cols) - cols
     if missing:
         raise ValidationError(f"Missing required columns: {sorted(missing)}")
 
-    for column in REQUIRED_INTERACTION_COLUMNS:
+    for column in check_cols:
         if interactions[column].isnull().any():
             raise ValidationError(f"Column '{column}' contains null values; please clean inputs.")
 
-    user_type = interactions["user_id"].dtype
-    item_type = interactions["item_id"].dtype
-    if not np.issubdtype(user_type, np.integer):
-        raise ValidationError("'user_id' column must be integer typed.")
-    if not np.issubdtype(item_type, np.integer):
-        raise ValidationError("'item_id' column must be integer typed.")
+    # Validate types for user and item columns if they exist
+    cols_to_check = set(check_cols) & REQUIRED_INTERACTION_COLUMNS
+    for column in cols_to_check:
+        col_type = interactions[column].dtype
+        if not np.issubdtype(col_type, np.integer):
+            raise ValidationError(f"'{column}' column must be integer typed.")
 
 
 def validate_item_features(item_features: np.ndarray, expected_items: int) -> None:

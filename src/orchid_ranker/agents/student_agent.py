@@ -44,21 +44,94 @@ def _safe(v):
 
 @dataclass
 class ItemMeta:
+    """Metadata about an educational item.
+
+    Attributes
+    ----------
+    difficulty : float
+        Difficulty level in [0, 1] (default: 0.5).
+    skills : list of int, optional
+        Skill indices (or boolean mask) associated with this item.
+    """
+
     difficulty: float = 0.5
     skills: Optional[List[int]] = None  # indices or boolean mask
 
 
 class StudentAgent:
-    """
-    Simulator of a learner. Maintains latent variables (knowledge, fatigue,
-    engagement, trust) and emits only platform-like telemetry.
+    """Simulator of a learner with adaptive behavior in educational systems.
 
-    Public methods:
-      - profile()
-      - set_initial_latents(**kwargs)   <-- added (engagement, trust, knowledge, fatigue)
-      - set_item_difficulty(...)
-      - interact(recommended_ids, items_meta)
-      - reward(feedback)
+    Maintains latent variables (knowledge, fatigue, engagement, trust) and emits
+    platform-like telemetry (accepted items, feedback, dwell time, etc.).
+    Implements realistic learning dynamics with position bias, zone of proximal
+    development (ZPD), and three-parameter logistic (3PL) response theory.
+
+    Parameters
+    ----------
+    user_id : int
+        Unique identifier for the student.
+    knowledge_dim : int, optional
+        Number of knowledge dimensions (default: 10). Used when knowledge_mode="vector".
+    knowledge_mode : str, optional
+        "scalar" for single ability, "vector" for multi-dimensional (default: "scalar").
+    lr : float, optional
+        Learning rate for knowledge updates (default: 0.2).
+    decay : float, optional
+        Knowledge decay/forgetting rate per round (default: 0.1).
+    trust_influence : bool, optional
+        Whether trust affects fatigue and engagement dynamics (default: True).
+    fatigue_growth : float, optional
+        Base fatigue growth rate per interaction (default: 0.05).
+    fatigue_recovery : float, optional
+        Fatigue recovery rate per idle round (default: 0.02).
+    base_topk : int, optional
+        Base number of items the student wants to review (default: 2).
+    min_topk : int, optional
+        Minimum items to engage with (default: 1).
+    act_mode : str, optional
+        Ability model: "IRT", "MIRT", "ZPD", or "ContextualZPD" (default: "ZPD").
+    seed : int, optional
+        Random seed (default: 42).
+    zpd_delta : float, optional
+        Target difficulty offset from current ability (default: 0.10).
+    zpd_width : float, optional
+        Width of zone of proximal development (default: 0.25).
+    pos_eta : float, optional
+        Position bias exponent, lower = stronger bias (default: 0.85).
+    budget_mu : float, optional
+        Lognormal mean for attention budget (default: 1.3).
+    budget_sigma : float, optional
+        Lognormal std for attention budget (default: 0.5).
+    budget_scale_eng : float, optional
+        Engagement multiplier on attention budget (default: 2.0).
+    budget_fatigue_penalty : float, optional
+        Fatigue penalty on attention budget (default: 2.0).
+    a_mean : float, optional
+        Mean discrimination parameter for 3PL (default: 1.2).
+    a_std : float, optional
+        Std of discrimination parameter (default: 0.2).
+    c_alpha : float, optional
+        Beta prior alpha for guessing probability (default: 2.0).
+    c_beta : float, optional
+        Beta prior beta for guessing probability (default: 20.0).
+    s_alpha : float, optional
+        Beta prior alpha for slip probability (default: 2.0).
+    s_beta : float, optional
+        Beta prior beta for slip probability (default: 20.0).
+    w_rel_mu : float, optional
+        Mean relevance weight in utility (default: 1.0).
+    w_zpd_mu : float, optional
+        Mean ZPD fit weight in utility (default: 0.6).
+    w_nov_mu : float, optional
+        Mean novelty weight in utility (default: 0.4).
+    w_pos_mu : float, optional
+        Mean position bias weight in utility (default: 0.6).
+    w_std : float, optional
+        Std of utility weights across students (default: 0.20).
+    forgetting_rate : float, optional
+        Per-round knowledge forgetting rate (default: 0.01).
+    verbose : bool, optional
+        Enable debug logging (default: False).
     """
 
     def __init__(
@@ -211,6 +284,14 @@ class StudentAgent:
             )
 
     def profile(self) -> Dict[str, Any]:
+        """Get a snapshot of the student's current latent state.
+
+        Returns
+        -------
+        dict
+            Profile with keys: user_id, act_mode, knowledge_mode, knowledge,
+            fatigue, trust, engagement.
+        """
         return {
             "user_id": self.user_id,
             "act_mode": self.act_mode,
@@ -431,6 +512,32 @@ class StudentAgent:
         items_meta: Optional[Dict[int, ItemMeta]] = None,
         rng_explain_prob: float = 0.15,
     ) -> Dict[str, Any]:
+        """Simulate student interaction with a recommended slate of items.
+
+        The student's attention budget, utility preferences, and position bias
+        determine which items to engage with. Outcomes are simulated via 3PL
+        and learning updates are applied.
+
+        Parameters
+        ----------
+        recommended_ids : list of int
+            Recommended item IDs (in order of preference/ranking).
+        items_meta : dict, optional
+            Mapping from item ID to ItemMeta. If None, uses default difficulty.
+        rng_explain_prob : float, optional
+            Probability of viewing explanation when fatigued (default: 0.15).
+
+        Returns
+        -------
+        dict
+            Interaction telemetry with keys:
+            - accepted_ids: items the student decided to work on
+            - skipped_ids: items not engaged
+            - feedback: {item_id: 1 or 0} for correctness on accepted items
+            - dwell_s: time spent in seconds
+            - latency_s: response time in seconds
+            - explanation_viewed: whether explanation was viewed
+        """
         # ----- decide how many items the student will actually engage with -----
         k_sys = self._topk_given_state(self.base_topk)  # system’s intended k
         budget = self._sample_budget()  # user's attention budget
@@ -546,6 +653,20 @@ class StudentAgent:
     # ------------------- reward summary -------------------
 
     def reward(self, feedback: Dict[int, int]) -> float:
+        """Compute a reward signal based on interaction feedback.
+
+        Combines accuracy, fatigue, and engagement into a single reward score.
+
+        Parameters
+        ----------
+        feedback : dict
+            Mapping from item_id to {0, 1} indicating correctness.
+
+        Returns
+        -------
+        float
+            Reward in [0, 1.2], where 0.6*accuracy + 0.25*(1-fatigue) + 0.15*engagement.
+        """
         if not feedback:
             acc = 0.0
         else:
@@ -640,6 +761,12 @@ class StudentAgent:
 
 
 class StudentAgentFactory:
+    """Factory for creating pre-configured StudentAgent instances.
+
+    Provides convenient factory methods to instantiate students with different
+    ability models (IRT, MIRT, ZPD, etc.).
+    """
+
     _registry = {
         "irt": lambda **kw: StudentAgent(act_mode="IRT", **kw),
         "mirt": lambda **kw: StudentAgent(act_mode="MIRT", knowledge_mode="vector", **kw),
@@ -649,6 +776,26 @@ class StudentAgentFactory:
 
     @classmethod
     def create(cls, name: str, **kwargs) -> StudentAgent:
+        """Create a StudentAgent of a specific type.
+
+        Parameters
+        ----------
+        name : str
+            Agent type: "irt", "mirt", "zpd", or "contextual_zpd".
+        **kwargs
+            Additional keyword arguments passed to StudentAgent.__init__.
+            Supports initial latent aliases: E, T, K, F, theta.
+
+        Returns
+        -------
+        StudentAgent
+            Configured student agent.
+
+        Raises
+        ------
+        ValueError
+            If name is not a registered type.
+        """
         key = name.lower()
         if key not in cls._registry:
             raise ValueError(
@@ -677,6 +824,13 @@ class StudentAgentFactory:
 
     @classmethod
     def available(cls) -> List[str]:
+        """Return list of available agent types.
+
+        Returns
+        -------
+        list of str
+            Registered factory keys.
+        """
         return list(cls._registry.keys())
 
 

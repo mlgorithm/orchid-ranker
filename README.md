@@ -1,211 +1,501 @@
 # Orchid Ranker
 
-Orchid Ranker is an adaptive educational recommender toolkit that pairs
-a modular slate orchestration engine, learner simulators, and a plug-and-play recommender class you can
-drop straight into your product (much like `surprise`’s algorithms).
-The toolkit grew out of large-scale tutoring experiments and now bundles:
+**Adaptive educational recommender toolkit** for personalized learning at scale.
 
-- agent modules (`orchid_ranker.agents`) implementing student
-  simulators, recommender policies, and the multi-user orchestration
-  loop;
-- ready-to-use baseline recommenders plus an `OrchidRecommender`
-  high-level API that feels similar to `surprise` (now including an
-  explicit MF/FunkSVD-style baseline); and
-- utilities for running offline experiments similar to those used in the
-  associated LAK'26 studies.
+Orchid Ranker combines a modular orchestration engine, realistic learner simulators, and a plug-and-play recommender API (similar to Surprise) into a single library purpose-built for educational technology. It grew out of large-scale tutoring experiments and now powers adaptive item selection, knowledge tracing, curriculum sequencing, and offline evaluation for learning platforms.
+
+[![Python 3.9–3.13](https://img.shields.io/badge/python-3.9%E2%80%933.13-blue.svg)](https://www.python.org/)
+[![PyTorch 1.13–2.9](https://img.shields.io/badge/pytorch-1.13%E2%80%932.9-ee4c2c.svg)](https://pytorch.org/)
+[![License: MIT](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
+[![Version](https://img.shields.io/badge/version-0.2.1-brightgreen.svg)](CHANGELOG.md)
+
+---
+
+## Why Orchid Ranker?
+
+Most recommender libraries target e-commerce or media. Orchid Ranker is designed from the ground up for **education**, where the goal isn't just relevance — it's learning. The library provides Bayesian knowledge tracing, prerequisite-aware curriculum sequencing, Zone of Proximal Development (ZPD) targeting, forgetting curve modeling, and educational evaluation metrics alongside traditional recommendation algorithms.
+
+**Key differentiators:**
+
+- **9 recommendation strategies** from popularity baselines to contextual bandits and neural models, all behind a unified `OrchidRecommender` API
+- **Knowledge tracing** with Bayesian Knowledge Tracing (BKT), mastery tracking, and Ebbinghaus forgetting curves
+- **Curriculum intelligence** via prerequisite graphs (DAG) with cycle detection, topological ordering, and ZPD-aware recommendations
+- **Learner simulation** with realistic student agents modeling knowledge, fatigue, trust, and engagement dynamics
+- **Educational metrics** including learning gain, knowledge coverage, curriculum adherence, and difficulty appropriateness
+- **Privacy by design** with differential privacy (DP-SGD), RBAC, and audit logging
+- **Model lifecycle** with serialization, cross-validation, grid/random search, and train/test splitting
+- **Enterprise ready** with Prometheus observability, Snowflake/BigQuery/S3 connectors, MLflow tracking, Docker/Helm/Terraform deployment
+
+---
 
 ## Installation
-
-```bash
-pip install .
-```
-
-or, once published, simply:
 
 ```bash
 pip install orchid-ranker
 ```
 
-You can opt into extra functionality when installing from PyPI:
+Or install from source:
 
 ```bash
-pip install orchid-ranker[agentic,viz,benchmarks]
+git clone https://github.com/farhad-vadiee/orchid-ranker.git
+cd orchid-ranker
+pip install -e .
 ```
 
-- `agentic` brings in optional experiment helpers.
-- `viz` adds plotting dependencies.
-- `benchmarks` installs optional competitor libraries (`implicit`, `reclab`).
+Optional extras for specific use cases:
 
-## Enterprise readiness
+```bash
+pip install orchid-ranker[agentic]       # Experiment helpers + Opacus DP
+pip install orchid-ranker[viz]           # Matplotlib plotting
+pip install orchid-ranker[connectors]    # Snowflake, BigQuery, S3, MLflow
+pip install orchid-ranker[observability] # Prometheus metrics
+pip install orchid-ranker[benchmarks]    # Competitor baselines (implicit, reclab)
+pip install orchid-ranker[dev]           # pytest, mypy, ruff, build tools
+```
 
-- See `docs/enterprise_runbook.md` for release checklists, CI smoke tests, monitoring guidance, and rollout strategy.
-- To sanity-check the SafeSwitch non-regression gate on every release, run `./scripts/ci_safe_smoke.sh` (which wraps the ML-100K safe smoke scenario).
-- For a hands-on tutorial showing how to run the adaptive vs fixed benchmark, safe smoke run, and inspect telemetry, see `docs/tutorial_safe_mode.md`.
-- Prefer notebooks? Open `docs/tutorials/safe_mode.ipynb` to run the same workflow interactively (baseline run, safe smoke script, telemetry visualization).
-- `benchmarks` installs optional competitor libraries (`implicit`, `reclab`).
- - `agentic` now bundles Opacus for production-grade DP accounting.
-- Additional guides:
-  - Dataset ingestion schema: `docs/tutorial_data_ingestion.md`
-  - Pareto/PC-EB controller: `docs/tutorial_pc_eb.md`
-  - Differential privacy deep dive: `docs/tutorial_dp.md`
-  - Observability & monitoring: `docs/tutorial_observability.md`
-  - Performance tuning: `docs/performance_playbook.md`
-  - Connectors & deployment: `docs/connectors_deployment.md`
-  - Secure deployment walkthrough: `docs/security_walkthrough.md`
+---
 
-### Support policy
+## Quick Start
 
-See `docs/api_support_policy.md` for the officially supported runtime matrix and versioning commitments.
-
-| Component | Supported versions | Notes |
-|-----------|-------------------|-------|
-| Python    | 3.9 – 3.13         | Verified in CI across CPython builds |
-| PyTorch   | 1.13 – 2.9         | Primary focus on 2.x for GPU optimisations |
-| OS        | Ubuntu 22.04, macOS 14+, Windows Server 2022 | Windows coverage targets CPU paths |
-
-### Quickstart & Deployment
-
-- Follow `docs/quickstart.md` or run `python examples/quickstart.py` to generate sample data and train your first model.
-- Work through the full walkthrough in `docs/tutorials/library_walkthrough.md` for DP, observability, and simulation extras.
-
-### Deployment quickstart
-
-- Build the container image with `docker build -t orchid-ranker .` (see `Dockerfile`).
-- Kubernetes users can install via `helm install orchid ./deploy/helm/orchid-ranker` and configure audit forwarding/metrics through the supplied values.
-- Terraform users should reference the module guidance in `deploy/terraform/README.md` or wrap the Helm chart in their own release module.
-
-## Quick start
-
-### As a plug-and-play recommender
+### 1. Fit and recommend in 5 lines
 
 ```python
 import pandas as pd
-from orchid_ranker import OrchidRecommender, Recommendation, configure_logging
+from orchid_ranker import OrchidRecommender
 
-# Optional: wire library logs into your observability stack
-configure_logging(level="INFO")
-
-# 1. Interaction log (implicit labels or ratings)
 interactions = pd.DataFrame({
     "user_id": [1, 1, 2, 2, 3, 3, 3],
     "item_id": [10, 12, 10, 11, 12, 13, 14],
-    "label":   [1,  1,  1,  0,  1,  0,  1],
+    "rating":  [1,  1,  1,  0,  1,  0,  1],
 })
 
-# Optional: item-side features (align with sorted item ids)
-item_side = pd.DataFrame({
-    "item_id": [10, 11, 12, 13, 14],
-    "difficulty": [0.35, 0.80, 0.55, 0.25, 0.60],
-    "popularity": [120, 45, 85, 30, 65],
-})
-item_features = (
-    item_side[["difficulty", "popularity"]]
-    .to_numpy(dtype="float32")
-)
-
-# 2. Instantiate a Surprise-style recommender (choose any strategy)
-strategies = [
-    ("linucb", {"alpha": 1.5, "item_features": item_features}),
-    ("als", {"epochs": 5}),
-    ("explicit_mf", {"epochs": 20, "emb_dim": 64}),
-    ("user_knn", {"k": 25}),
-    ("popularity", {}),
-    ("random", {}),
-]
-
-for strategy, kwargs in strategies:
-    rec = OrchidRecommender(
-        strategy=strategy,
-        validate_inputs=True,
-        **{k: v for k, v in kwargs.items() if k not in {"item_features"}},
-    )
-    rec.fit(
-        interactions,
-        rating_col="label",
-        item_features=kwargs.get("item_features"),
-    )
-    print(f"{strategy.title()} recommendations:", rec.recommend(user_id=1, top_k=5))
-
-# Predict a specific score if needed
-als_rec = OrchidRecommender(strategy="als", epochs=5).fit(interactions, rating_col="label")
-print("ALS predicted relevance:", als_rec.predict(user_id=1, item_id=10))
+rec = OrchidRecommender(strategy="als", epochs=5)
+rec.fit(interactions, rating_col="rating")
+print(rec.recommend(user_id=1, top_k=5))
 ```
 
-### Running adaptive vs. baseline experiments
+### 2. Compare strategies side by side
+
+```python
+from orchid_ranker import compare_models
+
+results = compare_models(
+    interactions,
+    strategies=["popularity", "als", "user_knn", "linucb"],
+    k=3,
+)
+print(results)  # DataFrame with metrics per strategy
+```
+
+### 3. Track student mastery
+
+```python
+from orchid_ranker import BayesianKnowledgeTracing
+
+bkt = BayesianKnowledgeTracing(p_init=0.1, p_transit=0.1, p_slip=0.1, p_guess=0.2)
+for correct in [True, True, False, True, True, True]:
+    bkt.update(correct=correct)
+
+print(f"P(mastery): {bkt.p_known():.3f}")
+print(f"Mastered: {bkt.is_mastered()}")
+```
+
+### 4. Build a prerequisite-aware curriculum
+
+```python
+from orchid_ranker import PrerequisiteGraph, CurriculumRecommender
+
+graph = PrerequisiteGraph()
+graph.add_edge("algebra", "calculus")
+graph.add_edge("algebra", "statistics")
+graph.add_edge("calculus", "differential_equations")
+
+cr = CurriculumRecommender(graph=graph, difficulty_map={
+    "algebra": 0.3, "calculus": 0.6, "statistics": 0.5, "differential_equations": 0.8
+})
+
+# Student has mastered algebra — what should they learn next?
+next_items = cr.recommend(student_mastery={"algebra"}, n=3)
+print(next_items)  # ['calculus', 'statistics'] — respects prerequisites
+```
+
+### 5. Save and load models
+
+```python
+from orchid_ranker import save_model, load_model
+
+save_model(rec, "my_model.orchid")
+loaded = load_model("my_model.orchid")
+print(loaded.recommend(user_id=1, top_k=3))
+```
+
+### 6. Hyperparameter tuning
+
+```python
+from orchid_ranker import GridSearchCV
+
+gs = GridSearchCV(
+    strategy="als",
+    param_grid={"epochs": [5, 10, 20], "emb_dim": [32, 64]},
+    cv=3,
+    scoring="ndcg@10",
+)
+gs.fit(interactions, rating_col="rating")
+print(f"Best params: {gs.best_params_}")
+print(f"Best score: {gs.best_score_:.4f}")
+```
+
+---
+
+## Recommendation Strategies
+
+All strategies are accessible through `OrchidRecommender(strategy=...)`:
+
+| Strategy | Description | Best For |
+|----------|-------------|----------|
+| `als` | Alternating Least Squares matrix factorization | Sparse implicit feedback |
+| `explicit_mf` | FunkSVD-style SGD factorization | Explicit 1-5 star ratings |
+| `neural_mf` | Deep neural matrix factorization (BCE/BPR/softmax) | Non-linear interaction patterns |
+| `linucb` | Linear Upper Confidence Bound contextual bandit | Exploration/exploitation with features |
+| `user_knn` | User-based collaborative filtering | Smaller catalogs, interpretable |
+| `popularity` | Items ranked by mean acceptance rate | Cold-start fallback |
+| `random` | Uniform random sampling | Sanity-check baseline |
+| `implicit_als` | Weighted ALS via the `implicit` library | Large-scale implicit feedback |
+| `implicit_bpr` | Bayesian Personalized Ranking via `implicit` | Pairwise ranking optimization |
+
+List all strategies programmatically:
+
+```python
+from orchid_ranker import STRATEGY_GUIDE
+for name, desc in STRATEGY_GUIDE.items():
+    print(f"  {name}: {desc}")
+```
+
+---
+
+## Knowledge Tracing & Mastery
+
+### Bayesian Knowledge Tracing (BKT)
+
+Estimates the probability a learner has mastered a skill based on their response history:
+
+```python
+from orchid_ranker import BayesianKnowledgeTracing
+
+bkt = BayesianKnowledgeTracing(
+    p_init=0.1,       # Prior probability of knowing the skill
+    p_transit=0.1,     # Probability of learning after each attempt
+    p_slip=0.1,        # Probability of a careless error when knowing
+    p_guess=0.2,       # Probability of guessing correctly when not knowing
+    mastery_threshold=0.95,
+)
+
+bkt.update(correct=True)
+print(bkt.p_known())      # Current mastery probability
+print(bkt.is_mastered())   # True if p_known > threshold
+bkt.reset()                # Reset to prior
+```
+
+### Multi-Skill Mastery Tracking
+
+```python
+from orchid_ranker import MasteryTracker
+
+tracker = MasteryTracker(
+    skills=["algebra", "geometry", "calculus"],
+    default_params={"p_init": 0.1, "p_transit": 0.15},
+)
+
+tracker.update("algebra", correct=True)
+tracker.update("algebra", correct=True)
+print(tracker.mastered_skills())   # Skills above mastery threshold
+print(tracker.recommend_next())    # Next skill to study
+```
+
+### Forgetting Curve
+
+Models memory decay using the Ebbinghaus exponential forgetting model:
+
+```python
+from orchid_ranker import ForgettingCurve
+
+fc = ForgettingCurve(initial_strength=1.0, strength_gain_on_review=0.5)
+fc.review()  # Record a review event
+
+retention = fc.retention_at(time_since_last_review=3600)  # After 1 hour
+needs_review = fc.should_review(threshold=0.5)
+```
+
+---
+
+## Curriculum Sequencing
+
+### Prerequisite Graph
+
+Model skill dependencies as a directed acyclic graph:
+
+```python
+from orchid_ranker import PrerequisiteGraph
+
+graph = PrerequisiteGraph()
+graph.add_edge("fractions", "algebra")
+graph.add_edge("algebra", "calculus")
+graph.add_edge("algebra", "linear_algebra")
+
+# Query the graph
+print(graph.topological_order())                    # Valid learning sequence
+print(graph.prerequisites_for("calculus"))           # {'algebra'}
+print(graph.all_prerequisites_for("calculus"))       # {'fractions', 'algebra'}
+print(graph.available_skills(mastered={"fractions"}))# ['algebra']
+print(graph.is_ready("calculus", mastered={"fractions", "algebra"}))  # True
+
+# Find the learning path to a target skill
+path = graph.learning_path("calculus", mastered={"fractions"})
+print(path)  # ['algebra', 'calculus']
+
+# Cycle detection is automatic
+graph.add_edge("calculus", "fractions")  # Raises ValueError
+```
+
+### Curriculum Recommender
+
+Recommends the next items to study, respecting prerequisites and targeting the learner's Zone of Proximal Development:
+
+```python
+from orchid_ranker import CurriculumRecommender
+
+cr = CurriculumRecommender(
+    graph=graph,
+    difficulty_map={"fractions": 0.2, "algebra": 0.5, "calculus": 0.8, "linear_algebra": 0.7},
+)
+
+recommendations = cr.recommend(student_mastery={"fractions"}, n=3)
+```
+
+---
+
+## Model Selection & Evaluation
+
+### Train/Test Split
+
+```python
+from orchid_ranker import train_test_split
+
+train, test = train_test_split(interactions, test_size=0.2, by_user=True, random_state=42)
+```
+
+### Cross-Validation
+
+```python
+from orchid_ranker import cross_validate
+
+results = cross_validate(interactions, strategy="als", k=5, strategy_kwargs={"epochs": 10})
+print(results)  # Dict with mean/std for each metric across folds
+```
+
+### Hyperparameter Tuning
+
+```python
+from orchid_ranker import GridSearchCV, RandomSearchCV
+
+# Exhaustive search
+gs = GridSearchCV(strategy="als", param_grid={"epochs": [5, 10], "emb_dim": [32, 64]}, cv=3)
+gs.fit(interactions, rating_col="rating")
+
+# Random search (faster for large grids)
+rs = RandomSearchCV(
+    strategy="als",
+    param_distributions={"epochs": [5, 10, 20], "emb_dim": [16, 32, 64, 128]},
+    n_iter=6, cv=3, random_state=42,
+)
+rs.fit(interactions, rating_col="rating")
+```
+
+### Educational Metrics
+
+```python
+from orchid_ranker import learning_gain, knowledge_coverage, difficulty_appropriateness
+
+gain = learning_gain(pre_score=0.4, post_score=0.8)       # Normalized learning gain
+coverage = knowledge_coverage(mastered={"a", "b"}, total_skills={"a", "b", "c", "d"})
+appropriateness = difficulty_appropriateness(
+    recommended_difficulties=[0.5, 0.55, 0.6],
+    student_ability=0.5,
+    zpd_width=0.25,
+)
+```
+
+---
+
+## Learner Simulation
+
+The `StudentAgent` simulates realistic learner behavior with configurable knowledge, fatigue, engagement, and trust dynamics:
+
+```python
+from orchid_ranker import StudentAgent, StudentAgentFactory
+
+student = StudentAgentFactory.create(
+    user_id=1,
+    knowledge_mode="scalar",  # or "IRT", "MIRT", "ZPD", "ContextualZPD"
+    seed=42,
+)
+
+response = student.accept(
+    item_id=10,
+    difficulty=0.5,
+    correct=True,
+    dwell_time=30.0,
+    feedback="positive",
+)
+print(f"Knowledge: {student.get_knowledge():.2f}")
+print(f"Fatigue: {student.get_fatigue():.2f}")
+print(f"Engagement: {student.get_engagement():.2f}")
+```
+
+---
+
+## Adaptive Experiments
+
+Run full adaptive vs. baseline experiments with the orchestration engine:
 
 ```python
 from orchid_ranker.experiments import RankingExperiment
 
-# Assuming you have prepared CSVs + YAML config (see "Dataset format")
 runner = RankingExperiment("configs/my_dataset.yaml", dataset="my_dataset", cohort_size=16)
-summary = runner.run_many(["adaptive", "fixed", "linucb", "als"], dp_enabled=False)
+summary = runner.run_many(
+    strategies=["adaptive", "fixed", "linucb", "als", "popularity"],
+    dp_enabled=False,
+)
 print(summary)
 ```
 
-See the `experiments/` directory for complete scripts and the `runs/` folder for generated reports/logs.
+### Differential Privacy
 
-### Apples-to-apples benchmarks
+Enable per-sample DP-SGD with gradient clipping and Gaussian noise:
 
-- Explicit ratings (Orchid vs Surprise SVD):
+```python
+from orchid_ranker import get_dp_config
 
-```bash
-PYTHONPATH=src python benchmarks/compare_surprise.py \
-  --train tmp/ml100k_explicit/train.csv \
-  --test tmp/ml100k_explicit/test.csv \
-  --rating-col rating \
-  --orchid-strategy explicit_mf \
-  --orchid-epochs 20 \
-  --orchid-emb 64
+# Built-in privacy presets
+dp_cfg = get_dp_config("eps_1")  # epsilon=1.0 preset
+# Presets: "off", "eps_2", "eps_1", "eps_05", "eps_02"
+
+# Or configure manually
+dp_cfg = {
+    "enabled": True,
+    "engine": "per_sample",
+    "noise_multiplier": 1.0,
+    "sample_rate": 0.02,
+    "max_grad": 1.0,
+    "delta": 1e-5,
+}
 ```
 
-- Implicit top‑K (binary, filter_seen, multi-seed):
+---
 
-```bash
-PYTHONPATH=src python benchmarks/eval_implicit.py --seeds 11 13 17 --top-users 400 --top-items 800 --k 10
+## Enterprise Features
+
+### Observability
+
+```python
+from orchid_ranker import start_metrics_server, record_training, export_metrics
+
+start_metrics_server(port=8000)  # Prometheus /metrics endpoint
+record_training(strategy="als", dataset="ednet", metric_name="ndcg@10", value=0.42)
 ```
 
-### Agentic (adaptive) benchmarks
+### Connectors
 
-- Fixed vs Adaptive (synthetic) with warmup/replay:
+```python
+from orchid_ranker import SnowflakeConnector, BigQueryConnector, S3StreamConnector, MLflowTracker
 
-```bash
-PYTHONPATH=src python benchmarks/run_agentic_adaptive.py --rounds 80 --users 16 --items 64 --top-k 6
+# Pull training data from Snowflake
+sf = SnowflakeConnector(account="...", user="...", password="...", warehouse="...", database="...")
+
+# Track experiments in MLflow
+tracker = MLflowTracker(tracking_uri="http://localhost:5000", experiment_name="orchid-v2")
 ```
 
-- Optional Funk-guided candidates/distillation for adaptive:
+### Security
 
-```bash
-PYTHONPATH=src python benchmarks/run_agentic_adaptive.py --rounds 80 --users 16 --items 64 --top-k 6 \
-  --funk-candidates --funk-pool 48
+```python
+from orchid_ranker import AccessControl, AuditLogger, DEFAULT_POLICY
+
+ac = AccessControl(policy=DEFAULT_POLICY)
+ac.check_permission(role="writer", action="train_model")  # True
+
+logger = AuditLogger(log_path="audit.jsonl")
+logger.log(event="model_trained", user="admin", details={"strategy": "als"})
 ```
 
-- MovieLens 100K fixed vs adaptive (MF-derived features):
+### Deployment
+
+- **Docker**: `docker build -t orchid-ranker .`
+- **Kubernetes**: `helm install orchid ./deploy/helm/orchid-ranker`
+- **Terraform**: See `deploy/terraform/README.md`
+
+---
+
+## Visualization
+
+```python
+from orchid_ranker.visualization import (
+    plot_user_activity,
+    plot_item_difficulty,
+    plot_learning_curve,
+    plot_knowledge_trajectory,
+    plot_acceptance_heatmap,
+)
+
+plot_user_activity(interactions_df, top_n=25)
+plot_item_difficulty(items_df)
+plot_learning_curve(round_summary_df, metric="mean_accuracy")
+```
+
+---
+
+## CLI
+
+Evaluate strategies from the command line:
 
 ```bash
-PYTHONPATH=src python benchmarks/run_agentic_ml100k.py \
-  --rounds 80 --top-users 400 --top-items 800 --top-k 6 --dim 32 --funk-candidates
+orchid-evaluate \
+    --train data/train.csv \
+    --test data/test.csv \
+    --strategy "als,epochs=5" \
+    --strategy "user_knn,k=25" \
+    --strategy "popularity"
 ```
-Add `--quick` to run a much lighter configuration (smaller user/item subsets and rounds).
 
-- sklearn digits variant (CPU-safe):
+---
+
+## Benchmarks
+
+Compare against established libraries:
 
 ```bash
-PYTHONPATH=src python benchmarks/run_agentic_sklearn_digits.py --rounds 40 --users 64 --top-k 5 --dim 8
+# vs. Surprise SVD
+python benchmarks/compare_surprise.py --train train.csv --test test.csv --rating-col rating
+
+# vs. implicit ALS/BPR (multi-seed)
+python benchmarks/eval_implicit.py --seeds 11 13 17 --top-users 400 --top-items 800 --k 10
+
+# Adaptive vs. fixed (synthetic learners)
+python benchmarks/run_agentic_adaptive.py --rounds 80 --users 16 --items 64 --top-k 6
+
+# MovieLens 100K
+python benchmarks/run_agentic_ml100k.py --rounds 80 --top-users 400 --top-items 800 --top-k 6
 ```
 
-## Dataset format at a glance
+---
 
-You can plug in **any** dataset as long as you provide five CSV files and
-a short YAML schema:
+## Dataset Format
 
-- `train.csv`, `val.csv`, `test.csv` each with at least `u`, `i`, `label`
-  (optionally `timestamp`, `correct`, `accept`, etc.).
-- `side_information_users.csv` describing per-learner features.
-- `side_information_items.csv` describing per-item features.
-- `configs/<your-dataset>.yaml` declaring which columns are categorical
-  vs numeric and where the CSVs live.
+Provide five CSV files and a YAML configuration:
 
-Minimal YAML example:
+- `train.csv`, `val.csv`, `test.csv` — each with `u`, `i`, `label` columns (plus optional `timestamp`, `correct`, `accept`)
+- `side_information_users.csv` — per-learner features
+- `side_information_items.csv` — per-item features
 
 ```yaml
 run:
@@ -230,132 +520,98 @@ datasets:
       numeric: [difficulty, recent_clicks_4w]
 ```
 
-As long as these files exist, `orchid_ranker.data.DatasetLoader` handles
-all encoding automatically.
+---
 
-## Visualising your data
+## Support Matrix
 
-The `orchid_ranker.visualization` module provides lightweight helpers:
+| Component | Supported Versions |
+|-----------|-------------------|
+| Python | 3.9 - 3.13 |
+| PyTorch | 1.13 - 2.9 |
+| OS | Ubuntu 22.04, macOS 14+, Windows Server 2022 |
 
-```python
-from orchid_ranker.visualization import (
-    plot_user_activity,
-    plot_item_difficulty,
-    plot_learning_curve,
-)
+See `docs/api_support_policy.md` for full versioning commitments.
 
-plot_user_activity(interactions_df, top_n=25)
-plot_item_difficulty(items_df)
-plot_learning_curve(round_summary_df, metric="mean_accuracy")
+---
+
+## Project Layout
+
+```
+orchid-ranker/
+  src/orchid_ranker/
+    __init__.py           # Public API (74 symbols)
+    recommender.py        # OrchidRecommender high-level API
+    baselines.py          # 9 strategy implementations
+    knowledge_tracing.py  # BKT, MasteryTracker, ForgettingCurve
+    curriculum.py         # PrerequisiteGraph, CurriculumRecommender
+    evaluation.py         # Ranking + educational metrics
+    model_selection.py    # Cross-validation, train/test split
+    tuning.py             # GridSearchCV, RandomSearchCV
+    serialization.py      # Model save/load
+    dp.py                 # Differential privacy presets
+    observability.py      # Prometheus metrics
+    agents/               # StudentAgent, TwoTowerRecommender, orchestrator
+    connectors/           # Snowflake, BigQuery, S3, MLflow
+    safety/               # SafeSwitch DR controller
+    security/             # RBAC, audit logging
+    visualization/        # Matplotlib plotting helpers
+    data/                 # DatasetLoader
+    experiments/          # RankingExperiment runner
+  tests/                  # 440+ tests including stress tests
+  benchmarks/             # Competitor comparisons
+  configs/                # Dataset YAML configurations
+  deploy/                 # Docker, Helm, Terraform
+  docs/                   # Tutorials, security, compliance
+  examples/               # Quickstart scripts and notebooks
 ```
 
-Each function returns a Matplotlib axes so you can further customise the
-plot before saving it.
+---
 
+## Documentation
 
-You can also toggle differential privacy quickly via presets:
+| Guide | Description |
+|-------|-------------|
+| `docs/quickstart.md` | Getting started tutorial |
+| `docs/overview.md` | Architecture overview |
+| `docs/tutorial_data_ingestion.md` | Dataset schema & ingestion |
+| `docs/tutorial_dp.md` | Differential privacy deep dive |
+| `docs/tutorial_safe_mode.md` | SafeSwitch walkthrough |
+| `docs/tutorial_observability.md` | Monitoring & metrics |
+| `docs/performance_playbook.md` | Performance tuning |
+| `docs/security.md` | Security overview |
+| `docs/enterprise_runbook.md` | Production checklists |
+| `docs/benchmarking.md` | Benchmark CLI recipes |
+| `docs/api_reference.md` | Complete API reference |
 
-```python
-from orchid_ranker.dp import get_dp_config
-from orchid_ranker.experiments import RankingExperiment
+---
 
-runner = RankingExperiment("configs/ednet.yaml", dataset="ednet")
-summary = runner.run_many(["adaptive", "fixed"], dp_params=get_dp_config("eps_05"))
+## Contributing
+
+```bash
+git clone https://github.com/farhad-vadiee/orchid-ranker.git
+cd orchid-ranker
+pip install -e ".[dev]"
+python -m pytest tests/
 ```
 
-For lower-level control, instantiate `TwoTowerRecommender` with a `dp_cfg`
-payload. The default engine (`"per_sample"`) applies DP-SGD with per-example
-clipping:
+---
 
-```python
-dp_cfg = {
-    "enabled": True,
-    "engine": "per_sample",
-    "noise_multiplier": 1.0,
-    "sample_rate": 0.02,
-    "max_grad": 1.0,
-    "delta": 1e-5,
+## License
+
+MIT License. See [LICENSE](LICENSE) for details.
+
+---
+
+## Citation
+
+If you use Orchid Ranker in your research, please cite:
+
+```bibtex
+@software{vadiee2025orchid,
+  author = {Vadiee, Farhad},
+  title = {Orchid Ranker: Adaptive Educational Recommender Toolkit},
+  version = {0.2.1},
+  year = {2025},
+  url = {https://github.com/farhad-vadiee/orchid-ranker}
 }
-model = TwoTowerRecommender(..., dp_cfg=dp_cfg)
 ```
-
-
-### Built-in baseline modes
-
-`RankingExperiment` understands the following non-adaptive policies out of the box:
-
-| Mode        | Description                                  |
-|-------------|----------------------------------------------|
-| `fixed`     | Two-tower recommender without online updates |
-| `popularity`| Mean acceptance per item                     |
-| `random`    | Uniform slate sampling                       |
-| `als`       | Matrix-factorization baseline (trained once) |
-| `implicit_als` | Weighted implicit ALS via the `implicit` package |
-| `implicit_bpr` | Bayesian Personalized Ranking optimiser (`implicit`) |
-| `neural_mf` | Shallow neural matrix factorisation with MLP head |
-| `user_knn`  | User-based collaborative filtering           |
-| `linucb`    | Linear contextual UCB over item features     |
-
-Run them via `runner.run_many([...])` and everyone will report the same summary metrics.
-
-
-## Automated checks
-
-- Quick pytest suite: `python -m pytest tests/`
-- Smoke orchestrator run: `python benchmarks/run_agentic_smoke.py`
-- Compare with Surprise (optional dependency):
-
-  ```bash
-  python benchmarks/compare_surprise.py \
-      --train path/to/train.csv \
-      --test path/to/test.csv \
-      --rating-col label
-  ```
-- Compare with `implicit` (optional dependency):
-
-  ```bash
-  python benchmarks/compare_implicit.py \
-      --train path/to/train.csv \
-      --test path/to/test.csv \
-      --rating-col label
-  ```
-- Compare with ReCLaB TopPop (optional dependency):
-
-  ```bash
-  python benchmarks/compare_reclab.py --env topics-static-v1-small
-  ```
-- Evaluate Orchid strategies and simple sweeps via the CLI:
-
-  ```bash
-  orchid-evaluate \
-      --train data/train.csv \
-      --test data/test.csv \
-      --strategy "als,epochs=5" \
-      --strategy "implicit_als,factors=64,iterations=10"
-  ```
-
-## Operational readiness
-
-- Input validation is enabled by default; pass `validate_inputs=False` for
-  best-effort casting when integrating with legacy pipelines.
-- Use `configure_logging(level="INFO")` to emit structured logs compatible
-  with enterprise observability platforms.
-- Enforce role-based access on CLI preprocessors with `--role` and capture DP
-  audit trails via the `AuditLogger` exposed in `orchid_ranker.security`.
-- Review `docs/security.md` and `docs/compliance/` for SBOM guidance, incident
-  response playbook, and retention policies when preparing enterprise rollouts.
-- Expose Prometheus metrics via `orchid_ranker.start_metrics_server()` or export with `orchid_ranker.export_metrics()`. Integrate Snowflake/BigQuery/S3 data sources and MLflow tracking via `orchid_ranker.connectors` classes.
-- For onboarding/support workflows, see `docs/customer_success/` (playbooks, SLAs, pilot plan) and the seeded notebooks under `examples/notebooks/`.
-- See `docs/benchmarking.md` for CLI recipes that compare Orchid against
-  Surprise, implicit, and ReCLaB baselines.
-- Leverage `orchid_ranker.evaluation` (Precision@K, MAP@10, NDCG@10, calibration)
-  for notebook-based analysis or custom pipelines.
-
-
-## Project layout
-
-- `docs/` – concise reference guides for privacy and API overviews.
-- `examples/` – runnable scripts demonstrating common workflows.
-- `tests/` – pytest-based smoke tests covering the public API.
-- `src/orchid_ranker/contrib/` – legacy or experimental components kept for
-  backwards compatibility.

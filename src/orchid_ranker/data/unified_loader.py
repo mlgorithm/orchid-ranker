@@ -8,12 +8,51 @@ from sklearn.preprocessing import OneHotEncoder, LabelEncoder
 
 
 class DatasetLoader:
-    def __init__(self, encoding: str = "onehot"):
-        """
-        Generic dataset loader with encoding support.
+    """Generic dataset loader with flexible categorical/numeric encoding.
 
-        Args:
-            encoding (str): "onehot" or "label"
+    Supports both one-hot and label encoding for categorical features.
+    Can load single tables or YAML-configured multi-table datasets (train/val/test
+    splits with per-entity side information).
+
+    Parameters
+    ----------
+    encoding : str, optional
+        "onehot" for one-hot encoding (default) or "label" for label encoding.
+
+    Attributes
+    ----------
+    encoding : str
+        Configured encoding type.
+    encoder : sklearn.preprocessing.OneHotEncoder, optional
+        Single-table one-hot encoder (used by .load()).
+    label_encoders : dict
+        Single-table label encoders by column (used by .load()).
+    encoders : dict
+        Per-entity (users/items) one-hot encoders.
+    label_encoders_map : dict
+        Per-entity label encoders by column.
+    categorical_cols : list
+        Categorical columns for single-table path.
+    numeric_cols : list
+        Numeric columns for single-table path.
+    categorical_cols_map : dict
+        Categorical columns per entity.
+    numeric_cols_map : dict
+        Numeric columns per entity.
+    """
+
+    def __init__(self, encoding: str = "onehot"):
+        """Initialize the DatasetLoader.
+
+        Parameters
+        ----------
+        encoding : str, optional
+            "onehot" (default) or "label".
+
+        Raises
+        ------
+        AssertionError
+            If encoding is not "onehot" or "label".
         """
         assert encoding in ["onehot", "label"], "Encoding must be 'onehot' or 'label'"
         self.encoding = encoding
@@ -40,9 +79,31 @@ class DatasetLoader:
             dataset: Optional[str] = None,
             encode_side_info: bool = True,
         ) -> Tuple[Dict[str, pd.DataFrame], Dict[str, Any]]:
-            """
-            Load a dataset bundle (train/val/test + user/item side info) as
-            specified in a YAML config.
+            """Load a complete dataset bundle from YAML configuration.
+
+            Loads train/val/test interaction tables and side information for
+            users/items. Optionally encodes side information using fitted encoders.
+
+            Parameters
+            ----------
+            config_path : str
+                Path to YAML configuration file.
+            dataset : str, optional
+                Dataset key to load. If None, uses run.dataset from YAML.
+            encode_side_info : bool, optional
+                Whether to encode side information tables (default: True).
+
+            Returns
+            -------
+            tuple
+                (data_dict, meta_dict) where data_dict contains keys
+                {train, val, test, side_information_users, side_information_items},
+                and meta_dict contains encoders, schemas, and paths.
+
+            Raises
+            ------
+            ValueError
+                If dataset is not specified or not found in YAML.
             """
             cfg = self._read_yaml(config_path)
             ds_name, ds_cfg = self._pick_dataset(cfg, dataset)
@@ -125,9 +186,25 @@ class DatasetLoader:
     # ------------------------ Original single-DF API ------------------------
 
     def load(self, data: Union[str, pd.DataFrame]) -> Tuple[pd.DataFrame, Dict[str, Any]]:
-        """
-        Load dataset and encode categorical features (single table).
-        Kept for backward compatibility.
+        """Load and encode a single dataset table (legacy single-table API).
+
+        Automatically detects categorical vs. numeric columns and applies
+        the configured encoding (one-hot or label).
+
+        Parameters
+        ----------
+        data : str or pd.DataFrame
+            Path to CSV file or a pandas DataFrame.
+
+        Returns
+        -------
+        tuple
+            (encoded_dataframe, metadata_dict)
+
+        Raises
+        ------
+        ValueError
+            If data is neither a CSV path nor a DataFrame.
         """
         if isinstance(data, str):
             df = pd.read_csv(data)
@@ -158,9 +235,22 @@ class DatasetLoader:
     # ------------------------ Public helpers ------------------------
 
     def transform_row(self, entity: str, row: Dict[str, Any]) -> np.ndarray:
-        """
-        Transform a single side-info row (dict) into a numeric vector
-        using the fitted encoder for the given entity ("users" or "items").
+        """Transform a single feature row into an encoded numeric vector.
+
+        Uses the fitted encoder for the given entity to transform categorical
+        and numeric features into a model-ready vector.
+
+        Parameters
+        ----------
+        entity : str
+            "users" or "items" (selects the right encoder set).
+        row : dict
+            Feature dictionary with keys matching the side-info columns.
+
+        Returns
+        -------
+        np.ndarray
+            Encoded feature vector (float32).
         """
         entity = entity.lower()
         if self.encoding == "onehot":
@@ -193,13 +283,22 @@ class DatasetLoader:
             return np.array(out, dtype=float)
 
     def decode_row(self, row: Dict[str, Any], entity: str = "users") -> Dict[str, Any]:
-        """
-        Decode a sanitized/encoded row back into human-readable categories.
-        Works with both One-Hot and Label encoding.
+        """Decode an encoded feature row back to human-readable categories.
 
-        Args:
-            row: mapping of feature_name -> value (e.g., a model-ready dict)
-            entity: "users" or "items" (selects the right encoder set)
+        Reverses the encoding applied by transform_row(), reconstructing original
+        categorical values and preserving numeric features.
+
+        Parameters
+        ----------
+        row : dict
+            Encoded feature dictionary (output from transform_row).
+        entity : str, optional
+            "users" or "items" (default: "users").
+
+        Returns
+        -------
+        dict
+            Decoded features with categorical values restored and numeric values preserved.
         """
         entity = entity.lower()
         decoded: Dict[str, Any] = {}

@@ -6,6 +6,22 @@ import torch
 
 @dataclass
 class SimpleDPConfig:
+    """Configuration for simple differential privacy.
+
+    Attributes
+    ----------
+    enabled : bool
+        Whether DP is enabled (default: True).
+    noise_multiplier : float
+        Gaussian noise std (σ), relative to max_grad_norm (default: 1.0).
+    max_grad_norm : float
+        Per-example gradient clipping threshold (C) (default: 1.0).
+    sample_rate : float
+        Batch sampling probability (q) (default: 0.02).
+    delta : float
+        Failure probability for (ε, δ)-DP (δ) (default: 1e-5).
+    """
+
     enabled: bool = True
     noise_multiplier: float = 1.0     # σ
     max_grad_norm: float = 1.0        # C
@@ -13,12 +29,24 @@ class SimpleDPConfig:
     delta: float = 1e-5               # δ
 
 class SimpleDPAccountant:
+    """Simple privacy accountant using Abadi et al. (2016) Gaussian mechanism bound.
+
+    Tracks cumulative epsilon (ε) for (ε, δ)-differential privacy using the bound:
+      ε(T) ≈ q * sqrt(2 T log(1/δ)) / σ + T * q^2 / σ^2
+
+    where q is sample rate, T is number of DP steps, σ is noise multiplier.
+    Composes linearly across steps.
+
+    Parameters
+    ----------
+    q : float
+        Sampling probability per step.
+    sigma : float
+        Noise multiplier.
+    delta : float
+        Target failure probability.
     """
-    Very small ε(δ) accountant using Abadi et al. (2016) bound:
-      ε ≈ q * sqrt(2 T log(1/δ)) / σ + T * q^2 / σ^2
-    where q is the sample rate, T the number of DP steps, σ the noise multiplier.
-    We treat q as the configured sample_rate and compose monotonically.
-    """
+
     def __init__(self, q: float, sigma: float, delta: float):
         self.q = float(q)
         self.sigma = float(sigma)
@@ -27,6 +55,7 @@ class SimpleDPAccountant:
         self.eps = 0.0
 
     def _eps_for(self, T: int) -> float:
+        """Compute cumulative epsilon for T DP steps using Abadi's bound."""
         if self.sigma <= 0.0 or self.q <= 0.0 or T <= 0:
             return 0.0
         term1 = self.q * math.sqrt(2.0 * T * math.log(1.0 / self.delta)) / self.sigma
@@ -34,7 +63,18 @@ class SimpleDPAccountant:
         return float(term1 + term2)
 
     def step(self, steps: int) -> Tuple[float, float]:
-        """Advance by `steps` DP steps, return (epsilon_delta, epsilon_cum)."""
+        """Advance by `steps` DP steps and return epsilon accounting.
+
+        Parameters
+        ----------
+        steps : int
+            Number of DP SGD steps to account for.
+
+        Returns
+        -------
+        tuple
+            (eps_delta: increment, eps_cumulative: total epsilon so far)
+        """
         steps = int(max(0, steps))
         if steps == 0:
             return 0.0, float(self.eps)
@@ -56,14 +96,38 @@ def dp_sgd_step(
     noise_multiplier: float,
     device: torch.device,
 ) -> float:
-    """
-    Perform one DP-SGD step by looping per-example:
-      - compute grad for each sample,
-      - clip to max_grad_norm,
-      - sum clipped grads,
-      - add Gaussian noise,
-      - set p.grad := (noisy_sum / batch_size), optimizer.step().
-    Returns loss (float).
+    """Perform one DP-SGD training step with per-example gradient clipping.
+
+    Implements the differentially private SGD algorithm:
+    1. Compute loss and gradient for each example independently
+    2. Clip each per-example gradient to max_grad_norm
+    3. Sum clipped gradients
+    4. Add Gaussian noise proportional to max_grad_norm
+    5. Average and update parameters
+
+    Parameters
+    ----------
+    model : torch.nn.Module
+        Neural network model (must be in train mode).
+    params : list of torch.nn.Parameter
+        Model parameters to optimize.
+    optimizer : torch.optim.Optimizer
+        Optimizer (e.g., Adam).
+    loss_fn : callable
+        Loss function taking (*x_tensors, y) and returning scalar loss.
+    batch_inputs : tuple of torch.Tensor
+        Batch data. Last tensor is labels, others are features.
+    max_grad_norm : float
+        Per-example gradient clipping threshold (C).
+    noise_multiplier : float
+        Noise multiplier relative to max_grad_norm (σ).
+    device : torch.device
+        Device for computation.
+
+    Returns
+    -------
+    float
+        Average batch loss.
     """
     model.train()
     # unpack inputs -> we expect last tensor in tuple to be labels

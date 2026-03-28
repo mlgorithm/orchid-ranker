@@ -1,6 +1,7 @@
 """High-level Surprise-like recommender interface for Orchid Ranker."""
 from __future__ import annotations
 
+import difflib
 import logging
 from dataclasses import dataclass
 from typing import Dict, Iterable, List, Optional, Sequence, Tuple
@@ -25,6 +26,15 @@ from .utils.validation import ValidationError, validate_interactions_frame, vali
 
 @dataclass
 class Recommendation:
+    """Single item recommendation with score.
+
+    Parameters
+    ----------
+    item_id : int
+        Identifier for the recommended item.
+    score : float
+        Relevance or ranking score for the item.
+    """
     item_id: int
     score: float
 
@@ -40,6 +50,18 @@ SUPPORTED_STRATEGIES: Tuple[str, ...] = (
     "neural_mf",
     "user_knn",
 )
+
+STRATEGY_GUIDE: Dict[str, str] = {
+    "als": "Fast alternating least squares. Best for implicit feedback with sparse data.",
+    "explicit_mf": "Classic SVD with SGD. Good baseline for explicit ratings (e.g., 1-5 scale).",
+    "linucb": "Contextual bandit algorithm. Requires item features. Balances exploration/exploitation.",
+    "popularity": "Returns items sorted by popularity. No personalization; good baseline.",
+    "random": "Random recommendation. Useful as a sanity-check baseline.",
+    "implicit_als": "ALS for implicit feedback. Optimizes for ranking using implicit signals.",
+    "implicit_bpr": "Bayesian Personalized Ranking. Optimizes pairwise ranking for implicit feedback.",
+    "neural_mf": "Deep neural networks for matrix factorization. Captures non-linear patterns.",
+    "user_knn": "User-based collaborative filtering. Recommends items liked by similar users.",
+}
 
 
 class OrchidRecommender:
@@ -65,8 +87,19 @@ class OrchidRecommender:
     ) -> None:
         normalised = strategy.lower()
         if normalised not in SUPPORTED_STRATEGIES:
+            # Build helpful error message with strategies and descriptions
+            strategies_help = "\n".join(
+                f"  {s}: {STRATEGY_GUIDE.get(s, 'N/A')}"
+                for s in sorted(SUPPORTED_STRATEGIES)
+            )
+            # Suggest close matches for typos
+            suggestions = difflib.get_close_matches(normalised, SUPPORTED_STRATEGIES, n=3, cutoff=0.6)
+            suggestion_text = ""
+            if suggestions:
+                suggestion_text = f"\nDid you mean: {', '.join(suggestions)}?"
             raise ValueError(
-                f"Unknown strategy '{strategy}'. Supported strategies: {', '.join(SUPPORTED_STRATEGIES)}"
+                f"Unknown strategy '{strategy}'.{suggestion_text}\n\n"
+                f"Supported strategies:\n{strategies_help}"
             )
         self.strategy = normalised
         self.device = torch.device(device or ("cuda" if torch.cuda.is_available() else "cpu"))
@@ -80,6 +113,34 @@ class OrchidRecommender:
         self._seen_items: Dict[int, set[int]] = {}
         self._item_features: Optional[np.ndarray] = None
         self._logger = logging.getLogger(__name__)
+
+    @classmethod
+    def available_strategies(cls) -> None:
+        """Print a formatted table of available strategies and descriptions.
+
+        Displays all supported recommendation strategies with their use cases
+        to help users choose the right strategy for their task.
+
+        Examples
+        --------
+        >>> OrchidRecommender.available_strategies()
+        Available Recommendation Strategies
+        ====================================
+        als: Fast alternating least squares. Best for implicit feedback with sparse data.
+        ...
+        """
+        _log = logging.getLogger(__name__)
+        header = "Available Recommendation Strategies"
+        _log.info(header)
+        _log.info("=" * 80)
+        lines = [header, "=" * 80]
+        max_name_len = max(len(s) for s in SUPPORTED_STRATEGIES)
+        for strategy in sorted(SUPPORTED_STRATEGIES):
+            description = STRATEGY_GUIDE.get(strategy, "N/A")
+            line = f"{strategy:<{max_name_len}} | {description}"
+            _log.info(line)
+            lines.append(line)
+        print("\n".join(lines))
 
     # ------------------------------------------------------------------
     def _build_mappings(self, interactions: pd.DataFrame, user_col: str, item_col: str) -> None:
@@ -240,7 +301,27 @@ class OrchidRecommender:
 
     # ------------------------------------------------------------------
     def predict(self, user_id: int, item_id: int) -> float:
-        """Predict the relevance score for a specific (user, item) pair."""
+        """Predict the relevance score for a specific (user, item) pair.
+
+        Parameters
+        ----------
+        user_id : int
+            User identifier (must exist in training data).
+        item_id : int
+            Item identifier (must exist in training data).
+
+        Returns
+        -------
+        float
+            Predicted relevance score.
+
+        Raises
+        ------
+        RuntimeError
+            If recommender has not been fit.
+        KeyError
+            If user_id or item_id is unknown.
+        """
         if user_id not in self._user2idx or item_id not in self._item2idx:
             raise KeyError("Unknown user_id or item_id provided to predict")
         user_idx = self._user2idx[user_id]
@@ -249,16 +330,28 @@ class OrchidRecommender:
         return float(score)
 
     def predict_many(self, user_ids: Sequence[int], item_ids: Sequence[int]) -> np.ndarray:
-        """Vectorised prediction for matching sequences of user_ids and item_ids.
+        """Vectorized prediction for matching sequences of user_ids and item_ids.
+
+        Computes relevance scores for (user, item) pairs in parallel.
 
         Parameters
         ----------
-        user_ids: sequence of user identifiers (length N)
-        item_ids: sequence of item identifiers (length N)
+        user_ids : Sequence[int]
+            User identifiers (length N).
+        item_ids : Sequence[int]
+            Item identifiers (length N). Must match length of user_ids.
 
         Returns
         -------
-        numpy.ndarray of shape (N,) with float32 scores.
+        np.ndarray
+            Shape (N,), dtype float32. Predicted scores for each (user, item) pair.
+
+        Raises
+        ------
+        ValueError
+            If user_ids and item_ids have different lengths.
+        KeyError
+            If any user_id or item_id is unknown.
         """
         if len(user_ids) != len(item_ids):
             raise ValueError("user_ids and item_ids must have the same length")
@@ -287,7 +380,29 @@ class OrchidRecommender:
         *,
         filter_seen: bool = True,
     ) -> List[Recommendation]:
-        """Return top-k item recommendations for a user."""
+        """Generate top-k item recommendations for a user.
+
+        Parameters
+        ----------
+        user_id : int
+            User identifier (must exist in training data).
+        top_k : int, optional
+            Number of recommendations to return (default: 10).
+        filter_seen : bool, optional
+            Whether to exclude items already seen by the user (default: True).
+
+        Returns
+        -------
+        list of Recommendation
+            Top-k recommended items with scores, in descending score order.
+
+        Raises
+        ------
+        RuntimeError
+            If recommender has not been fit.
+        KeyError
+            If user_id is unknown.
+        """
         if user_id not in self._user2idx:
             raise KeyError(f"Unknown user_id {user_id}. Have you called fit?")
         user_idx = self._user2idx[user_id]
@@ -310,7 +425,84 @@ class OrchidRecommender:
 
     # ------------------------------------------------------------------
     def all_items(self) -> List[int]:
+        """Get all known item IDs.
+
+        Returns
+        -------
+        list of int
+            All item IDs in the training data.
+        """
         return list(self._item2idx.keys())
 
     def all_users(self) -> List[int]:
+        """Get all known user IDs.
+
+        Returns
+        -------
+        list of int
+            All user IDs in the training data.
+        """
         return list(self._user2idx.keys())
+
+    # ------------------------------------------------------------------
+    def save(self, path: str) -> None:
+        """Save the fitted recommender to disk.
+
+        Convenience method that delegates to serialization.save_model().
+        Saves the strategy, user/item mappings, and fitted model state.
+
+        Parameters
+        ----------
+        path : str or Path
+            Destination file path for the checkpoint.
+
+        Raises
+        ------
+        RuntimeError
+            If recommender has not been fit yet.
+        RuntimeError
+            If checkpoint writing fails.
+
+        Examples
+        --------
+        >>> rec = OrchidRecommender(strategy="als")
+        >>> rec.fit(interactions_df)
+        >>> rec.save("model.pt")
+        """
+        from .serialization import save_model
+        save_model(self, path)
+
+    @classmethod
+    def load(cls, path: str) -> "OrchidRecommender":
+        """Load a previously saved OrchidRecommender from disk.
+
+        Convenience classmethod that delegates to serialization.load_model().
+        Restores the model in fitted state with all internal mappings and state.
+
+        Parameters
+        ----------
+        path : str or Path
+            Path to the saved checkpoint file.
+
+        Returns
+        -------
+        OrchidRecommender
+            The restored model in fitted state, ready for inference.
+
+        Raises
+        ------
+        FileNotFoundError
+            If checkpoint file does not exist.
+        RuntimeError
+            If checkpoint loading or restoration fails.
+
+        Examples
+        --------
+        >>> rec = OrchidRecommender.load("model.pt")
+        >>> predictions = rec.predict(user_id=1, item_id=5)
+        """
+        from .serialization import load_model
+        model = load_model(path)
+        if not isinstance(model, cls):
+            raise TypeError(f"Loaded model is {type(model).__name__}, expected OrchidRecommender")
+        return model

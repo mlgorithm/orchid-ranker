@@ -10,6 +10,17 @@ DevicePreference = Literal["auto", "cuda", "mps", "cpu"]
 
 @dataclass(frozen=True)
 class DeviceChoice:
+    """Selected compute device and selection rationale.
+
+    Parameters
+    ----------
+    name : str
+        Device name (e.g., "cuda", "mps", "cpu").
+    torch_device : torch.device
+        Torch device object.
+    reason : str
+        Human-readable explanation for device selection.
+    """
     name: str
     torch_device: torch.device
     reason: str

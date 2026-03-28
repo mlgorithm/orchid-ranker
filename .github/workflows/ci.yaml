@@ -9,15 +9,26 @@ on:
 jobs:
   tests:
     runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python-version: ["3.11", "3.12"]
 
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Set up Python
+      - name: Set up Python ${{ matrix.python-version }}
         uses: actions/setup-python@v5
         with:
-          python-version: "3.11"
+          python-version: ${{ matrix.python-version }}
+
+      - name: Cache pip packages
+        uses: actions/cache@v3
+        with:
+          path: ~/.cache/pip
+          key: ${{ runner.os }}-pip-${{ hashFiles('**/pyproject.toml') }}
+          restore-keys: |
+            ${{ runner.os }}-pip-
 
       - name: Install system dependencies
         run: sudo apt-get update && sudo apt-get install -y build-essential
@@ -27,8 +38,11 @@ jobs:
           python -m pip install --upgrade pip
           pip install ".[dev]"
 
-      - name: Run targeted unit tests
-        run: python -m pytest tests/test_native_scoring.py tests/test_safe_switch.py
+      - name: Run ruff linting
+        run: python -m ruff check src/
 
-      - name: Run ML100K safe smoke scenario
-        run: ./scripts/ci_safe_smoke.sh runs/ci-safe-smoke
+      - name: Run mypy type checking
+        run: python -m mypy src/orchid_ranker --ignore-missing-imports
+
+      - name: Run full test suite
+        run: python -m pytest tests/ -x --tb=short

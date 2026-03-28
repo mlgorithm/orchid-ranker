@@ -1,6 +1,6 @@
 """Orchid Ranker – adaptive educational recommender toolkit."""
 
-__version__ = "0.2.0.dev0"
+__version__ = "0.2.1"
 
 from .agents.student_agent import StudentAgent, StudentAgentFactory
 from .agents.agentic import MultiUserOrchestrator, MultiConfig, UserCtx
@@ -14,7 +14,16 @@ from .visualization import (
     plot_knowledge_trajectory,
 )
 from .experiments import RankingExperiment
-from .recommender import OrchidRecommender, Recommendation, SUPPORTED_STRATEGIES
+from .recommender import OrchidRecommender, Recommendation, SUPPORTED_STRATEGIES, STRATEGY_GUIDE
+from .serialization import save_model, load_model
+from .evaluation import (
+    learning_gain,
+    knowledge_coverage,
+    curriculum_adherence,
+    difficulty_appropriateness,
+    engagement_score,
+    EducationalReport,
+)
 from .dp import get_dp_config
 from .logging import configure_logging
 from .security import AccessControl, DEFAULT_POLICY, AuditLogger
@@ -31,6 +40,19 @@ from .observability import (
     export_metrics,
     metrics_content_type,
 )
+from .model_selection import (
+    cross_validate,
+    compare_models,
+    train_test_split,
+    evaluate_on_holdout,
+)
+from .tuning import GridSearchCV, RandomSearchCV
+from .knowledge_tracing import (
+    BayesianKnowledgeTracing,
+    MasteryTracker,
+    ForgettingCurve,
+)
+from .curriculum import PrerequisiteGraph, CurriculumRecommender
 
 __all__ = [
     "__version__",
@@ -56,6 +78,15 @@ __all__ = [
     "OrchidRecommender",
     "Recommendation",
     "SUPPORTED_STRATEGIES",
+    "STRATEGY_GUIDE",
+    "learning_gain",
+    "knowledge_coverage",
+    "curriculum_adherence",
+    "difficulty_appropriateness",
+    "engagement_score",
+    "EducationalReport",
+    "save_model",
+    "load_model",
     "AccessControl",
     "DEFAULT_POLICY",
     "AuditLogger",
@@ -68,4 +99,15 @@ __all__ = [
     "record_training",
     "export_metrics",
     "metrics_content_type",
+    "cross_validate",
+    "compare_models",
+    "train_test_split",
+    "evaluate_on_holdout",
+    "GridSearchCV",
+    "RandomSearchCV",
+    "BayesianKnowledgeTracing",
+    "MasteryTracker",
+    "ForgettingCurve",
+    "PrerequisiteGraph",
+    "CurriculumRecommender",
 ]

@@ -4,11 +4,11 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "orchid-ranker"
-version = "0.2.0"
+version = "0.2.1"
 description = "Adaptive educational recommender toolkit with learner simulators, agentic orchestration, and preprocessing utilities."
 readme = "README.md"
 authors = [
-  {name = "Farhad Vadiee"}
+  {name = "Farhad Vadiee", email = "sam.vadiee@gmail.com"}
 ]
 license = {file = "LICENSE"}
 requires-python = ">=3.9"
@@ -23,11 +23,21 @@ dependencies = [
 ]
 keywords = ["recommender-systems", "education", "privacy", "bandits", "simulation"]
 classifiers = [
+  "Development Status :: 4 - Beta",
   "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3.9",
+  "Programming Language :: Python :: 3.10",
+  "Programming Language :: Python :: 3.11",
+  "Programming Language :: Python :: 3.12",
+  "Programming Language :: Python :: 3.13",
   "License :: OSI Approved :: MIT License",
   "Intended Audience :: Developers",
   "Intended Audience :: Science/Research",
+  "Intended Audience :: Education",
   "Topic :: Scientific/Engineering :: Artificial Intelligence",
+  "Topic :: Education",
+  "Operating System :: OS Independent",
+  "Typing :: Typed",
 ]
 
 [project.optional-dependencies]
@@ -62,8 +72,11 @@ dev = [
 ]
 
 [project.urls]
-Homepage = "https://github.com/farhad.vadiee/orchid-ranker"
-Source = "https://github.com/farhad.vadiee/orchid-ranker"
+Homepage = "https://github.com/farhad-vadiee/orchid-ranker"
+Source = "https://github.com/farhad-vadiee/orchid-ranker"
+Documentation = "https://github.com/farhad-vadiee/orchid-ranker/tree/main/docs"
+Changelog = "https://github.com/farhad-vadiee/orchid-ranker/blob/main/CHANGELOG.md"
+Issues = "https://github.com/farhad-vadiee/orchid-ranker/issues"
 
 [tool.setuptools]
 include-package-data = true
@@ -74,3 +87,17 @@ include = ["orchid_ranker", "orchid_ranker.*"]
 
 [project.scripts]
 orchid-evaluate = "orchid_ranker.cli.evaluate:main"
+
+[tool.ruff]
+line-length = 120
+target-version = "py39"
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I"]
+ignore = ["E501"]
+
+[tool.mypy]
+python_version = "3.9"
+warn_return_any = true
+warn_unused_configs = true
+ignore_missing_imports = true

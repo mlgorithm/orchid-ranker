@@ -15,6 +15,25 @@ except ImportError:  # pragma: no cover - optional path
 
 
 class MatrixFactorization(nn.Module):
+    """Neural matrix factorization model with embeddings and biases.
+
+    Implements a basic matrix factorization recommender using embeddings for users
+    and items, plus learned bias terms. Supports both implicit (sigmoid-activated)
+    and explicit (raw score) output modes.
+
+    Parameters
+    ----------
+    num_users : int
+        Number of unique users.
+    num_items : int
+        Number of unique items.
+    emb_dim : int, optional
+        Embedding dimension (default: 32).
+    implicit : bool, optional
+        If True, apply sigmoid activation to outputs. If False, return raw scores
+        (default: True).
+    """
+
     def __init__(self, num_users: int, num_items: int, emb_dim: int = 32, implicit: bool = True):
         super().__init__()
         self.user_emb = nn.Embedding(num_users, emb_dim)
@@ -25,12 +44,28 @@ class MatrixFactorization(nn.Module):
         self._init_weights()
 
     def _init_weights(self) -> None:
+        """Initialize embedding and bias weights from normal distribution."""
         nn.init.normal_(self.user_emb.weight, std=0.01)
         nn.init.normal_(self.item_emb.weight, std=0.01)
         nn.init.zeros_(self.user_bias.weight)
         nn.init.zeros_(self.item_bias.weight)
 
     def forward(self, user_ids: torch.Tensor, item_ids: torch.Tensor) -> torch.Tensor:
+        """Compute preference scores for user-item pairs.
+
+        Parameters
+        ----------
+        user_ids : torch.Tensor
+            User indices of shape (batch_size,).
+        item_ids : torch.Tensor
+            Item indices of shape (batch_size,).
+
+        Returns
+        -------
+        torch.Tensor
+            Predicted scores of shape (batch_size,). If implicit=True, values are
+            in [0, 1] (sigmoid-activated). If implicit=False, raw unbounded scores.
+        """
         u_emb = self.user_emb(user_ids)
         i_emb = self.item_emb(item_ids)
         dot = (u_emb * i_emb).sum(dim=1, keepdim=True)
@@ -46,50 +81,199 @@ class MatrixFactorization(nn.Module):
 
 @dataclass
 class BaselineResult:
+    """Result container for baseline training.
+
+    Attributes
+    ----------
+    train_loss : float, optional
+        Final training loss after fitting, if applicable.
+    """
+
     train_loss: Optional[float] = None
 
 
 class BaseBaseline:
+    """Abstract base class for all baseline recommenders.
+
+    Provides a common interface for fitting, inference, and decision-making
+    across different baseline strategies.
+
+    Parameters
+    ----------
+    device : torch.device
+        Torch device (CPU or CUDA) for computation.
+
+    Attributes
+    ----------
+    device : torch.device
+        The compute device.
+    user_matrix : array-like, optional
+        Optional user interaction matrix for some baselines.
+    result : BaselineResult
+        Container for training results.
+    """
+
     def __init__(self, device: torch.device):
         self.device = device
         self.user_matrix = None
         self.result = BaselineResult()
 
     def fit(self, *args, **kwargs) -> None:  # pragma: no cover - default no-op
+        """Train the baseline on interaction data.
+
+        This is a no-op in the base class; subclasses should override.
+
+        Parameters
+        ----------
+        *args
+            Positional arguments (e.g., user_ids, item_ids, labels).
+        **kwargs
+            Keyword arguments (e.g., num_users, num_items).
+        """
         return None
 
     def infer(self, **kwargs):  # pragma: no cover - override in subclasses
+        """Compute item scores for a given context.
+
+        Must be overridden by subclasses.
+
+        Returns
+        -------
+        torch.Tensor
+            Score tensor of shape (1, num_items).
+        """
         raise NotImplementedError
 
     def decide(self, **kwargs):  # pragma: no cover
+        """Select top-k items from scored candidates.
+
+        Must be overridden by subclasses.
+
+        Returns
+        -------
+        tuple
+            (selected_item_ids, metadata_dict)
+        """
         raise NotImplementedError
 
 
 class PopularityBaseline(BaseBaseline):
+    """Recommends items based on historical popularity (item frequency/rating average).
+
+    Parameters
+    ----------
+    popularity : dict
+        Mapping from item ID to popularity score.
+    device : torch.device
+        Torch device for computation.
+    """
+
     def __init__(self, popularity: Dict[int, float], device: torch.device):
         super().__init__(device)
         self.popularity = popularity
 
     def infer(self, *, item_ids: torch.Tensor, **_):
+        """Score items by their popularity.
+
+        Parameters
+        ----------
+        item_ids : torch.Tensor
+            Item indices to score.
+
+        Returns
+        -------
+        torch.Tensor
+            Popularity scores of shape (1, num_items).
+        """
         scores = [self.popularity.get(int(i.item()), 0.0) for i in item_ids]
         return torch.tensor(scores, dtype=torch.float32, device=self.device).unsqueeze(0)
 
     def decide(self, *, logits: torch.Tensor, top_k: int, item_ids: torch.Tensor, **_):
+        """Select top-k most popular items.
+
+        Parameters
+        ----------
+        logits : torch.Tensor
+            Score tensor from infer().
+        top_k : int
+            Number of items to select.
+        item_ids : torch.Tensor
+            Candidate item IDs.
+
+        Returns
+        -------
+        tuple
+            (list of selected item IDs, metadata dict)
+        """
         order = torch.argsort(logits[0], descending=True)
         chosen = order[:top_k]
         return [int(item_ids[i].item()) for i in chosen], {"policy": "popularity"}
 
 
 class RandomBaseline(BaseBaseline):
+    """Recommends items uniformly at random.
+
+    Useful as a baseline for comparison and hypothesis testing.
+    """
+
     def infer(self, *, item_ids: torch.Tensor, **_):
+        """Generate random scores for all items.
+
+        Parameters
+        ----------
+        item_ids : torch.Tensor
+            Item indices to score.
+
+        Returns
+        -------
+        torch.Tensor
+            Random scores of shape (1, num_items), uniform in [0, 1).
+        """
         return torch.rand((1, item_ids.numel()), device=self.device)
 
     def decide(self, *, logits: torch.Tensor, top_k: int, item_ids: torch.Tensor, **_):
+        """Select top-k items uniformly at random.
+
+        Parameters
+        ----------
+        logits : torch.Tensor
+            Score tensor (ignored, used only for interface compatibility).
+        top_k : int
+            Number of items to select.
+        item_ids : torch.Tensor
+            Candidate item IDs.
+
+        Returns
+        -------
+        tuple
+            (list of randomly selected item IDs, metadata dict)
+        """
         chosen = torch.randperm(item_ids.numel(), device=self.device)[:top_k]
         return [int(item_ids[i].item()) for i in chosen], {"policy": "random"}
 
 
 class ALSBaseline(BaseBaseline):
+    """Alternating Least Squares matrix factorization for binary feedback.
+
+    Trains embeddings to predict user-item interaction probabilities using
+    binary cross-entropy loss.
+
+    Parameters
+    ----------
+    num_users : int
+        Number of unique users.
+    num_items : int
+        Number of unique items.
+    device : torch.device
+        Torch device for computation.
+    emb_dim : int, optional
+        Embedding dimension (default: 32).
+    lr : float, optional
+        Adam learning rate (default: 0.01).
+    epochs : int, optional
+        Number of training epochs (default: 5).
+    """
+
     def __init__(self, num_users: int, num_items: int, device: torch.device, emb_dim: int = 32, lr: float = 1e-2, epochs: int = 5):
         super().__init__(device)
         self.model = MatrixFactorization(num_users, num_items, emb_dim=emb_dim, implicit=True).to(device)
@@ -97,6 +281,17 @@ class ALSBaseline(BaseBaseline):
         self.epochs = epochs
 
     def fit(self, user_ids: Iterable[int], item_ids: Iterable[int], labels: Iterable[int]) -> None:
+        """Train the matrix factorization model.
+
+        Parameters
+        ----------
+        user_ids : Iterable[int]
+            User indices.
+        item_ids : Iterable[int]
+            Item indices.
+        labels : Iterable[int]
+            Binary labels (0 or 1) indicating interaction.
+        """
         user_tensor = torch.tensor(list(user_ids), dtype=torch.long, device=self.device)
         item_tensor = torch.tensor(list(item_ids), dtype=torch.long, device=self.device)
         label_tensor = torch.tensor(list(labels), dtype=torch.float32, device=self.device)
@@ -111,6 +306,20 @@ class ALSBaseline(BaseBaseline):
         self.result.train_loss = float(loss.detach().cpu().item())
 
     def infer(self, *, user_ids: torch.Tensor, item_ids: torch.Tensor, **_):
+        """Score all items for a given user.
+
+        Parameters
+        ----------
+        user_ids : torch.Tensor
+            User index (will be broadcast to all items).
+        item_ids : torch.Tensor
+            Candidate item indices.
+
+        Returns
+        -------
+        torch.Tensor
+            Predicted scores of shape (1, num_items), in [0, 1].
+        """
         users = user_ids.expand(item_ids.numel())
         items = item_ids
         with torch.no_grad():
@@ -118,17 +327,62 @@ class ALSBaseline(BaseBaseline):
         return scores.view(1, -1)
 
     def decide(self, *, logits: torch.Tensor, top_k: int, item_ids: torch.Tensor, **_):
+        """Select top-k items by predicted score.
+
+        Parameters
+        ----------
+        logits : torch.Tensor
+            Score tensor from infer().
+        top_k : int
+            Number of items to select.
+        item_ids : torch.Tensor
+            Candidate item IDs.
+
+        Returns
+        -------
+        tuple
+            (list of selected item IDs, metadata dict)
+        """
         top = torch.argsort(logits[0], descending=True)[:top_k]
         return [int(item_ids[i].item()) for i in top], {"policy": "als"}
 
 
 class UserKNNBaseline(BaseBaseline):
+    """User-based collaborative filtering using k-nearest neighbors.
+
+    Recommends items liked by similar users. Similarity is computed as
+    cosine distance in user-item interaction space.
+
+    Parameters
+    ----------
+    user_item_matrix : np.ndarray
+        User-item interaction matrix of shape (num_users, num_items).
+    device : torch.device
+        Torch device for computation.
+    k : int, optional
+        Number of nearest neighbors to consider (default: 20).
+    """
+
     def __init__(self, user_item_matrix: np.ndarray, device: torch.device, k: int = 20):
         super().__init__(device)
         self.matrix = user_item_matrix.astype(np.float32)
         self.k = k
 
     def infer(self, *, user_ids: torch.Tensor, item_ids: torch.Tensor, **_):
+        """Score items based on similar users' preferences.
+
+        Parameters
+        ----------
+        user_ids : torch.Tensor
+            User index.
+        item_ids : torch.Tensor
+            Candidate item indices.
+
+        Returns
+        -------
+        torch.Tensor
+            Item scores of shape (1, num_items).
+        """
         uid = int(user_ids.item())
         user_vector = self.matrix[uid]
         norms = np.linalg.norm(self.matrix, axis=1) + 1e-8
@@ -139,11 +393,42 @@ class UserKNNBaseline(BaseBaseline):
         return torch.tensor(scores, dtype=torch.float32, device=self.device).unsqueeze(0)
 
     def decide(self, *, logits: torch.Tensor, top_k: int, item_ids: torch.Tensor, **_):
+        """Select top-k items by neighbor preference score.
+
+        Parameters
+        ----------
+        logits : torch.Tensor
+            Score tensor from infer().
+        top_k : int
+            Number of items to select.
+        item_ids : torch.Tensor
+            Candidate item IDs.
+
+        Returns
+        -------
+        tuple
+            (list of selected item IDs, metadata dict)
+        """
         order = torch.argsort(logits[0], descending=True)[:top_k]
         return [int(item_ids[i].item()) for i in order], {"policy": "user_knn"}
 
 
 class LinUCBBaseline(BaseBaseline):
+    """Linear Upper Confidence Bound contextual bandit algorithm.
+
+    Uses item features to maintain a linear model with confidence bounds for
+    exploration-exploitation tradeoff.
+
+    Parameters
+    ----------
+    alpha : float
+        Exploration bonus multiplier for the UCB term.
+    item_features : np.ndarray
+        Item feature matrix of shape (num_items, feature_dim).
+    device : torch.device
+        Torch device for computation.
+    """
+
     def __init__(self, alpha: float, item_features: np.ndarray, device: torch.device):
         super().__init__(device)
         self.alpha = alpha
@@ -153,6 +438,13 @@ class LinUCBBaseline(BaseBaseline):
         self.b = torch.zeros(d, device=device)
 
     def fit(self, rewards: Dict[int, float]) -> None:
+        """Update linear model parameters with observed rewards.
+
+        Parameters
+        ----------
+        rewards : dict
+            Mapping from item ID to reward value.
+        """
         if self.item_features.shape[1] == 0:
             return
         for iid, r in rewards.items():
@@ -161,6 +453,18 @@ class LinUCBBaseline(BaseBaseline):
             self.b += float(r) * feature
 
     def infer(self, *, item_ids: torch.Tensor, **_):
+        """Compute UCB scores for candidate items.
+
+        Parameters
+        ----------
+        item_ids : torch.Tensor
+            Candidate item indices.
+
+        Returns
+        -------
+        torch.Tensor
+            UCB scores of shape (1, num_items).
+        """
         if self.item_features.shape[1] == 0:
             return torch.zeros((1, item_ids.numel()), device=self.device)
         A_inv = torch.inverse(self.A + 1e-6 * torch.eye(self.A.shape[0], device=self.device))
@@ -172,12 +476,44 @@ class LinUCBBaseline(BaseBaseline):
         return scores.unsqueeze(0)
 
     def decide(self, *, logits: torch.Tensor, top_k: int, item_ids: torch.Tensor, **kwargs):
+        """Select top-k items by UCB score.
+
+        Parameters
+        ----------
+        logits : torch.Tensor
+            Score tensor from infer().
+        top_k : int
+            Number of items to select.
+        item_ids : torch.Tensor
+            Candidate item IDs.
+
+        Returns
+        -------
+        tuple
+            (list of selected item IDs, metadata dict)
+        """
         order = torch.argsort(logits[0], descending=True)[:top_k]
         chosen = [int(item_ids[i].item()) for i in order]
         return chosen, {"policy": "linucb"}
 
 
 class _ImplicitBase(BaseBaseline):
+    """Base class for implicit feedback baselines using the `implicit` library.
+
+    Provides common infrastructure for training with implicit library models.
+
+    Parameters
+    ----------
+    factors : int, optional
+        Embedding dimension (default: 64).
+    iterations : int, optional
+        Number of training iterations (default: 20).
+    regularization : float, optional
+        L2 regularization strength (default: 0.01).
+    **kwargs
+        Additional arguments passed to implicit model constructors.
+    """
+
     def __init__(self, *, factors: int = 64, iterations: int = 20, regularization: float = 0.01, **kwargs):
         if implicit is None:
             raise ImportError("The 'implicit' package is required for this strategy. Install via `pip install implicit`.")
@@ -192,6 +528,26 @@ class _ImplicitBase(BaseBaseline):
 
     @staticmethod
     def _coo_matrix(user_ids: Iterable[int], item_ids: Iterable[int], labels: Iterable[float], num_users: int, num_items: int):
+        """Convert interaction lists to COO sparse matrix format.
+
+        Parameters
+        ----------
+        user_ids : Iterable[int]
+            User indices.
+        item_ids : Iterable[int]
+            Item indices.
+        labels : Iterable[float]
+            Interaction weights.
+        num_users : int
+            Total number of users.
+        num_items : int
+            Total number of items.
+
+        Returns
+        -------
+        scipy.sparse.coo_matrix
+            Sparse COO matrix of shape (num_users, num_items).
+        """
         import scipy.sparse
 
         rows = np.asarray(list(user_ids), dtype=np.int32)
@@ -200,6 +556,25 @@ class _ImplicitBase(BaseBaseline):
         return scipy.sparse.coo_matrix((data, (rows, cols)), shape=(num_users, num_items))
 
     def infer(self, *, user_ids: torch.Tensor, item_ids: torch.Tensor, **_) -> torch.Tensor:
+        """Score items using learned factor embeddings.
+
+        Parameters
+        ----------
+        user_ids : torch.Tensor
+            User index.
+        item_ids : torch.Tensor
+            Candidate item indices.
+
+        Returns
+        -------
+        torch.Tensor
+            Predicted scores of shape (1, num_items).
+
+        Raises
+        ------
+        RuntimeError
+            If model has not been trained yet.
+        """
         if self.user_factors is None or self.item_factors is None:
             raise RuntimeError("Implicit model has not been trained")
         u = self.user_factors[user_ids.cpu().numpy()]
@@ -208,12 +583,48 @@ class _ImplicitBase(BaseBaseline):
         return torch.tensor(scores, dtype=torch.float32, device=self.device)
 
     def decide(self, *, logits: torch.Tensor, top_k: int, item_ids: torch.Tensor, **_):
+        """Select top-k items by score.
+
+        Parameters
+        ----------
+        logits : torch.Tensor
+            Score tensor from infer().
+        top_k : int
+            Number of items to select.
+        item_ids : torch.Tensor
+            Candidate item IDs.
+
+        Returns
+        -------
+        tuple
+            (list of selected item IDs, metadata dict)
+        """
         top = torch.argsort(logits[0], descending=True)[:top_k]
         return [int(item_ids[i].item()) for i in top], {"policy": type(self).__name__.lower()}
 
 
 class ImplicitALSBaseline(_ImplicitBase):
+    """Implicit ALS (Alternating Least Squares) baseline using the `implicit` library.
+
+    Optimized for binary or weighted implicit feedback (e.g., play counts).
+    """
+
     def fit(self, user_ids: Iterable[int], item_ids: Iterable[int], labels: Iterable[float], *, num_users: int, num_items: int) -> None:
+        """Train the implicit ALS model.
+
+        Parameters
+        ----------
+        user_ids : Iterable[int]
+            User indices.
+        item_ids : Iterable[int]
+            Item indices.
+        labels : Iterable[float]
+            Interaction weights (typically counts or 0/1).
+        num_users : int
+            Total number of users.
+        num_items : int
+            Total number of items.
+        """
         if implicit is None:
             raise ImportError("implicit is required for ImplicitALSBaseline")
         coo = self._coo_matrix(user_ids, item_ids, labels, num_users, num_items)
@@ -230,11 +641,44 @@ class ImplicitALSBaseline(_ImplicitBase):
 
 
 class ImplicitBPRBaseline(_ImplicitBase):
+    """Implicit BPR (Bayesian Personalized Ranking) baseline using the `implicit` library.
+
+    Optimized for ranking with pairwise loss, good for implicit feedback scenarios.
+
+    Parameters
+    ----------
+    factors : int, optional
+        Embedding dimension (default: 64).
+    iterations : int, optional
+        Number of training iterations (default: 50).
+    learning_rate : float, optional
+        Learning rate (default: 0.01).
+    regularization : float, optional
+        L2 regularization strength (default: 0.01).
+    **kwargs
+        Additional arguments passed to implicit BPR model.
+    """
+
     def __init__(self, *, factors: int = 64, iterations: int = 50, learning_rate: float = 0.01, regularization: float = 0.01, **kwargs):
         super().__init__(factors=factors, iterations=iterations, regularization=regularization, **kwargs)
         self.learning_rate = float(learning_rate)
 
     def fit(self, user_ids: Iterable[int], item_ids: Iterable[int], labels: Iterable[float], *, num_users: int, num_items: int) -> None:
+        """Train the implicit BPR model.
+
+        Parameters
+        ----------
+        user_ids : Iterable[int]
+            User indices.
+        item_ids : Iterable[int]
+            Item indices.
+        labels : Iterable[float]
+            Interaction weights (thresholded to binary for BPR).
+        num_users : int
+            Total number of users.
+        num_items : int
+            Total number of items.
+        """
         if implicit is None:
             raise ImportError("implicit is required for ImplicitBPRBaseline")
         user_arr = np.asarray(list(user_ids), dtype=np.int32)
@@ -259,6 +703,37 @@ class ImplicitBPRBaseline(_ImplicitBase):
 
 
 class NeuralMatrixFactorizationBaseline(BaseBaseline):
+    """Neural matrix factorization with configurable loss functions (BCE, BPR, or Softmax).
+
+    Combines embeddings with an MLP to learn user-item preferences. Supports
+    multiple training objectives: binary cross-entropy (implicit feedback),
+    Bayesian Personalized Ranking (ranking), or sampled softmax (next-item prediction).
+
+    Parameters
+    ----------
+    num_users : int
+        Number of unique users.
+    num_items : int
+        Number of unique items.
+    device : torch.device
+        Torch device for computation.
+    emb_dim : int, optional
+        Embedding dimension (default: 32).
+    hidden : tuple of int, optional
+        Hidden layer sizes for MLP (default: (64, 32)).
+    epochs : int, optional
+        Number of training epochs (default: 5).
+    lr : float, optional
+        Adam learning rate (default: 0.001).
+    loss : str, optional
+        Loss type: "bce" (binary cross-entropy), "bpr" (Bayesian Personalized Ranking),
+        or "softmax" (sampled softmax). Default: "bce".
+    neg_k : int, optional
+        Number of negative samples for BPR and softmax losses (default: 10).
+    batch_size : int, optional
+        Training batch size (default: 256).
+    """
+
     def __init__(
         self,
         num_users: int,
@@ -299,9 +774,27 @@ class NeuralMatrixFactorizationBaseline(BaseBaseline):
         self.loss_fn = nn.BCELoss()
 
     def parameters(self):
+        """Return trainable model parameters.
+
+        Returns
+        -------
+        list
+            List of all model parameters (MLP + user embeddings + item embeddings).
+        """
         return list(self.mlp.parameters()) + list(self.user_emb.parameters()) + list(self.item_emb.parameters())
 
     def fit(self, user_ids: Iterable[int], item_ids: Iterable[int], labels: Iterable[float]) -> None:
+        """Train the neural matrix factorization model.
+
+        Parameters
+        ----------
+        user_ids : Iterable[int]
+            User indices.
+        item_ids : Iterable[int]
+            Item indices.
+        labels : Iterable[float]
+            Target labels (0/1 for binary feedback, or real-valued ratings).
+        """
         users = torch.tensor(list(user_ids), dtype=torch.long, device=self.device)
         items = torch.tensor(list(item_ids), dtype=torch.long, device=self.device)
         y = torch.tensor(list(labels), dtype=torch.float32, device=self.device)
@@ -411,6 +904,20 @@ class NeuralMatrixFactorizationBaseline(BaseBaseline):
             self.result.train_loss = float(loss.detach().cpu().item()) if 'loss' in locals() else 0.0
 
     def _forward(self, user_ids: torch.Tensor, item_ids: torch.Tensor) -> torch.Tensor:
+        """Compute model predictions for user-item pairs.
+
+        Parameters
+        ----------
+        user_ids : torch.Tensor
+            User indices.
+        item_ids : torch.Tensor
+            Item indices.
+
+        Returns
+        -------
+        torch.Tensor
+            Sigmoid-activated predictions in [0, 1].
+        """
         u = self.user_emb(user_ids)
         i = self.item_emb(item_ids)
         x = torch.cat([u, i], dim=1)
@@ -418,11 +925,41 @@ class NeuralMatrixFactorizationBaseline(BaseBaseline):
         return self.sigmoid(logits)
 
     def infer(self, *, user_ids: torch.Tensor, item_ids: torch.Tensor, **_) -> torch.Tensor:
+        """Score all candidate items for a given user.
+
+        Parameters
+        ----------
+        user_ids : torch.Tensor
+            User index.
+        item_ids : torch.Tensor
+            Candidate item indices.
+
+        Returns
+        -------
+        torch.Tensor
+            Predicted scores of shape (1, num_items), in [0, 1].
+        """
         with torch.no_grad():
             preds = self._forward(user_ids.to(self.device), item_ids.to(self.device))
         return preds.view(1, -1)
 
     def decide(self, *, logits: torch.Tensor, top_k: int, item_ids: torch.Tensor, **_):
+        """Select top-k items by predicted score.
+
+        Parameters
+        ----------
+        logits : torch.Tensor
+            Score tensor from infer().
+        top_k : int
+            Number of items to select.
+        item_ids : torch.Tensor
+            Candidate item IDs.
+
+        Returns
+        -------
+        tuple
+            (list of selected item IDs, metadata dict)
+        """
         top = torch.argsort(logits[0], descending=True)[:top_k]
         return [int(item_ids[i].item()) for i in top], {"policy": "neural_mf"}
 
@@ -441,6 +978,29 @@ __all__ = [
 ]
 
 class ExplicitMFBaseline(BaseBaseline):
+    """Matrix factorization for explicit ratings/feedback.
+
+    Trains embeddings to predict real-valued user-item ratings using MSE loss.
+    Predictions are centered around the global mean rating.
+
+    Parameters
+    ----------
+    num_users : int
+        Number of unique users.
+    num_items : int
+        Number of unique items.
+    device : torch.device
+        Torch device for computation.
+    emb_dim : int, optional
+        Embedding dimension (default: 64).
+    lr : float, optional
+        Adam learning rate (default: 0.001).
+    epochs : int, optional
+        Number of training epochs (default: 10).
+    weight_decay : float, optional
+        L2 regularization coefficient (default: 0.0001).
+    """
+
     def __init__(self, num_users: int, num_items: int, device: torch.device, emb_dim: int = 64, lr: float = 1e-3, epochs: int = 10, weight_decay: float = 1e-4):
         super().__init__(device)
         # Use the shared MF with implicit=False so it outputs raw scores (no sigmoid)
@@ -455,6 +1015,17 @@ class ExplicitMFBaseline(BaseBaseline):
         self._max_rating: float = 1.0
 
     def fit(self, user_ids: Iterable[int], item_ids: Iterable[int], ratings: Iterable[float]) -> None:
+        """Train the explicit rating prediction model.
+
+        Parameters
+        ----------
+        user_ids : Iterable[int]
+            User indices.
+        item_ids : Iterable[int]
+            Item indices.
+        ratings : Iterable[float]
+            Real-valued rating targets.
+        """
         users = torch.tensor(list(user_ids), dtype=torch.long, device=self.device)
         items = torch.tensor(list(item_ids), dtype=torch.long, device=self.device)
         y = torch.tensor(list(ratings), dtype=torch.float32, device=self.device)
@@ -472,6 +1043,20 @@ class ExplicitMFBaseline(BaseBaseline):
         self.result.train_loss = float(loss.detach().cpu().item())
 
     def infer(self, *, user_ids: torch.Tensor, item_ids: torch.Tensor, **_) -> torch.Tensor:
+        """Predict ratings for candidate items.
+
+        Parameters
+        ----------
+        user_ids : torch.Tensor
+            User index.
+        item_ids : torch.Tensor
+            Candidate item indices.
+
+        Returns
+        -------
+        torch.Tensor
+            Predicted ratings of shape (1, num_items), clamped to observed range.
+        """
         # Score a batch of items for a given user (or vector of users broadcast)
         users = user_ids.expand(item_ids.numel())
         items = item_ids
@@ -482,5 +1067,21 @@ class ExplicitMFBaseline(BaseBaseline):
         return scores.view(1, -1)
 
     def decide(self, *, logits: torch.Tensor, top_k: int, item_ids: torch.Tensor, **_):
+        """Select top-k items by predicted rating.
+
+        Parameters
+        ----------
+        logits : torch.Tensor
+            Score tensor from infer().
+        top_k : int
+            Number of items to select.
+        item_ids : torch.Tensor
+            Candidate item IDs.
+
+        Returns
+        -------
+        tuple
+            (list of selected item IDs, metadata dict)
+        """
         top = torch.argsort(logits[0], descending=True)[:top_k]
         return [int(item_ids[i].item()) for i in top], {"policy": "explicit_mf"}

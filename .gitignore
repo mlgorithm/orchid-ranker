@@ -209,3 +209,14 @@ __marimo__/
 .DS_Store
 runs/
 tmp/
+.venv/
+data/
+results/
+outputs/
+artifacts/
+.build/
+node_modules/
+.next/
+.cache/
+.swiftpm/
+.xcode-derived/

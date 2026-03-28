@@ -175,6 +175,27 @@ def _flatten_user_records(records: List[dict]) -> pd.DataFrame:
 
 @dataclass
 class SummaryRow:
+    """Summary statistics for an experiment mode/run.
+
+    Parameters
+    ----------
+    mode : str
+        Mode label (e.g., "baseline", "adaptive").
+    accuracy : float
+        Accuracy metric value.
+    accept_rate : float
+        Fraction of items accepted by users.
+    novelty_rate : float
+        Fraction of novel/unseen items recommended.
+    serendipity : float
+        Serendipity metric value.
+    mean_knowledge : float
+        Average user knowledge across rounds.
+    epsilon_cum : float
+        Cumulative privacy budget consumed.
+    mean_engagement : float, optional
+        Average user engagement (default: NaN).
+    """
     mode: str
     accuracy: float
     accept_rate: float

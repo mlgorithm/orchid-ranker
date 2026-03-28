@@ -21,6 +21,13 @@ from orchid_ranker.agents.student_agent import StudentAgent
 # ------------------------------------------------------------------------------------
 @dataclass
 class MultiConfig:
+    """Configuration for multi-user agentic orchestration experiments.
+
+    Parameters
+    ----------
+    rounds : int, optional
+        Number of recommendation rounds (default: 10).
+    """
     rounds: int = 10
     top_k_base: int = 5
     zpd_margin: float = 0.12
@@ -74,6 +81,23 @@ class MultiConfig:
 
 @dataclass
 class UserCtx:
+    """User context and state for agentic recommendations.
+
+    Parameters
+    ----------
+    user_id : int
+        External user identifier.
+    user_idx : int
+        Internal index into user feature matrix.
+    student : Any
+        StudentAgent instance for adaptive personalization.
+    user_vec : torch.Tensor
+        Shape (1, Du), user feature vector.
+    profile : str, optional
+        Profile tag for fairness tracking (default: None).
+    name : str, optional
+        User name or identifier (default: None).
+    """
     user_id: int           # external user ID
     user_idx: int          # internal index into user_matrix
     student: Any           # StudentAgent instance
@@ -83,6 +107,35 @@ class UserCtx:
 
 @dataclass
 class PolicyState:
+    """Adaptive policy parameters and moving-average statistics.
+
+    Parameters
+    ----------
+    alpha : float
+        Exploration strength parameter.
+    lam : float
+        Diversity/MMR weight.
+    top_k : int
+        Top-k for ranking and candidate filtering.
+    zpd_delta : float
+        Zone of proximal development margin.
+    novelty : float
+        Novelty bonus weight.
+    accept_ma : float, optional
+        Moving average of acceptance rate (default: 0.5).
+    acc_ma : float, optional
+        Moving average of accuracy (default: 0.6).
+    novelty_ma : float, optional
+        Moving average of novelty rate (default: 0.5).
+    reward_ma : float, optional
+        Moving average of reward/engagement (default: 0.55).
+    knowledge_ma : float, optional
+        Moving average of user knowledge (default: 0.5).
+    knowledge_delta_ma : float, optional
+        Moving average of knowledge change (default: 0.0).
+    rounds : int, optional
+        Number of rounds executed (default: 0).
+    """
     alpha: float
     lam: float
     top_k: int
@@ -101,6 +154,17 @@ class PolicyState:
 # A tiny “online state” placeholder (kept for compatibility)
 # ------------------------------------------------------------------------------------
 class OnlineState:
+    """Online user state tracking for knowledge, fatigue, trust, engagement, and uncertainty.
+
+    Parameters
+    ----------
+    None
+
+    Attributes
+    ----------
+    _state : dict
+        Mapping of user_id to state dict with keys: knowledge, fatigue, trust, engagement, uncertainty.
+    """
     def __init__(self):
         self._state: Dict[int, Dict[str, float]] = {}  # user_id -> {k,f,t,e,uncertainty}
 
@@ -168,6 +232,18 @@ class _TimingRecorder:
 # Orchestrator
 # ------------------------------------------------------------------------------------
 class MultiUserOrchestrator:
+    """Multi-user agentic recommendation orchestrator with online learning and privacy budgeting.
+
+    Coordinates recommendation rounds across users, tracks online metrics, handles student
+    training, popularity tracking, and logging.
+
+    Parameters
+    ----------
+    rec : TwoTowerRecommender | DualRecommender
+        Teacher recommender model.
+    users : List[UserCtx]
+        List of user contexts with student agents.
+    """
     class _PrivacyDummy:
         def __init__(self):
             self.mia_threshold: float = 0.55

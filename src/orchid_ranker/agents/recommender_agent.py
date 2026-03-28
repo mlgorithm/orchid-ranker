@@ -38,6 +38,15 @@ def _d(*args) -> None:
 # Minimal JSONL logger (privacy-friendly; avoids raw sensitive values)
 # ---------------------------------------------------------------------
 class JSONLLogger:
+    """Privacy-aware JSONL logger for recommendation events and metrics.
+
+    Parameters
+    ----------
+    path : Path
+        Output file path for JSONL logs.
+    max_feature_dump : int, optional
+        Maximum features to dump before truncation (default: 256).
+    """
     def __init__(self, path: Path, max_feature_dump: int = 256):
         self.path = Path(path)
         self.path.parent.mkdir(parents=True, exist_ok=True)
@@ -87,6 +96,17 @@ class JSONLLogger:
 # LinUCB arm-wise policy (stable & regularized)
 # ---------------------------------------------------------------------
 class LinUCBPolicy:
+    """Linear contextual bandit with UCB confidence bounds for arm selection.
+
+    Parameters
+    ----------
+    d : int
+        Feature dimension.
+    alpha : float, optional
+        Exploration bonus multiplier (default: 1.0).
+    l2 : float, optional
+        L2 regularization strength (default: 1.0).
+    """
     def __init__(self, d: int, alpha: float = 1.0, l2: float = 1.0):
         self.d = int(d)
         self.alpha = float(alpha)
@@ -177,6 +197,52 @@ class BootTS:
 # Two-Tower Recommender (updated)
 # ---------------------------------------------------------------------
 class TwoTowerRecommender(nn.Module):
+    """Two-tower neural recommender with state-dependent gating and diversity mechanisms.
+
+    Dual encoder architecture with FiLM gating for online learning, MMR diversity, and
+    zone-of-proximal-development constraints.
+
+    Parameters
+    ----------
+    num_users : int
+        Number of users.
+    num_items : int
+        Number of items.
+    user_dim : int
+        User feature dimension.
+    item_dim : int
+        Item feature dimension.
+    hidden : int, optional
+        Hidden layer dimension (default: 64).
+    emb_dim : int, optional
+        Embedding dimension (default: 32).
+    state_dim : int, optional
+        Cognitive state dimension [knowledge, fatigue, trust, engagement] (default: 4).
+    lr : float, optional
+        Learning rate (default: 1e-2).
+    seed : int, optional
+        Random seed (default: 42).
+    dp_cfg : dict, optional
+        Differential privacy config (default: None).
+    mmr_lambda : float, optional
+        Max-marginal-relevance diversity weight (default: 0.3).
+    novelty_bonus : float, optional
+        Novelty bonus factor (default: 0.10).
+    zpd_width : float, optional
+        Zone of proximal development width (default: 0.10).
+    zpd_weight : float, optional
+        ZPD constraint weight (default: 0.05).
+    sigma_min : float, optional
+        Minimum uncertainty/noise (default: 0.05).
+    item_bias : bool, optional
+        Whether to use per-item bias (default: True).
+    device : str, optional
+        Torch device (default: "cpu").
+    use_native_scoring : bool, optional
+        Use native C++ scoring kernel (default: False).
+    **kwargs
+        Additional parameters (num_cohorts, adapter_slots, etc.).
+    """
     def __init__(
         self,
         num_users: int,
