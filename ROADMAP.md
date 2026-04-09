@@ -14,9 +14,10 @@ The plan is organized into 6 phases over ~20 weeks. Phases overlap where depende
 
 ---
 
-## Phase 1 — Performance Foundation (Weeks 1–4)
+## Phase 1 — Performance Foundation (Weeks 1–4) ✅ CORE COMPLETE
 
-**Goal:** 3–5× inference speedup on key hot paths; establish benchmark baselines.
+**Goal:** 3–5× inference speedup on key hot paths; establish benchmark baselines.  
+**Status:** Core deliverables complete. LinUCB batched solve deferred to Phase 3 (lower priority).
 
 ### 1.1 Vectorize the Critical Hot Paths
 
@@ -63,11 +64,12 @@ No optimization program works without before/after numbers.
 - Gate CI on ±15% regression threshold.
 
 **Deliverables:**
-- [ ] Vectorized negative sampling in NeuralMF
-- [ ] Batched user inference in orchestrator
-- [ ] torch.compile integration for TwoTower
-- [ ] Golden benchmark baselines committed + CI regression gate
-- [ ] Pre-allocated state buffers in agentic loop
+- [x] Vectorized negative sampling in NeuralMF *(done — `5dedc6a`)*
+- [x] Batched user inference in orchestrator *(done — `38e9177` adds `infer_batch()`)*
+- [x] torch.compile integration for TwoTower *(done — `38e9177` adds `compile=True` flag)*
+- [x] Golden benchmark baselines committed + CI regression gate *(done — `b7bb623`)*
+- [x] Pre-allocated state buffers in agentic loop *(done — `38e9177`)*
+- [ ] LinUCB batched matrix solve *(deferred — lower priority)*
 
 ---
 
