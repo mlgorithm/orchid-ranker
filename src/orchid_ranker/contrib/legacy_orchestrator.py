@@ -20,8 +20,9 @@ import numpy as np
 import torch
 
 warnings.warn(
-    "orchid_ranker.contrib.legacy_orchestrator is deprecated and will be removed in v0.4.0. "
-    "Use orchid_ranker.agents.agentic.MultiUserOrchestrator instead.",
+    "orchid_ranker.contrib.legacy_orchestrator is deprecated and will be removed in v0.5.0. "
+    "Use orchid_ranker.agents.orchestrator.MultiUserOrchestrator instead. "
+    "See docs/migration/legacy_orchestrator.md for a migration guide.",
     DeprecationWarning,
     stacklevel=2,
 )
