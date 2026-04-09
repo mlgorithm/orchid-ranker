@@ -44,5 +44,8 @@ jobs:
       - name: Run mypy type checking
         run: python -m mypy src/orchid_ranker --ignore-missing-imports
 
-      - name: Run full test suite
-        run: python -m pytest tests/ -x --tb=short
+      - name: Run full test suite with coverage
+        run: |
+          python -m pytest tests/ -x --tb=short \
+            --cov=orchid_ranker --cov-report=term-missing \
+            --cov-fail-under=70
