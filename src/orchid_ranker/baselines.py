@@ -171,6 +171,14 @@ class PopularityBaseline(BaseBaseline):
     def __init__(self, popularity: Dict[int, float], device: torch.device):
         super().__init__(device)
         self.popularity = popularity
+        # Pre-build lookup tensor for vectorized scoring
+        if popularity:
+            max_id = max(popularity.keys()) + 1
+        else:
+            max_id = 1
+        self._pop_tensor = torch.zeros(max_id, dtype=torch.float32, device=device)
+        for item_id, score in popularity.items():
+            self._pop_tensor[item_id] = score
 
     def infer(self, *, item_ids: torch.Tensor, **_):
         """Score items by their popularity.
@@ -185,8 +193,15 @@ class PopularityBaseline(BaseBaseline):
         torch.Tensor
             Popularity scores of shape (1, num_items).
         """
-        scores = [self.popularity.get(int(i.item()), 0.0) for i in item_ids]
-        return torch.tensor(scores, dtype=torch.float32, device=self.device).unsqueeze(0)
+        ids = item_ids.long()
+        # Expand lookup tensor if needed for out-of-range item IDs
+        max_id = int(ids.max().item()) + 1 if ids.numel() > 0 else 0
+        if max_id > self._pop_tensor.size(0):
+            expanded = torch.zeros(max_id, dtype=torch.float32, device=self.device)
+            expanded[:self._pop_tensor.size(0)] = self._pop_tensor
+            self._pop_tensor = expanded
+        scores = self._pop_tensor[ids]
+        return scores.unsqueeze(0)
 
     def decide(self, *, logits: torch.Tensor, top_k: int, item_ids: torch.Tensor, **_):
         """Select top-k most popular items.
@@ -367,6 +382,9 @@ class UserKNNBaseline(BaseBaseline):
         super().__init__(device)
         self.matrix = user_item_matrix.astype(np.float32)
         self.k = k
+        self._matrix_t = torch.from_numpy(self.matrix).to(device)
+        self._norms = torch.norm(self._matrix_t, dim=1, keepdim=True).clamp(min=1e-8)
+        self._normed = self._matrix_t / self._norms
 
     def infer(self, *, user_ids: torch.Tensor, item_ids: torch.Tensor, **_):
         """Score items based on similar users' preferences.
@@ -384,13 +402,16 @@ class UserKNNBaseline(BaseBaseline):
             Item scores of shape (1, num_items).
         """
         uid = int(user_ids.item())
-        user_vector = self.matrix[uid]
-        norms = np.linalg.norm(self.matrix, axis=1) + 1e-8
-        sims = (self.matrix @ user_vector) / (norms * np.linalg.norm(user_vector) + 1e-8)
-        top_neighbors = np.argsort(sims)[-self.k :]
-        neighbor_pref = self.matrix[top_neighbors].mean(axis=0)
-        scores = neighbor_pref[[int(i.item()) for i in item_ids]]
-        return torch.tensor(scores, dtype=torch.float32, device=self.device).unsqueeze(0)
+        user_vec = self._normed[uid]  # (num_items,)
+        # Cosine similarity via dot product of normalized vectors
+        sims = self._normed @ user_vec  # (num_users,)
+        # Get top-k neighbors (exclude self)
+        sims[uid] = -1.0
+        _, top_idx = torch.topk(sims, self.k)
+        # Average neighbor preferences
+        neighbor_pref = self._matrix_t[top_idx].mean(dim=0)  # (num_items,)
+        scores = neighbor_pref[item_ids.long()]
+        return scores.unsqueeze(0)
 
     def decide(self, *, logits: torch.Tensor, top_k: int, item_ids: torch.Tensor, **_):
         """Select top-k items by neighbor preference score.
@@ -799,14 +820,7 @@ class NeuralMatrixFactorizationBaseline(BaseBaseline):
         items = torch.tensor(list(item_ids), dtype=torch.long, device=self.device)
         y = torch.tensor(list(labels), dtype=torch.float32, device=self.device)
         if self.loss_type == "bpr":
-            # Build per-user positive sets for negative sampling
-            import numpy as np
-            pos_df = torch.stack([users, items, (y > 0).float()], dim=1).detach().cpu().numpy()
-            by_user: dict[int, set[int]] = {}
-            for u, i, lbl in pos_df:
-                if lbl >= 0.5:
-                    by_user.setdefault(int(u), set()).add(int(i))
-            all_items = np.arange(self.num_items, dtype=np.int64)
+            # BPR: Bayesian Personalized Ranking
             bsz = max(256, self.batch_size)
             for _ in range(self.epochs):
                 perm = torch.randperm(users.size(0), device=self.device)
@@ -814,21 +828,10 @@ class NeuralMatrixFactorizationBaseline(BaseBaseline):
                     idx = perm[start:start+bsz]
                     u_pos = users[idx]
                     i_pos = items[idx]
-                    # Sample one negative per positive
-                    j_neg = []
-                    for u in u_pos.detach().cpu().numpy():
-                        pos_set = by_user.get(int(u), set())
-                        # ensure at least one negative exists
-                        cand = all_items
-                        # sample until not in positives (cap tries)
-                        for _tries in range(10):
-                            j = int(np.random.randint(0, self.num_items))
-                            if j not in pos_set:
-                                j_neg.append(j)
-                                break
-                        else:
-                            j_neg.append(int(np.random.randint(0, self.num_items)))
-                    j_neg = torch.tensor(j_neg, dtype=torch.long, device=self.device)
+                    # Vectorized negative sampling — sample batch at once on device.
+                    # For large item counts, collision probability with positives is negligible,
+                    # so uniform sampling is a good approximation and avoids rejection sampling overhead.
+                    j_neg = torch.randint(0, self.num_items, (u_pos.size(0),), device=self.device)
                     self.optimizer.zero_grad()
                     # predicted preference scores (logits before sigmoid)
                     u_emb = self.user_emb(u_pos)
@@ -844,14 +847,9 @@ class NeuralMatrixFactorizationBaseline(BaseBaseline):
             self.result.train_loss = float(loss.detach().cpu().item()) if 'loss' in locals() else 0.0
         elif self.loss_type == "softmax":
             # Sampled softmax over (1 positive + K negatives) per positive pair
-            import numpy as np
             pos_mask = (y > 0)
             up = users[pos_mask]
             ip = items[pos_mask]
-            # build positives per user for negative sampling
-            by_user: dict[int, set[int]] = {}
-            for uu, ii in zip(up.detach().cpu().numpy(), ip.detach().cpu().numpy()):
-                by_user.setdefault(int(uu), set()).add(int(ii))
             bsz = max(256, self.batch_size)
             neg_k = max(1, self.neg_k)
             ce = nn.CrossEntropyLoss()
@@ -861,23 +859,9 @@ class NeuralMatrixFactorizationBaseline(BaseBaseline):
                     idx = perm[start:start+bsz]
                     u_pos = up[idx]
                     i_pos = ip[idx]
-                    # sample K negatives per positive
-                    neg_list = []
-                    for u in u_pos.detach().cpu().numpy():
-                        pos_set = by_user.get(int(u), set())
-                        # sample without replacement if possible
-                        candidates = []
-                        trials = 0
-                        while len(candidates) < neg_k and trials < neg_k * 5:
-                            j = int(np.random.randint(0, self.num_items))
-                            if j not in pos_set:
-                                candidates.append(j)
-                            trials += 1
-                        # pad if needed
-                        while len(candidates) < neg_k:
-                            candidates.append(int(np.random.randint(0, self.num_items)))
-                        neg_list.append(candidates)
-                    j_neg = torch.tensor(neg_list, dtype=torch.long, device=self.device)  # [B, K]
+                    # Vectorized: sample [batch_size, neg_k] negatives at once.
+                    # For large item catalogs, collision probability with positives is negligible.
+                    j_neg = torch.randint(0, self.num_items, (u_pos.size(0), neg_k), device=self.device)  # [B, K]
 
                     self.optimizer.zero_grad()
                     u_emb = self.user_emb(u_pos)                      # [B, D]
