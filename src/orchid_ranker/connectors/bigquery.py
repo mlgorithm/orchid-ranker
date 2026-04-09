@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import logging
+import os
 import time
 from dataclasses import dataclass
 from typing import Optional
@@ -47,12 +48,45 @@ class BigQueryConnector:
         Max retry attempts.
     timeout : int
         Operation timeout.
+
+    Examples
+    --------
+    Load from environment variables:
+        >>> conn = BigQueryConnector.from_env()
     """
 
     project: Optional[str] = None
     dataset: Optional[str] = None
     max_retries: int = 3
     timeout: int = 30
+
+    @classmethod
+    def from_env(cls, prefix: str = "ORCHID_BIGQUERY") -> BigQueryConnector:
+        """Create a BigQueryConnector from environment variables.
+
+        Reads configuration from environment variables with the given prefix.
+        All variables are optional and can be None.
+
+        Parameters
+        ----------
+        prefix : str, optional
+            Environment variable prefix (default: "ORCHID_BIGQUERY").
+            For example, with prefix="ORCHID_BIGQUERY", expects:
+            - ORCHID_BIGQUERY_PROJECT (optional)
+            - ORCHID_BIGQUERY_DATASET (optional)
+
+        Returns
+        -------
+        BigQueryConnector
+            Configured connector instance.
+        """
+        project = os.environ.get(f"{prefix}_PROJECT")
+        dataset = os.environ.get(f"{prefix}_DATASET")
+
+        return cls(
+            project=project,
+            dataset=dataset,
+        )
 
     def _client(self):
         """Get or create BigQuery client.

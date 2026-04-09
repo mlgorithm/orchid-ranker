@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import logging
+import os
 import time
 from dataclasses import dataclass
 from typing import Iterable, Optional
@@ -55,6 +56,11 @@ class S3StreamConnector:
         Max retry attempts.
     timeout : int
         Operation timeout.
+
+    Examples
+    --------
+    Load from environment variables:
+        >>> conn = S3StreamConnector.from_env()
     """
 
     bucket: str
@@ -63,6 +69,48 @@ class S3StreamConnector:
     region: Optional[str] = None
     max_retries: int = 3
     timeout: int = 30
+
+    @classmethod
+    def from_env(cls, prefix: str = "ORCHID_S3") -> S3StreamConnector:
+        """Create an S3StreamConnector from environment variables.
+
+        Reads configuration from environment variables with the given prefix.
+        Only the bucket is required; other variables are optional.
+
+        Parameters
+        ----------
+        prefix : str, optional
+            Environment variable prefix (default: "ORCHID_S3").
+            For example, with prefix="ORCHID_S3", expects:
+            - ORCHID_S3_BUCKET (required)
+            - ORCHID_S3_PREFIX (optional, default: "")
+            - ORCHID_S3_PROFILE (optional)
+            - ORCHID_S3_REGION (optional)
+
+        Returns
+        -------
+        S3StreamConnector
+            Configured connector instance.
+
+        Raises
+        ------
+        EnvironmentError
+            If ORCHID_S3_BUCKET is not set.
+        """
+        bucket = os.environ.get(f"{prefix}_BUCKET")
+        if not bucket:
+            raise EnvironmentError(f"Missing required environment variable: {prefix}_BUCKET")
+
+        prefix_value = os.environ.get(f"{prefix}_PREFIX", "")
+        profile = os.environ.get(f"{prefix}_PROFILE")
+        region = os.environ.get(f"{prefix}_REGION")
+
+        return cls(
+            bucket=bucket,
+            prefix=prefix_value,
+            profile=profile,
+            region=region,
+        )
 
     def _client(self):
         """Get or create S3 client.

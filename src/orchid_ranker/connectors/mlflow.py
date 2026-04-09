@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import logging
+import os
 import time
 from dataclasses import dataclass
 from typing import Any, Dict, Optional
@@ -46,12 +47,45 @@ class MLflowTracker:
         Max retry attempts.
     timeout : int
         Operation timeout.
+
+    Examples
+    --------
+    Load from environment variables:
+        >>> tracker = MLflowTracker.from_env()
     """
 
     experiment: Optional[str] = None
     tracking_uri: Optional[str] = None
     max_retries: int = 3
     timeout: int = 30
+
+    @classmethod
+    def from_env(cls, prefix: str = "ORCHID_MLFLOW") -> MLflowTracker:
+        """Create an MLflowTracker from environment variables.
+
+        Reads configuration from environment variables with the given prefix.
+        All variables are optional.
+
+        Parameters
+        ----------
+        prefix : str, optional
+            Environment variable prefix (default: "ORCHID_MLFLOW").
+            For example, with prefix="ORCHID_MLFLOW", expects:
+            - ORCHID_MLFLOW_EXPERIMENT (optional)
+            - ORCHID_MLFLOW_TRACKING_URI (optional)
+
+        Returns
+        -------
+        MLflowTracker
+            Configured tracker instance.
+        """
+        experiment = os.environ.get(f"{prefix}_EXPERIMENT")
+        tracking_uri = os.environ.get(f"{prefix}_TRACKING_URI")
+
+        return cls(
+            experiment=experiment,
+            tracking_uri=tracking_uri,
+        )
 
     def _client(self):
         """Get or initialize MLflow client.

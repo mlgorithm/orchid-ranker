@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import logging
+import os
 import time
 from dataclasses import dataclass
 from typing import Any, Dict, Optional
@@ -28,6 +29,11 @@ class SnowflakeConnector:
     automatic exponential backoff retry logic.
     Requires snowflake-connector-python library (optional dependency).
 
+    Secure credential management: Use `from_env()` or `from_vault()` classmethods
+    to load credentials from environment variables or secret vaults rather than
+    passing plaintext passwords. This prevents credentials from being exposed in
+    logs, tracebacks, or source code.
+
     Parameters
     ----------
     account : str
@@ -35,7 +41,7 @@ class SnowflakeConnector:
     user : str
         Snowflake username.
     password : str
-        Snowflake password.
+        Snowflake password. Prefer loading via `from_env()` or `from_vault()`.
     warehouse : str, optional
         Warehouse name. If None, uses default warehouse.
     database : str, optional
@@ -54,7 +60,7 @@ class SnowflakeConnector:
     user : str
         Snowflake username.
     password : str
-        Snowflake password (should not be logged).
+        Snowflake password (masked in __repr__).
     warehouse : str, optional
         Warehouse name.
     database : str, optional
@@ -65,6 +71,14 @@ class SnowflakeConnector:
         Max retry attempts.
     timeout : int
         Login timeout.
+
+    Examples
+    --------
+    Load from environment variables:
+        >>> conn = SnowflakeConnector.from_env()
+
+    Load from a vault (HashiCorp Vault or AWS Secrets Manager):
+        >>> conn = SnowflakeConnector.from_vault(vault_client, "snowflake/prod")
     """
 
     account: str
@@ -75,6 +89,196 @@ class SnowflakeConnector:
     schema: Optional[str] = None
     max_retries: int = 3
     timeout: int = 30
+
+    def __repr__(self) -> str:
+        """Return a string representation with password masked for security.
+
+        Returns
+        -------
+        str
+            Representation with password shown as '****'.
+        """
+        return (
+            f"SnowflakeConnector(account={self.account!r}, user={self.user!r}, "
+            f"password='****', warehouse={self.warehouse!r}, database={self.database!r}, "
+            f"schema={self.schema!r}, max_retries={self.max_retries}, timeout={self.timeout})"
+        )
+
+    @classmethod
+    def from_env(cls, prefix: str = "ORCHID_SNOWFLAKE") -> SnowflakeConnector:
+        """Create a SnowflakeConnector from environment variables.
+
+        Reads credentials and configuration from environment variables with the
+        given prefix. Required variables: {prefix}_ACCOUNT, {prefix}_USER,
+        {prefix}_PASSWORD.
+
+        Parameters
+        ----------
+        prefix : str, optional
+            Environment variable prefix (default: "ORCHID_SNOWFLAKE").
+            For example, with prefix="ORCHID_SNOWFLAKE", expects:
+            - ORCHID_SNOWFLAKE_ACCOUNT
+            - ORCHID_SNOWFLAKE_USER
+            - ORCHID_SNOWFLAKE_PASSWORD
+            - ORCHID_SNOWFLAKE_WAREHOUSE (optional)
+            - ORCHID_SNOWFLAKE_DATABASE (optional)
+            - ORCHID_SNOWFLAKE_SCHEMA (optional)
+
+        Returns
+        -------
+        SnowflakeConnector
+            Configured connector instance.
+
+        Raises
+        ------
+        EnvironmentError
+            If required environment variables are missing.
+        """
+        account = os.environ.get(f"{prefix}_ACCOUNT")
+        user = os.environ.get(f"{prefix}_USER")
+        password = os.environ.get(f"{prefix}_PASSWORD")
+        warehouse = os.environ.get(f"{prefix}_WAREHOUSE")
+        database = os.environ.get(f"{prefix}_DATABASE")
+        schema = os.environ.get(f"{prefix}_SCHEMA")
+
+        missing = []
+        if not account:
+            missing.append(f"{prefix}_ACCOUNT")
+        if not user:
+            missing.append(f"{prefix}_USER")
+        if not password:
+            missing.append(f"{prefix}_PASSWORD")
+
+        if missing:
+            raise EnvironmentError(
+                f"Missing required environment variables: {', '.join(missing)}"
+            )
+
+        return cls(
+            account=account,
+            user=user,
+            password=password,
+            warehouse=warehouse,
+            database=database,
+            schema=schema,
+        )
+
+    @classmethod
+    def from_vault(
+        cls,
+        vault_client: Any,
+        secret_path: str,
+        *,
+        account_key: str = "account",
+        user_key: str = "user",
+        password_key: str = "password",
+        warehouse_key: str = "warehouse",
+        database_key: str = "database",
+        schema_key: str = "schema",
+    ) -> SnowflakeConnector:
+        """Create a SnowflakeConnector from a vault client.
+
+        Supports multiple vault backends:
+        - HashiCorp Vault: calls `vault_client.read_secret(secret_path)`
+        - AWS Secrets Manager: calls `vault_client.get_secret_value(SecretId=secret_path)`
+
+        Parameters
+        ----------
+        vault_client : Any
+            Vault client instance (e.g., hvac.Client or boto3 SecretsManager client).
+        secret_path : str
+            Path or SecretId for the secret in the vault.
+        account_key : str, optional
+            Key for account field in secret (default: "account").
+        user_key : str, optional
+            Key for user field in secret (default: "user").
+        password_key : str, optional
+            Key for password field in secret (default: "password").
+        warehouse_key : str, optional
+            Key for warehouse field in secret (default: "warehouse").
+        database_key : str, optional
+            Key for database field in secret (default: "database").
+        schema_key : str, optional
+            Key for schema field in secret (default: "schema").
+
+        Returns
+        -------
+        SnowflakeConnector
+            Configured connector instance.
+
+        Raises
+        ------
+        ValueError
+            If secret cannot be read or required keys are missing.
+
+        Examples
+        --------
+        With HashiCorp Vault:
+            >>> import hvac
+            >>> vault = hvac.Client(url="http://vault:8200", token="...")
+            >>> conn = SnowflakeConnector.from_vault(vault, "secret/snowflake/prod")
+
+        With AWS Secrets Manager:
+            >>> import boto3
+            >>> sm = boto3.client("secretsmanager")
+            >>> conn = SnowflakeConnector.from_vault(sm, "snowflake/prod")
+        """
+        try:
+            # Try HashiCorp Vault pattern first
+            if hasattr(vault_client, "read_secret"):
+                secret_data = vault_client.read_secret(secret_path)
+                if isinstance(secret_data, dict) and "data" in secret_data:
+                    # Standard Vault response structure
+                    secret_dict = secret_data.get("data", {})
+                else:
+                    secret_dict = secret_data
+            # Fall back to AWS Secrets Manager pattern
+            elif hasattr(vault_client, "get_secret_value"):
+                response = vault_client.get_secret_value(SecretId=secret_path)
+                if "SecretString" in response:
+                    import json
+
+                    secret_dict = json.loads(response["SecretString"])
+                else:
+                    secret_dict = response
+            else:
+                raise ValueError(
+                    "vault_client must implement read_secret() (Vault) or "
+                    "get_secret_value() (AWS Secrets Manager)"
+                )
+        except Exception as e:
+            raise ValueError(f"Failed to read secret from vault: {e}") from e
+
+        # Extract keys with defaults for optional fields
+        account = secret_dict.get(account_key)
+        user = secret_dict.get(user_key)
+        password = secret_dict.get(password_key)
+        warehouse = secret_dict.get(warehouse_key)
+        database = secret_dict.get(database_key)
+        schema = secret_dict.get(schema_key)
+
+        # Check required fields
+        missing = []
+        if not account:
+            missing.append(account_key)
+        if not user:
+            missing.append(user_key)
+        if not password:
+            missing.append(password_key)
+
+        if missing:
+            raise ValueError(
+                f"Missing required keys in vault secret: {', '.join(missing)}"
+            )
+
+        return cls(
+            account=account,
+            user=user,
+            password=password,
+            warehouse=warehouse,
+            database=database,
+            schema=schema,
+        )
 
     def _require_lib(self):
         """Verify snowflake-connector-python is installed.
