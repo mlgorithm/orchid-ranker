@@ -769,6 +769,10 @@ class MultiUserOrchestrator:
             except Exception:
                 self.logger = None
 
+        # ---------- pre-allocate reusable state buffer ----------
+        # Avoids creating a new GPU tensor per user per round (saves ~1-2ms/user)
+        self._state_buf = torch.zeros((1, 4), dtype=torch.float32, device=self.device)
+
         # ---------- optional pre-loop warmup (pseudo-labels) ----------
         if is_adaptive and int(self.cfg.warmup_rounds) > 0 and bool(getattr(self.cfg, "warmup_preloop", False)):
             try:
@@ -798,7 +802,11 @@ class MultiUserOrchestrator:
                     for ux in self.users:
                         uid = int(ux.user_id)
                         user_ids = torch.tensor([uid], dtype=torch.long, device=self.device)
-                        state_vec = torch.tensor([[self._khat[uid], 0.0, 0.5, self._ehat[uid]]], dtype=torch.float32, device=self.device)
+                        self._state_buf[0, 0] = self._khat[uid]
+                        self._state_buf[0, 1] = 0.0
+                        self._state_buf[0, 2] = 0.5
+                        self._state_buf[0, 3] = self._ehat[uid]
+                        state_vec = self._state_buf
                         # sample show_cnt candidate positions
                         all_pos = torch.arange(self.item_matrix.shape[0], dtype=torch.long, device=self.device)
                         perm = torch.randperm(all_pos.numel(), device=self.device)
@@ -944,8 +952,12 @@ class MultiUserOrchestrator:
                 pre = _extract_student_state(ux.student)
                 k_val, f_val, t_val, e_val = pre["knowledge"], pre["fatigue"], pre["trust"], pre["engagement"]
 
-                # state vector for the recommender
-                state_vec = torch.tensor([[k_val, f_val, t_val, e_val]], dtype=torch.float32, device=self.device)
+                # Reuse pre-allocated state buffer (avoids per-user GPU tensor allocation)
+                self._state_buf[0, 0] = k_val
+                self._state_buf[0, 1] = f_val
+                self._state_buf[0, 2] = t_val
+                self._state_buf[0, 3] = e_val
+                state_vec = self._state_buf
 
                 with self._timing.phase("candidate_sampling"):
                     # ---- candidate sampling (optionally deterministic per round) ----

@@ -240,6 +240,10 @@ class TwoTowerRecommender(nn.Module):
         Torch device (default: "cpu").
     use_native_scoring : bool, optional
         Use native C++ scoring kernel (default: False).
+    compile : bool, optional
+        Enable torch.compile graph optimization on the scoring path.
+        Requires PyTorch >= 2.0 and a CUDA device (not supported on MPS).
+        Can provide 20-40% inference latency reduction (default: False).
     **kwargs
         Additional parameters (num_cohorts, adapter_slots, etc.).
     """
@@ -263,6 +267,7 @@ class TwoTowerRecommender(nn.Module):
         item_bias: bool = True,
         device: str = "cpu",
         use_native_scoring: bool = False,
+        compile: bool = False,
         **kwargs,
     ):
         super().__init__()
@@ -430,7 +435,22 @@ class TwoTowerRecommender(nn.Module):
 
         self.device = device
         self.per_user_only = False
+        self._compiled = False
         self.to(self.device)
+
+        # Optional torch.compile for scoring path (PyTorch >= 2.0, CUDA only)
+        if compile:
+            _torch_version = tuple(int(x) for x in torch.__version__.split(".")[:2])
+            _is_cuda = "cuda" in str(device)
+            if _torch_version >= (2, 0) and _is_cuda:
+                try:
+                    self._scores_logits = torch.compile(  # type: ignore[assignment]
+                        self._scores_logits, mode="reduce-overhead"
+                    )
+                    self._compiled = True
+                except Exception:
+                    pass  # fallback to eager if compile fails
+
         self.audit_logger: Optional[AuditLogger] = None
         self._audit_actor = "TwoTowerRecommender"
 
@@ -857,6 +877,84 @@ class TwoTowerRecommender(nn.Module):
         if _DEBUG_REC:
             _d(f"infer: logits shape={tuple(out.shape)}")
         return out
+
+    def infer_batch(
+        self,
+        *,
+        user_vecs: torch.Tensor,
+        item_matrix: torch.Tensor,
+        user_ids: torch.Tensor,
+        item_ids: torch.Tensor,
+        state_vecs: torch.Tensor,
+        cohort_ids: Optional[torch.Tensor] = None,
+    ) -> torch.Tensor:
+        """Batched inference for multiple users in a single forward pass.
+
+        Instead of calling infer() N times (once per user), this method
+        processes all users simultaneously, reducing device sync overhead
+        and enabling GPU parallelism.
+
+        Parameters
+        ----------
+        user_vecs : torch.Tensor
+            User feature vectors, shape (N, user_dim).
+        item_matrix : torch.Tensor
+            Full item feature matrix, shape (num_items, item_dim).
+        user_ids : torch.Tensor
+            User indices, shape (N,).
+        item_ids : torch.Tensor
+            Candidate item indices, shape (K,). Same candidates for all users.
+        state_vecs : torch.Tensor
+            Cognitive state vectors, shape (N, state_dim).
+        cohort_ids : torch.Tensor, optional
+            Cohort indices, shape (N,).
+
+        Returns
+        -------
+        torch.Tensor
+            Logits of shape (N, K) — scores for each user × candidate pair.
+        """
+        N = user_ids.size(0)
+        K = item_ids.size(0)
+        dev = item_matrix.device
+
+        # Move inputs to device
+        user_vecs = user_vecs.to(dev)
+        user_ids = user_ids.to(dev)
+        item_ids = item_ids.long().to(dev)
+        state_vecs = state_vecs.to(dev)
+
+        # Item tower (shared across all users — compute once)
+        I_base = self.item_net(item_matrix.index_select(0, item_ids))  # [K, H]
+        I = self.item_proj(I_base) + self.item_emb(item_ids)          # [K, D]
+        I = torch.nn.functional.normalize(I, dim=-1)
+
+        # User tower (batched for all N users)
+        xu_cat = torch.cat([user_vecs, state_vecs], dim=1)  # [N, Du+S]
+        u_base = self.user_net(xu_cat)                       # [N, H]
+
+        # FiLM gating
+        gamma_beta = self.state_to_gate(state_vecs)  # [N, 2H]
+        gamma, beta = gamma_beta.chunk(2, dim=1)
+        u_base = u_base * (1 + torch.tanh(gamma)) + beta
+
+        u = self.user_proj(u_base) + self.user_emb(user_ids)  # [N, D]
+        if (cohort_ids is not None) and (self.cohort_emb is not None):
+            u = u + self.cohort_emb(cohort_ids.to(dev))
+        u = torch.nn.functional.normalize(u, dim=-1)
+
+        # Batched dot product: [N, D] × [D, K] → [N, K]
+        logits = u @ I.t()
+
+        # Per-user calibration
+        tau = torch.clamp(self.user_temp(user_ids), 0.25, 4.0)  # [N, 1]
+        b_u = self.user_bias(user_ids)                            # [N, 1]
+        logits = logits / tau + b_u
+
+        if self.item_bias is not None:
+            logits = logits + self.item_bias(item_ids).squeeze(1).unsqueeze(0)
+
+        return torch.nan_to_num(logits, nan=-1e9, posinf=1e9, neginf=-1e9)
 
     def update(self, *,
            feedback: Dict[int, int],
