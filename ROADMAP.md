@@ -199,9 +199,10 @@ from .agents import StudentAgent, MultiUserOrchestrator, TwoTowerRecommender
 
 ---
 
-## Phase 4 — Security & Compliance Hardening (Weeks 6–10)
+## Phase 4 — Security & Compliance Hardening (Weeks 6–10) ✅ CORE COMPLETE
 
-**Goal:** Security model that passes enterprise procurement review.
+**Goal:** Security model that passes enterprise procurement review.  
+**Status:** Core deliverables complete. JWT/OIDC auth, HMAC audit chains, secrets management for all 4 connectors, and threat model document all shipped. Pen test scheduling is an external action item.
 
 ### 4.1 Authentication Integration
 
@@ -246,11 +247,11 @@ Create `docs/security/threat_model.md`:
 - Scope: the library's serialization (pickle/torch.load attack surface), the audit webhook endpoint, the connector authentication flows.
 
 **Deliverables:**
-- [ ] JWT/OIDC auth middleware (optional)
-- [ ] HMAC hash-chained audit logs + integrity verifier
-- [ ] Secrets-from-env/vault patterns for all connectors
-- [ ] Threat model document
-- [ ] Pen test scheduled and scoped
+- [x] JWT/OIDC auth middleware — `security/auth.py`: JWTAuthenticator with JWKS caching, role extraction, AccessControl integration *(done — `907f027`)*
+- [x] HMAC hash-chained audit logs + integrity verifier — `verify_log_integrity()` + optional Fernet encryption *(done — `907f027`)*
+- [x] Secrets-from-env/vault patterns for all 4 connectors: Snowflake (from_env + from_vault + masked repr), BigQuery, S3, MLflow *(done — `907f027`)*
+- [x] Threat model document — `docs/security/threat_model.md`: 12-threat STRIDE matrix, serialization analysis, deployer checklist *(done — `907f027`)*
+- [ ] Pen test scheduled and scoped *(external action — not automatable)*
 
 ---
 
