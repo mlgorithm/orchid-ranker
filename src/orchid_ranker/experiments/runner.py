@@ -30,180 +30,29 @@ from orchid_ranker.baselines import (
 )
 from itertools import product
 
+# Import from new modules
+from orchid_ranker.experiments.data_prep import (
+    _resolve_id_column,
+    _build_feature_matrix,
+    _prepare_item_meta,
+    _flatten_round_records,
+    _flatten_user_records,
+)
+from orchid_ranker.experiments.evaluation import (
+    _fmt_scalar_or_mean,
+    _CompositeLogger,
+    _MemoryLogger,
+    SummaryRow,
+)
+from orchid_ranker.experiments.model_factory import (
+    warm_start_recommender,
+    build_adaptive,
+    build_fixed,
+    build_baseline,
+    train_baseline,
+    train_als,
+)
 
-# ---------------- internal loggers ----------------
-
-def _fmt_scalar_or_mean(x, ndigits=3):
-    try:
-        import numpy as np
-        if isinstance(x, (list, tuple, np.ndarray)):
-            return f"{float(np.mean(x)):.{ndigits}f}"
-        return f"{float(x):.{ndigits}f}"
-    except Exception:
-        return "nan"
-
-class _CompositeLogger:
-    def __init__(self, path: Path) -> None:
-        self.path = Path(path)
-        self.path.parent.mkdir(parents=True, exist_ok=True)
-        if self.path.exists():
-            self.path.unlink()
-        self.records: List[dict] = []
-
-    def log(self, obj: dict) -> None:
-        self.records.append(obj)
-        with self.path.open("a", encoding="utf-8") as f:
-            f.write(json.dumps(obj) + "\n")
-
-
-class _MemoryLogger:
-    def __init__(self) -> None:
-        self.records: List[dict] = []
-
-    def log(self, obj: dict) -> None:
-        self.records.append(obj)
-
-
-# ---------------- helpers ----------------
-
-def _resolve_id_column(df: pd.DataFrame, preferred: str, fallbacks: tuple[str, ...] = ()) -> str:
-    if preferred in df.columns:
-        return preferred
-    for col in fallbacks + ("u", "i", "user_id", "item_id", "id"):
-        if col in df.columns:
-            return col
-    return df.columns[0]
-
-
-def _build_feature_matrix(
-    df: pd.DataFrame,
-    id_col: str,
-    device: torch.device,
-    *,
-    kind: str = "items",
-    verbose: bool = True,
-):
-    """
-    Robust builder:
-    - Resolves the ID column.
-    - Keeps ONLY numeric feature columns (avoids object->NaN coercion).
-    - Cleans inf/-inf -> NaN -> 0.0.
-    """
-    if df.empty:
-        return np.arange(0, dtype=int), torch.zeros((0, 0), dtype=torch.float32, device=device)
-
-    resolved = _resolve_id_column(df, id_col)
-    ids = df[resolved].to_numpy()
-
-    rem = df.drop(columns=[resolved], errors="ignore")
-    num = rem.select_dtypes(include=[np.number]).copy()
-    dropped = [c for c in rem.columns if c not in num.columns]
-
-    if not num.empty:
-        num.replace([np.inf, -np.inf], np.nan, inplace=True)
-        num.fillna(0.0, inplace=True)
-
-    feats_np = num.to_numpy(dtype=np.float32) if not num.empty else np.zeros((len(df), 0), dtype=np.float32)
-    feats = torch.tensor(feats_np, dtype=torch.float32, device=device)
-
-    if verbose:
-        kept = list(num.columns)
-        msg = f"[{kind}] id_col='{resolved}', kept_num={len(kept)}, dropped_non_num={len(dropped)}"
-        if dropped:
-            msg += f", dropped={dropped[:8]}{'…' if len(dropped) > 8 else ''}"
-        print("[RankingExperiment]", msg)
-
-    return ids, feats
-
-
-def _prepare_item_meta(df: pd.DataFrame) -> Dict[int, dict]:
-    meta = {}
-    if df.empty:
-        return meta
-    id_col = _resolve_id_column(df, "i", ("item_id",))
-    for row in df.to_dict(orient="records"):
-        iid = int(row[id_col])
-        meta[iid] = {k: v for k, v in row.items() if k != id_col}
-    return meta
-
-
-def _flatten_round_records(records: List[dict]) -> pd.DataFrame:
-    rows = []
-    for rec in records:
-        if rec.get("type") != "round_summary":
-            continue
-        metric = rec.get("metrics", {})
-        rows.append({"round": rec.get("round"), "mode": rec.get("mode"), **metric})
-    return pd.DataFrame(rows)
-
-
-def _flatten_user_records(records: List[dict]) -> pd.DataFrame:
-    rows = []
-    for rec in records:
-        if rec.get("type") != "user_round":
-            continue
-        base = {
-            "round": rec.get("round"),
-            "mode": rec.get("mode"),
-            "user_id": rec.get("user_id"),
-            "student_method": rec.get("student_method"),
-            "profile": rec.get("profile"),
-        }
-        tel = rec.get("telemetry", {}) or {}
-        pre = ((rec.get("state_estimator") or {}).get("pre")) or {}
-        post = ((rec.get("state_estimator") or {}).get("post")) or {}
-        knobs = rec.get("knobs", {}) or {}
-
-        # telemetry
-        for k, v in tel.items():
-            base[f"tel_{k}"] = v
-        # knobs
-        for k, v in knobs.items():
-            base[f"knob_{k}"] = v
-        # pre / post
-        for k, v in pre.items():
-            base[f"pre_{k}"] = v
-        for k, v in post.items():
-            base[f"post_{k}"] = v
-
-        rows.append(base)
-    return pd.DataFrame(rows)
-
-
-
-# ---------------- data classes ----------------
-
-@dataclass
-class SummaryRow:
-    """Summary statistics for an experiment mode/run.
-
-    Parameters
-    ----------
-    mode : str
-        Mode label (e.g., "baseline", "adaptive").
-    accuracy : float
-        Accuracy metric value.
-    accept_rate : float
-        Fraction of items accepted by users.
-    novelty_rate : float
-        Fraction of novel/unseen items recommended.
-    serendipity : float
-        Serendipity metric value.
-    mean_knowledge : float
-        Average user knowledge across rounds.
-    epsilon_cum : float
-        Cumulative privacy budget consumed.
-    mean_engagement : float, optional
-        Average user engagement (default: NaN).
-    """
-    mode: str
-    accuracy: float
-    accept_rate: float
-    novelty_rate: float
-    serendipity: float
-    mean_knowledge: float
-    epsilon_cum: float
-    mean_engagement: float = float("nan")
 
 
 # ---------------- main class ----------------
@@ -733,66 +582,16 @@ class RankingExperiment:
         max_batches: Optional[int],
     ) -> None:
         cache = self._build_warm_cache()
-        if cache is None:
-            self._p("warm_start: skipped (no cache)")
-            return
-        user_idx, item_idx, labels = cache
-        total = int(len(labels))
-        if total == 0:
-            self._p("warm_start: skipped (empty cache)")
-            return
-
-        device = getattr(model, "device", self.device)
-        item_matrix = getattr(model, "item_matrix", None)
-        if item_matrix is None:
-            item_matrix = self.item_matrix
-        if item_matrix.device != device:
-            item_matrix = item_matrix.to(device)
-        state_dim = int(getattr(model, "state_dim", 0))
-
-        epochs = max(1, int(epochs))
-        batch_size = max(1, int(batch_size))
-        max_batches = int(max_batches) if max_batches is not None else None
-
-        self._p(f"warm_start: epochs={epochs}, batch_size={batch_size}, "
-                f"max_batches={max_batches}, total_pairs={total}")
-
-        batches = 0
-        for _ in range(epochs):
-            order = self.rng.permutation(total)
-            for start in range(0, total, batch_size):
-                if max_batches is not None and batches >= max_batches:
-                    self._p(f"warm_start: reached max_batches={max_batches}")
-                    model.eval()
-                    return
-                idx = order[start:start + batch_size]
-                if idx.size == 0:
-                    continue
-                u = torch.tensor(user_idx[idx], dtype=torch.long, device=device)
-                it = torch.tensor(item_idx[idx], dtype=torch.long, device=device)
-                y = torch.tensor(labels[idx], dtype=torch.float32, device=device)
-                batch = {
-                    "user_ids": u,
-                    "item_ids": it,
-                    "labels": y,
-                    "item_matrix": item_matrix,
-                }
-                if state_dim > 0:
-                    batch["state_vec"] = torch.zeros((len(idx), state_dim), dtype=torch.float32, device=device)
-                try:
-                    model.train_step(batch)
-                except TypeError:
-                    batch.pop("state_vec", None)
-                    model.train_step(batch)
-                batches += 1
-                if batches % 50 == 0:
-                    self._p(f"warm_start: batches={batches}")
-                if max_batches is not None and batches >= max_batches:
-                    self._p(f"warm_start: reached max_batches={max_batches}")
-                    model.eval()
-                    return
-        model.eval()
-        self._p(f"warm_start: done, batches={batches}")
+        warm_start_recommender(
+            model,
+            cache,
+            self.item_matrix,
+            self.rng,
+            epochs=epochs,
+            batch_size=batch_size,
+            max_batches=max_batches,
+            print_fn=self._p,
+        )
 
     def _make_config(self, *, console: bool, policy_gain: float) -> MultiConfig:
         return MultiConfig(
@@ -817,106 +616,43 @@ class RankingExperiment:
         adaptive_kwargs: Optional[Dict[str, object]] = None,
         warm_cfg: Optional[Dict[str, object]] = None,
     ):
-        tower_kwargs = dict(self.adaptive_defaults)
-        if adaptive_kwargs:
-            tower_kwargs.update(adaptive_kwargs)
-
-        blend_increment = float(tower_kwargs.pop("blend_increment", self.adaptive_defaults.get("blend_increment", 0.16)))
-        teacher_ema = float(tower_kwargs.pop("teacher_ema", self.adaptive_defaults.get("teacher_ema", 0.9)))
-
-        warm_defaults = dict(self.warm_start_defaults)
-        if warm_cfg:
-            for key, value in warm_cfg.items():
-                if value is not None:
-                    warm_defaults[key] = value
-        warm_enabled = bool(warm_defaults.get("enabled", True))
-        warm_epochs = int(warm_defaults.get("epochs", 0))
-        warm_batch = int(warm_defaults.get("batch_size", 1))
-        warm_max_batches = warm_defaults.get("max_batches")
-        if warm_max_batches is not None:
-            warm_max_batches = int(warm_max_batches)
-
-        teacher = TwoTowerRecommender(
+        return build_adaptive(
             num_users=len(self.user_ids),
             num_items=len(self.item_ids),
-            user_dim=self.user_matrix.shape[1],
-            item_dim=self.item_matrix.shape[1],
-            dp_cfg={**dp_cfg, "enabled": False},
-            **tower_kwargs,
-        )
-        student = TwoTowerRecommender(
-            num_users=len(self.user_ids),
-            num_items=len(self.item_ids),
-            user_dim=self.user_matrix.shape[1],
-            item_dim=self.item_matrix.shape[1],
+            user_matrix=self.user_matrix,
+            item_matrix=self.item_matrix,
+            pos2id=self.pos2id,
             dp_cfg=dp_cfg,
-            **tower_kwargs,
+            adaptive_defaults=self.adaptive_defaults,
+            warm_start_defaults=self.warm_start_defaults,
+            warm_cache=self._build_warm_cache(),
+            rng=self.rng,
+            adaptive_kwargs=adaptive_kwargs,
+            warm_cfg=warm_cfg,
+            print_fn=self._p,
         )
-
-        for model in (teacher, student):
-            setattr(model, "user_matrix", self.user_matrix)
-            setattr(model, "item_matrix", self.item_matrix)
-            setattr(model, "pos2id_map", dict(self.pos2id))
-
-        if warm_enabled and warm_epochs > 0:
-            self._warm_start_recommender(
-                teacher,
-                epochs=warm_epochs,
-                batch_size=warm_batch,
-                max_batches=warm_max_batches,
-            )
-
-        student.load_state_dict(teacher.state_dict())
-        setattr(student, "blend_increment", blend_increment)
-        setattr(student, "teacher_ema", teacher_ema)
-        setattr(teacher, "blend_increment", blend_increment)
-        setattr(teacher, "teacher_ema", teacher_ema)
-
-        if hasattr(student, "linucb"):
-            teacher.linucb = student.linucb
-            teacher.use_linucb = getattr(student, "use_linucb", False)
-        if hasattr(student, "bootts"):
-            teacher.bootts = student.bootts
-            teacher.use_bootts = getattr(student, "use_bootts", False)
-
-        return DualRecommender(teacher=teacher, student=student)
 
     def _build_fixed(self, dp_cfg: dict):
-        model = TwoTowerRecommender(
+        return build_fixed(
             num_users=len(self.user_ids),
             num_items=len(self.item_ids),
-            user_dim=self.user_matrix.shape[1],
-            item_dim=self.item_matrix.shape[1],
+            user_matrix=self.user_matrix,
+            item_matrix=self.item_matrix,
+            pos2id=self.pos2id,
             dp_cfg=dp_cfg,
         )
-        setattr(model, "user_matrix", self.user_matrix)
-        setattr(model, "item_matrix", self.item_matrix)
-        setattr(model, "pos2id_map", dict(self.pos2id))
-        return model
 
     def _build_baseline(self, mode: str) -> object:
-        if mode == "popularity":
-            self._p("baseline=popularity")
-            return PopularityBaseline(self.popularity, self.device)
-        if mode == "random":
-            self._p("baseline=random")
-            return RandomBaseline(self.device)
-        if mode == "als":
-            self._p("baseline=als")
-            return ALSBaseline(len(self.user_ids), len(self.item_ids), self.device)
-        if mode == "user_knn":
-            self._p("baseline=user_knn")
-            return UserKNNBaseline(self.user_item_matrix, self.device)
-        if mode == "linucb":
-            self._p("baseline=linucb")
-            feats = self.item_matrix.detach().cpu().numpy()
-            self._p(f"linucb item_features shape={feats.shape}, "
-                    f"std={float(feats.std()) if feats.size>0 else 0.0:.6f}")
-            if feats.ndim == 2 and feats.shape[1] == 0:
-                self._p("WARNING: LinUCB will degenerate (0 feature columns). "
-                        "Consider adding fallback features.")
-            return LinUCBBaseline(alpha=1.5, item_features=feats, device=self.device)
-        raise ValueError(f"Unknown baseline '{mode}'")
+        return build_baseline(
+            mode=mode,
+            num_users=len(self.user_ids),
+            num_items=len(self.item_ids),
+            popularity=self.popularity,
+            item_matrix=self.item_matrix,
+            user_item_matrix=self.user_item_matrix,
+            device=self.device,
+            print_fn=self._p,
+        )
 
     def _train_baseline(self, model, mode: str) -> None:
         self._p(f"train_baseline: mode={mode}")
@@ -930,22 +666,18 @@ class RankingExperiment:
             model.fit({self.id2pos[int(k)]: float(v) for k, v in rewards.items() if int(k) in self.id2pos})
             self._p("LinUCB: fit done")
         else:
-            self._p("no training step for this baseline")
-            return
+            train_baseline(model, mode, print_fn=self._p)
 
     def _train_als(self, model: ALSBaseline) -> None:
-        user_ids = []
-        item_ids = []
-        labels = []
-        for row in self.train.itertuples():
-            uid = self.user_index.get(int(getattr(row, self.interaction_user_col)))
-            iid_pos = self.id2pos.get(int(getattr(row, self.interaction_item_col)))
-            if uid is None or iid_pos is None:
-                continue
-            user_ids.append(uid)
-            item_ids.append(iid_pos)
-            labels.append(float(getattr(row, "label", 0.0)))
-        model.fit(user_ids, item_ids, labels)
+        train_als(
+            model,
+            self.train,
+            self.interaction_user_col,
+            self.interaction_item_col,
+            self.user_index,
+            self.id2pos,
+            print_fn=self._p,
+        )
 
     def run(
         self,
