@@ -1,0 +1,76 @@
+site_name: Orchid Ranker
+site_description: Adaptive educational recommender toolkit
+site_url: https://uib-slate.github.io/orchid-ranker/
+repo_url: https://github.com/uib-slate/orchid-ranker
+repo_name: uib-slate/orchid-ranker
+
+theme:
+  name: material
+  palette:
+    - scheme: default
+      primary: deep purple
+      accent: amber
+      toggle:
+        icon: material/brightness-7
+        name: Switch to dark mode
+    - scheme: slate
+      primary: deep purple
+      accent: amber
+      toggle:
+        icon: material/brightness-4
+        name: Switch to light mode
+  features:
+    - navigation.tabs
+    - navigation.sections
+    - navigation.expand
+    - search.suggest
+    - content.code.copy
+
+plugins:
+  - search
+  - mkdocstrings:
+      handlers:
+        python:
+          options:
+            docstring_style: numpy
+            show_source: true
+            show_root_heading: true
+
+nav:
+  - Home: index.md
+  - Getting Started:
+    - Installation: getting-started/installation.md
+    - Quick Start: getting-started/quickstart.md
+  - Tutorials:
+    - Knowledge Tracing: tutorials/knowledge_tracing.md
+    - Curriculum Design: tutorials/curriculum.md
+    - Agentic Simulation: tutorials/agentic.md
+    - Differential Privacy: tutorials/privacy.md
+    - Enterprise Deployment: tutorials/deployment.md
+  - API Reference:
+    - OrchidRecommender: api/recommender.md
+    - Knowledge Tracing: api/knowledge_tracing.md
+    - Curriculum: api/curriculum.md
+    - Evaluation: api/evaluation.md
+    - Agents: api/agents.md
+    - Security: api/security.md
+  - Deployment:
+    - Capacity Planning: capacity_planning.md
+    - Security: security/threat_model.md
+  - Migration:
+    - Legacy Orchestrator: migration/legacy_orchestrator.md
+  - Changelog: CHANGELOG.md
+
+markdown_extensions:
+  - pymdownx.highlight
+  - pymdownx.superfences
+  - pymdownx.tabbed:
+      alternate_style: true
+  - admonition
+  - pymdownx.details
+  - toc:
+      permalink: true
+
+extra:
+  version:
+    provider: mike

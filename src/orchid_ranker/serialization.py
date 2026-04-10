@@ -163,6 +163,9 @@ def load_model(path: str | Path) -> Any:
 def _extract_orchid_state(model: OrchidRecommender) -> Dict[str, Any]:
     """Extract internal state from a fitted OrchidRecommender.
 
+    Private function that captures all necessary state for serialization,
+    including user/item mappings, strategy configuration, and fitted baseline model.
+
     Parameters
     ----------
     model : OrchidRecommender
@@ -171,7 +174,15 @@ def _extract_orchid_state(model: OrchidRecommender) -> Dict[str, Any]:
     Returns
     -------
     dict
-        State dictionary containing strategy, mappings, and fitted model data.
+        State dictionary containing:
+        - strategy: strategy name
+        - strategy_kwargs: kwargs passed to baseline
+        - device: torch device string
+        - user_map, item_map: ID mappings
+        - seen_items: items seen by each user
+        - baseline_type: type of baseline model
+        - baseline_state_dict or baseline_object: model weights/params
+        - item_features: optional feature matrix for linucb
 
     Raises
     ------
@@ -215,6 +226,9 @@ def _extract_orchid_state(model: OrchidRecommender) -> Dict[str, Any]:
 def _restore_orchid_model(state: Dict[str, Any]) -> OrchidRecommender:
     """Restore an OrchidRecommender from saved state.
 
+    Private function that reconstructs an OrchidRecommender from a saved state dictionary,
+    restoring all internal mappings and fitted parameters.
+
     Parameters
     ----------
     state : dict
@@ -223,7 +237,12 @@ def _restore_orchid_model(state: Dict[str, Any]) -> OrchidRecommender:
     Returns
     -------
     OrchidRecommender
-        Restored model in fitted state.
+        Restored model in fitted state, ready for inference.
+
+    Raises
+    ------
+    RuntimeError
+        If baseline state is invalid.
     """
     from .recommender import OrchidRecommender
 
@@ -280,27 +299,35 @@ def _restore_neural_baseline(
 ) -> Any:
     """Restore a neural baseline model from its state_dict.
 
+    Private function that instantiates a neural baseline model and loads
+    saved PyTorch weights.
+
     Parameters
     ----------
     baseline_type : str
-        Name of the baseline class.
+        Name of the baseline class (e.g., "NeuralMatrixFactorizationBaseline").
     state_dict : dict
-        PyTorch state_dict.
+        PyTorch state_dict containing model weights.
     strategy : str
         Strategy name.
     num_users : int
-        Number of users.
+        Number of users for model initialization.
     num_items : int
-        Number of items.
+        Number of items for model initialization.
     device : str
-        Torch device string.
+        Torch device string (e.g., "cpu", "cuda").
     strategy_kwargs : dict
-        Additional strategy kwargs.
+        Additional strategy kwargs for baseline instantiation.
 
     Returns
     -------
     Baseline instance
-        Restored baseline model.
+        Restored and initialized baseline model.
+
+    Raises
+    ------
+    RuntimeError
+        If baseline_type is not recognized.
     """
     from .baselines import NeuralMatrixFactorizationBaseline
 
@@ -321,6 +348,9 @@ def _restore_neural_baseline(
 def _extract_two_tower_state(model: TwoTowerRecommender) -> Dict[str, Any]:
     """Extract internal state from a fitted TwoTowerRecommender.
 
+    Private function that captures PyTorch model state and configuration
+    for a two-tower neural recommendation model.
+
     Parameters
     ----------
     model : TwoTowerRecommender
@@ -329,7 +359,10 @@ def _extract_two_tower_state(model: TwoTowerRecommender) -> Dict[str, Any]:
     Returns
     -------
     dict
-        State dictionary containing model architecture and weights.
+        State dictionary containing:
+        - model_state_dict: PyTorch state_dict with all parameters
+        - config: architecture configuration (num_users, num_items, dims, etc.)
+        - device: torch device string
     """
     state: Dict[str, Any] = {
         "model_state_dict": model.state_dict(),
@@ -352,6 +385,9 @@ def _extract_two_tower_state(model: TwoTowerRecommender) -> Dict[str, Any]:
 def _restore_two_tower_model(state: Dict[str, Any]) -> TwoTowerRecommender:
     """Restore a TwoTowerRecommender from saved state.
 
+    Private function that reconstructs a two-tower model from saved state,
+    instantiating the architecture and loading saved weights.
+
     Parameters
     ----------
     state : dict
@@ -360,7 +396,7 @@ def _restore_two_tower_model(state: Dict[str, Any]) -> TwoTowerRecommender:
     Returns
     -------
     TwoTowerRecommender
-        Restored model.
+        Restored model in fitted state, ready for inference.
     """
     from .agents.recommender_agent import TwoTowerRecommender
 

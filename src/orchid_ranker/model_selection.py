@@ -272,6 +272,7 @@ def evaluate_on_holdout(
         A fitted recommender model.
     test_interactions : pd.DataFrame
         Test interactions DataFrame with user_col and item_col.
+        Contains ground-truth relevant items for each user.
     metrics : list of str, optional
         Metric names to compute. Options: "precision@5", "recall@5", "ndcg@10",
         "map@10". If None, defaults to all (default: None).
@@ -285,7 +286,13 @@ def evaluate_on_holdout(
     Returns
     -------
     scores : dict
-        Dictionary mapping metric names to computed scores.
+        Dictionary mapping metric names to computed mean scores
+        (averaged across all users).
+
+    Raises
+    ------
+    ValueError
+        If unknown metric is requested.
 
     Examples
     --------
@@ -379,8 +386,9 @@ def compare_models(
 ) -> pd.DataFrame:
     """Compare multiple recommender strategies via cross-validation.
 
-    Runs cross-validation for each strategy and returns a DataFrame
-    with rows=strategies and columns=metrics (showing mean ± std).
+    Runs k-fold cross-validation for each strategy and returns a DataFrame
+    with rows=strategies and columns=metrics. Useful for model selection
+    and benchmarking different approaches.
 
     Parameters
     ----------
@@ -391,8 +399,8 @@ def compare_models(
     k : int, optional
         Number of cross-validation folds (default: 5).
     metrics : list of str, optional
-        Metric names to compute. If None, defaults to ["precision@5", "recall@5",
-        "ndcg@10", "map@10"] (default: None).
+        Metric names to compute. Options: "precision@5", "recall@5", "ndcg@10",
+        "map@10". If None, defaults to all (default: None).
     strategy_kwargs_list : list of dict, optional
         List of kwargs dicts (one per strategy). If shorter than strategies,
         remaining strategies use empty dicts (default: None).
@@ -406,8 +414,13 @@ def compare_models(
     Returns
     -------
     results_df : pd.DataFrame
-        DataFrame with strategies as rows and metrics as columns.
-        Each cell contains "mean ± std" formatted string.
+        DataFrame with strategies as row indices and metrics as columns.
+        Each cell contains "mean ± std" formatted string, e.g., "0.45 ± 0.05".
+
+    Raises
+    ------
+    ValueError
+        If interactions is empty or k < 2.
 
     Examples
     --------

@@ -160,22 +160,44 @@ class BayesianKnowledgeTracing:
         return self._p_known
 
     def p_known(self) -> float:
-        """Current probability the student knows the skill.
+        """Get current probability the student knows the skill.
+
+        Returns the current posterior probability estimate P(L=1) that the
+        student has learned/mastered this skill, based on observed outcomes.
 
         Returns
         -------
         float
             Current posterior P(L = 1), range [0, 1].
+
+        Examples
+        --------
+        >>> bkt = BayesianKnowledgeTracing()
+        >>> p = bkt.p_known()
+        >>> 0 <= p <= 1
+        True
         """
         return self._p_known
 
     def is_mastered(self) -> bool:
         """Check if skill is considered mastered.
 
+        Returns True if the current probability of knowing the skill meets or
+        exceeds the mastery threshold set during initialization.
+
         Returns
         -------
         bool
             True if P(known) >= mastery_threshold, False otherwise.
+
+        Examples
+        --------
+        >>> bkt = BayesianKnowledgeTracing(mastery_threshold=0.95)
+        >>> bkt.is_mastered()
+        False
+        >>> bkt.update(True)  # After correct response
+        >>> bkt.is_mastered()  # Still False if p_known < 0.95
+        False
         """
         return self._p_known >= self.mastery_threshold
 
@@ -183,7 +205,17 @@ class BayesianKnowledgeTracing:
         """Reset to prior distribution.
 
         Resets the knowledge estimate back to p_init and clears observation
-        counter. Useful for starting fresh with a student.
+        counter. Useful for starting fresh with a student or clearing historical data.
+
+        Examples
+        --------
+        >>> bkt = BayesianKnowledgeTracing()
+        >>> bkt.update(True)
+        >>> bkt.p_known() > 0.1  # Changed from prior
+        True
+        >>> bkt.reset()
+        >>> bkt.p_known() == 0.1  # Back to prior
+        True
         """
         self._p_known = self.p_init
         self._num_observations = 0
@@ -338,10 +370,20 @@ class MasteryTracker:
     def mastered_skills(self) -> List[str]:
         """Return list of mastered skill names.
 
+        Returns all skill names for which the current knowledge probability
+        meets or exceeds the mastery threshold.
+
         Returns
         -------
         list of str
-            Skill names where P(known) >= mastery_threshold.
+            Skill names where P(known) >= mastery_threshold, sorted alphabetically.
+
+        Examples
+        --------
+        >>> tracker = MasteryTracker(['algebra', 'geometry', 'calculus'])
+        >>> tracker.update('algebra', True)
+        >>> tracker.mastered_skills()  # Depends on initial p_init
+        []
         """
         return [
             skill for skill in self.skills
@@ -351,10 +393,19 @@ class MasteryTracker:
     def unmastered_skills(self) -> List[str]:
         """Return list of not-yet-mastered skill names.
 
+        Returns all skill names for which the current knowledge probability
+        is below the mastery threshold.
+
         Returns
         -------
         list of str
-            Skill names where P(known) < mastery_threshold.
+            Skill names where P(known) < mastery_threshold, sorted alphabetically.
+
+        Examples
+        --------
+        >>> tracker = MasteryTracker(['algebra', 'geometry', 'calculus'])
+        >>> tracker.unmastered_skills()
+        ['algebra', 'geometry', 'calculus']
         """
         return [
             skill for skill in self.skills
@@ -578,7 +629,17 @@ class ForgettingCurve:
         """Record a review, strengthening memory.
 
         Increases memory strength by strength_gain_on_review and updates
-        last review timestamp to now.
+        the last_review_time to the current time. Call this each time
+        the learner reviews an item.
+
+        Examples
+        --------
+        >>> curve = ForgettingCurve()
+        >>> curve.retention_at(1.0)
+        0.367...
+        >>> curve.review()
+        >>> curve.strength > 1.0  # Increased by strength_gain_on_review
+        True
         """
         self.strength += self.strength_gain_on_review
         self.last_review_time = datetime.now()
@@ -587,7 +648,8 @@ class ForgettingCurve:
         """Check if memory should be reviewed given a threshold.
 
         Returns True if retention has dropped below the threshold, indicating
-        that a review is needed to strengthen memory.
+        that a review is needed to strengthen memory. Returns True if never
+        reviewed (last_review_time is None).
 
         Parameters
         ----------
@@ -608,6 +670,15 @@ class ForgettingCurve:
         - 0.5 (50%): More aggressive review schedule
         - 0.8 (80%): Conservative review schedule
         - 0.9 (90%): Very conservative schedule
+
+        Examples
+        --------
+        >>> curve = ForgettingCurve()
+        >>> curve.should_review(0.5)  # Never reviewed
+        True
+        >>> curve.review()
+        >>> curve.should_review(0.5)
+        False  # Just reviewed
         """
         if self.last_review_time is None:
             return True

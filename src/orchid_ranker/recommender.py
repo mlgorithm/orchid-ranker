@@ -85,6 +85,34 @@ class OrchidRecommender:
         validate_inputs: bool = True,
         **strategy_kwargs,
     ) -> None:
+        """Initialize an OrchidRecommender with a specific strategy.
+
+        Parameters
+        ----------
+        strategy : str, optional
+            Recommendation strategy. One of "als", "explicit_mf", "linucb",
+            "popularity", "random", "implicit_als", "implicit_bpr", "neural_mf",
+            or "user_knn" (default: "als").
+        device : str, optional
+            Torch device string (e.g., "cpu", "cuda", "cuda:0").
+            If None, automatically selects CUDA if available, else CPU.
+        validate_inputs : bool, optional
+            Whether to validate input DataFrames during fit (default: True).
+        **strategy_kwargs
+            Additional keyword arguments passed to the underlying baseline model.
+            For example: n_factors, learning_rate, k (for user_knn), alpha (for linucb).
+
+        Raises
+        ------
+        ValueError
+            If strategy is not in the supported strategies list.
+
+        Examples
+        --------
+        >>> rec = OrchidRecommender(strategy="als")
+        >>> rec_knn = OrchidRecommender(strategy="user_knn", k=20)
+        >>> rec_linucb = OrchidRecommender(strategy="linucb", alpha=1.5)
+        """
         normalised = strategy.lower()
         if normalised not in SUPPORTED_STRATEGIES:
             # Build helpful error message with strategies and descriptions
@@ -168,7 +196,45 @@ class OrchidRecommender:
         rating_col: Optional[str] = None,
         item_features: Optional[np.ndarray] = None,
     ) -> "OrchidRecommender":
-        """Fit the recommender on implicit or explicit feedback."""
+        """Fit the recommender on implicit or explicit feedback.
+
+        Trains the underlying baseline model on user-item interaction data.
+        Supports implicit feedback (presence/absence) or explicit ratings.
+
+        Parameters
+        ----------
+        interactions : pd.DataFrame
+            Interactions DataFrame with at least user_col and item_col.
+            If rating_col is provided, it should contain rating/feedback values.
+        user_col : str, optional
+            Column name for user IDs (default: "user_id").
+        item_col : str, optional
+            Column name for item IDs (default: "item_id").
+        rating_col : str, optional
+            Column name for explicit ratings/feedback. If None, treats all
+            interactions as implicit feedback with uniform weight 1.0 (default: None).
+        item_features : np.ndarray, optional
+            Feature matrix of shape (num_items, feature_dim) for linucb strategy.
+            Required if strategy=="linucb", ignored otherwise (default: None).
+
+        Returns
+        -------
+        self : OrchidRecommender
+            Returns self for method chaining.
+
+        Raises
+        ------
+        ValueError
+            If interactions DataFrame is empty or missing required columns.
+        ValueError
+            If linucb strategy is selected but item_features is not provided.
+
+        Examples
+        --------
+        >>> rec = OrchidRecommender(strategy="als")
+        >>> rec.fit(interactions_df)
+        >>> rec.fit(interactions_df, rating_col="rating")
+        """
         if interactions.empty:
             raise ValueError("interactions DataFrame is empty")
 
@@ -333,6 +399,7 @@ class OrchidRecommender:
         """Vectorized prediction for matching sequences of user_ids and item_ids.
 
         Computes relevance scores for (user, item) pairs in parallel.
+        More efficient than calling predict() multiple times.
 
         Parameters
         ----------
@@ -344,7 +411,8 @@ class OrchidRecommender:
         Returns
         -------
         np.ndarray
-            Shape (N,), dtype float32. Predicted scores for each (user, item) pair.
+            Shape (N,), dtype float32. Predicted scores for each (user, item) pair
+            in the same order as input sequences.
 
         Raises
         ------
@@ -352,6 +420,14 @@ class OrchidRecommender:
             If user_ids and item_ids have different lengths.
         KeyError
             If any user_id or item_id is unknown.
+        RuntimeError
+            If recommender has not been fit.
+
+        Examples
+        --------
+        >>> scores = rec.predict_many([1, 1, 2], [5, 6, 5])
+        >>> scores.shape
+        (3,)
         """
         if len(user_ids) != len(item_ids):
             raise ValueError("user_ids and item_ids must have the same length")
@@ -427,20 +503,38 @@ class OrchidRecommender:
     def all_items(self) -> List[int]:
         """Get all known item IDs.
 
+        Returns list of all item identifiers that were present in the training data
+        used to fit the recommender.
+
         Returns
         -------
         list of int
-            All item IDs in the training data.
+            All item IDs in the training data, sorted in ascending order.
+
+        Examples
+        --------
+        >>> items = rec.all_items()
+        >>> len(items) > 0
+        True
         """
         return list(self._item2idx.keys())
 
     def all_users(self) -> List[int]:
         """Get all known user IDs.
 
+        Returns list of all user identifiers that were present in the training data
+        used to fit the recommender.
+
         Returns
         -------
         list of int
-            All user IDs in the training data.
+            All user IDs in the training data, sorted in ascending order.
+
+        Examples
+        --------
+        >>> users = rec.all_users()
+        >>> len(users) > 0
+        True
         """
         return list(self._user2idx.keys())
 

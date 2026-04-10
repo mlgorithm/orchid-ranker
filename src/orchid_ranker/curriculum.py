@@ -146,6 +146,9 @@ class PrerequisiteGraph:
     def prerequisites_for(self, skill: str) -> Set[str]:
         """Return all direct prerequisites for a skill.
 
+        Returns the immediate prerequisites (parents) of a skill in the DAG.
+        This includes only direct dependencies, not transitive ones.
+
         Parameters
         ----------
         skill : str
@@ -156,6 +159,12 @@ class PrerequisiteGraph:
         set of str
             Direct prerequisites (parents) of the skill.
             Empty set if skill has no prerequisites or doesn't exist.
+
+        Examples
+        --------
+        >>> graph = PrerequisiteGraph([("a", "b"), ("c", "b")])
+        >>> graph.prerequisites_for("b")
+        {'a', 'c'}
         """
         return self._reverse_edges.get(skill, set()).copy()
 
@@ -193,6 +202,9 @@ class PrerequisiteGraph:
     def dependents_of(self, skill: str) -> Set[str]:
         """Return skills that directly depend on this skill.
 
+        Returns immediate dependents (children) of a skill in the DAG.
+        This includes only direct dependencies, not transitive ones.
+
         Parameters
         ----------
         skill : str
@@ -203,6 +215,12 @@ class PrerequisiteGraph:
         set of str
             Direct dependents (children) of the skill.
             Empty set if skill has no dependents or doesn't exist.
+
+        Examples
+        --------
+        >>> graph = PrerequisiteGraph([("a", "b"), ("a", "c")])
+        >>> graph.dependents_of("a")
+        {'b', 'c'}
         """
         return self._edges.get(skill, set()).copy()
 
@@ -257,6 +275,9 @@ class PrerequisiteGraph:
     def is_ready(self, skill: str, mastered: Set[str]) -> bool:
         """Check if all prerequisites for skill are in mastered set.
 
+        Determines whether a learner is prepared to learn a skill based on
+        whether they have mastered all direct prerequisites.
+
         Parameters
         ----------
         skill : str
@@ -270,6 +291,14 @@ class PrerequisiteGraph:
             True if all direct prerequisites of skill are in mastered set.
             True if skill has no prerequisites.
             False if skill is already in mastered set.
+
+        Examples
+        --------
+        >>> graph = PrerequisiteGraph([("a", "b"), ("b", "c")])
+        >>> graph.is_ready("b", {"a"})
+        True
+        >>> graph.is_ready("c", {"a"})
+        False
         """
         if skill in mastered:
             return False
@@ -280,8 +309,8 @@ class PrerequisiteGraph:
     def available_skills(self, mastered: Set[str]) -> List[str]:
         """Return skills whose prerequisites are all mastered but skill itself is not.
 
-        A skill is "available" if:
-        1. All its prerequisites are in the mastered set
+        A skill is "available" for learning if:
+        1. All its direct prerequisites are in the mastered set
         2. The skill itself is not in the mastered set
 
         Parameters
@@ -293,6 +322,14 @@ class PrerequisiteGraph:
         -------
         list of str
             Available skills sorted lexicographically for determinism.
+
+        Examples
+        --------
+        >>> graph = PrerequisiteGraph([("a", "b"), ("b", "c")])
+        >>> graph.available_skills({"a"})
+        ['b']
+        >>> graph.available_skills({"a", "b"})
+        ['c']
         """
         available = []
         for skill in self._vertices:
@@ -361,13 +398,20 @@ class PrerequisiteGraph:
     def validate(self) -> None:
         """Check graph is a DAG (no cycles).
 
-        Uses DFS with three colors to detect cycles: white (unvisited),
-        gray (visiting), black (visited).
+        Uses depth-first search with three colors to detect cycles:
+        white (unvisited), gray (visiting), black (visited).
 
         Raises
         ------
         ValueError
             If the graph contains a cycle.
+
+        Examples
+        --------
+        >>> graph = PrerequisiteGraph([("a", "b")])
+        >>> graph.validate()  # No error
+        >>> graph.add_edge("b", "a")  # Would create cycle
+        ValueError: Adding edge b -> a would create a cycle
         """
         color = {v: "white" for v in self._vertices}
 
@@ -435,10 +479,22 @@ class PrerequisiteGraph:
     def summary(self) -> str:
         """Return human-readable summary of graph structure.
 
+        Generates a text summary with vertex/edge counts and identification
+        of root skills (no prerequisites) and leaf skills (no dependents).
+
         Returns
         -------
         str
-            Summary including vertex count, edge count, and leaf/root nodes.
+            Multi-line summary including vertex count, edge count, and lists
+            of root and leaf nodes.
+
+        Examples
+        --------
+        >>> graph = PrerequisiteGraph([("a", "b"), ("b", "c")])
+        >>> print(graph.summary())
+        PrerequisiteGraph(vertices=3, edges=2)
+          Root skills (no prerequisites): ['a']
+          Leaf skills (no dependents): ['c']
         """
         if not self._vertices:
             return "Empty graph (0 vertices, 0 edges)"
@@ -662,7 +718,7 @@ class CurriculumRecommender:
 
         Validates that all candidates have their direct prerequisites satisfied.
         This is a stricter check than available_skills() as it ensures each
-        candidate individually is valid.
+        candidate individually has its prerequisites met before recommending.
 
         Parameters
         ----------
@@ -676,6 +732,13 @@ class CurriculumRecommender:
         list of str
             Filtered list containing only candidates with prerequisites met.
             Order is preserved from input.
+
+        Examples
+        --------
+        >>> graph = PrerequisiteGraph([("a", "b"), ("b", "c")])
+        >>> rec = CurriculumRecommender(graph)
+        >>> rec.filter_candidates(["b", "c"], {"a"})
+        ['b']
         """
         filtered = []
         for candidate in candidates:

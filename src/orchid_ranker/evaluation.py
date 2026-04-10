@@ -188,16 +188,23 @@ def expected_calibration_error(preds: np.ndarray, labels: np.ndarray, bins: int 
 class RankingReport:
     """Container for ranking evaluation metrics.
 
+    Holds aggregated ranking metrics computed across multiple users,
+    providing a comprehensive view of recommender performance.
+
     Attributes
     ----------
     precision_at_5 : float
-        Mean Precision@5 across users.
+        Mean Precision@5 across users. Measures fraction of top-5 recommendations
+        that are relevant.
     recall_at_5 : float
-        Mean Recall@5 across users.
+        Mean Recall@5 across users. Measures fraction of all relevant items
+        that appear in top-5.
     map_at_10 : float
-        Mean Average Precision@10 across users.
+        Mean Average Precision@10 across users. Measures ranking quality
+        considering position of relevant items.
     ndcg_at_10 : float
-        Mean NDCG@10 across users.
+        Mean NDCG@10 across users. Normalized ranking metric accounting
+        for relevance grades and position.
     """
 
     precision_at_5: float
@@ -418,18 +425,25 @@ def engagement_score(interactions: Sequence, total_available: int) -> float:
 class EducationalReport:
     """Container for educational evaluation metrics.
 
+    Aggregates educational metrics for assessing learning effectiveness,
+    curriculum quality, and learner engagement.
+
     Attributes
     ----------
     learning_gain : float
-        Normalized learning gain: (post - pre) / (1 - pre).
+        Normalized learning gain: (post - pre) / (1 - pre). Measures improvement
+        from pre-test to post-test, normalized by maximum possible gain.
     coverage : float
-        Fraction of total skills mastered.
+        Fraction of total skills mastered. Measures breadth of competency.
     adherence : float
-        Fraction of recommendations with satisfied prerequisites.
+        Fraction of recommendations with satisfied prerequisites. Measures
+        pedagogical validity of recommendations.
     difficulty_fit : float
-        Fraction of recommendations within student's ZPD.
+        Fraction of recommendations within student's Zone of Proximal Development.
+        Measures appropriateness of difficulty level.
     engagement : float
-        Ratio of items interacted with to items recommended.
+        Ratio of items interacted with to items recommended. Measures student
+        engagement and participation.
     """
 
     learning_gain: float
