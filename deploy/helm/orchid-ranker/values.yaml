@@ -11,11 +11,11 @@ service:
 
 resources:
   limits:
-    cpu: 500m
-    memory: 512Mi
+    cpu: "2"
+    memory: 4Gi
   requests:
-    cpu: 250m
-    memory: 256Mi
+    cpu: 500m
+    memory: 1Gi
 
 env:
   ORCHID_LOG_LEVEL: INFO
@@ -25,3 +25,36 @@ env:
 metrics:
   enabled: true
   port: 9090
+
+health:
+  port: 8081
+
+# -- Horizontal Pod Autoscaler
+autoscaling:
+  enabled: false
+  minReplicas: 2
+  maxReplicas: 10
+  targetCPUUtilizationPercentage: 70
+  targetMemoryUtilizationPercentage: 80
+
+# -- Pod Disruption Budget
+podDisruptionBudget:
+  enabled: false
+  minAvailable: 1
+
+# -- Liveness and readiness probes
+probes:
+  liveness:
+    httpGet:
+      path: /healthz
+      port: 8081
+    initialDelaySeconds: 10
+    periodSeconds: 15
+    failureThreshold: 3
+  readiness:
+    httpGet:
+      path: /readyz
+      port: 8081
+    initialDelaySeconds: 5
+    periodSeconds: 10
+    failureThreshold: 3

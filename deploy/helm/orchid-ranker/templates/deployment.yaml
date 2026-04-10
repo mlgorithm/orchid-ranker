@@ -23,6 +23,8 @@ spec:
               name: http
             - containerPort: {{ .Values.metrics.port }}
               name: metrics
+            - containerPort: {{ .Values.health.port }}
+              name: health
           env:
             - name: ORCHID_LOG_LEVEL
               value: {{ .Values.env.ORCHID_LOG_LEVEL | quote }}
@@ -33,5 +35,9 @@ spec:
                 secretKeyRef:
                   name: {{ include "orchid-ranker.fullname" . }}-secrets
                   key: auditApiKey
+          livenessProbe:
+            {{- toYaml .Values.probes.liveness | nindent 12 }}
+          readinessProbe:
+            {{- toYaml .Values.probes.readiness | nindent 12 }}
           resources:
             {{- toYaml .Values.resources | nindent 12 }}
