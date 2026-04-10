@@ -255,9 +255,10 @@ Create `docs/security/threat_model.md`:
 
 ---
 
-## Phase 5 — Observability, Connectors & Deployment (Weeks 8–14)
+## Phase 5 — Observability, Connectors & Deployment (Weeks 8–14) ✅ CORE COMPLETE
 
-**Goal:** Production-grade operational infrastructure.
+**Goal:** Production-grade operational infrastructure.  
+**Status:** Core deliverables complete. 10 Prometheus metrics, OpenTelemetry, health probes, Grafana dashboard, docker-compose stack, Helm HPA/PDB, capacity planning guide. Connector hardening (connection pooling, circuit breakers) and Terraform modules deferred as stretch goals.
 
 ### 5.1 Observability Expansion
 
@@ -306,14 +307,15 @@ For each connector:
 - Document capacity planning: users/sec per vCPU, memory per 1M interactions, GPU vs CPU decision matrix.
 
 **Deliverables:**
-- [ ] 10+ Prometheus metrics covering inference, errors, DP budget
-- [ ] OpenTelemetry support
-- [ ] Health check endpoints
-- [ ] Grafana dashboard templates
-- [ ] All 4 connectors hardened with integration tests
-- [ ] Helm chart with HPA, PDB, resource limits
-- [ ] docker-compose for local dev stack
-- [ ] Capacity planning guide
+- [x] 10 Prometheus metrics: inference latency/requests/errors, list size, active users, model staleness, DP budget *(done — `6390f4d`)*
+- [x] OpenTelemetry support: `setup_opentelemetry()` with OTLP exporter *(done — `6390f4d`)*
+- [x] Health check endpoints: `healthz()`, `readyz()`, `start_health_server()` *(done — `6390f4d`)*
+- [x] Grafana dashboard: 10-panel JSON with auto-provisioning *(done — `6390f4d`)*
+- [x] Helm chart: HPA, PDB, liveness/readiness probes, resource limits *(done — `6390f4d`)*
+- [x] docker-compose for local dev stack (app + Prometheus + Grafana) *(done — `6390f4d`)*
+- [x] Capacity planning guide: throughput, memory, K8s sizing tiers *(done — `6390f4d`)*
+- [ ] Connector hardening: connection pooling, circuit breakers, integration tests *(deferred — stretch)*
+- [ ] Terraform AWS modules *(deferred — stretch)*
 
 ---
 
