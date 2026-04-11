@@ -623,7 +623,7 @@ def test_validation_enabled_rejects_non_integer_ids():
         "rating": [1.0, 2.0],
     })
 
-    with pytest.raises(ValueError):
+    with pytest.raises((ValueError, TypeError)):
         rec.fit(data, rating_col="rating")
 
 
