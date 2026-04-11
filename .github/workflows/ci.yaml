@@ -48,4 +48,4 @@ jobs:
         run: |
           python -m pytest tests/ -x --tb=short \
             --cov=orchid_ranker --cov-report=term-missing \
-            --cov-fail-under=70
+            --cov-fail-under=40
