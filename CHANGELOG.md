@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.3.1 - 2026-04-11
+
+- Changed license from MIT to Apache 2.0 (adds patent grant for enterprise adoption).
+- Fixed repository URLs to point to `mlgorithm/orchid-ranker`.
+
 ## 0.3.0 - 2026-04-11
 
 ### Breaking Changes (with backward-compat aliases until v1.0)

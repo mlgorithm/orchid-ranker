@@ -6,8 +6,8 @@ Orchid Ranker combines a modular orchestration engine, realistic user simulators
 
 [![Python 3.9–3.13](https://img.shields.io/badge/python-3.9%E2%80%933.13-blue.svg)](https://www.python.org/)
 [![PyTorch 1.13–2.9](https://img.shields.io/badge/pytorch-1.13%E2%80%932.9-ee4c2c.svg)](https://pytorch.org/)
-[![License: MIT](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
-[![Version](https://img.shields.io/badge/version-0.3.0-brightgreen.svg)](CHANGELOG.md)
+[![License](https://img.shields.io/badge/license-Apache%202.0-blue.svg)](LICENSE)
+[![Version](https://img.shields.io/badge/version-0.3.1-brightgreen.svg)](CHANGELOG.md)
 
 ---
 
@@ -37,7 +37,7 @@ pip install orchid-ranker
 Or install from source:
 
 ```bash
-git clone https://github.com/farhad-vadiee/orchid-ranker.git
+git clone https://github.com/mlgorithm/orchid-ranker.git
 cd orchid-ranker
 pip install -e .
 ```
@@ -588,7 +588,7 @@ orchid-ranker/
 ## Contributing
 
 ```bash
-git clone https://github.com/farhad-vadiee/orchid-ranker.git
+git clone https://github.com/mlgorithm/orchid-ranker.git
 cd orchid-ranker
 pip install -e ".[dev]"
 python -m pytest tests/
@@ -598,7 +598,7 @@ python -m pytest tests/
 
 ## License
 
-MIT License. See [LICENSE](LICENSE) for details.
+Apache License 2.0. See [LICENSE](LICENSE) for details.
 
 ---
 
@@ -610,8 +610,8 @@ If you use Orchid Ranker in your research, please cite:
 @software{vadiee2025orchid,
   author = {Vadiee, Farhad},
   title = {Orchid Ranker: Adaptive Progression and Recommender Toolkit},
-  version = {0.3.0},
+  version = {0.3.1},
   year = {2025},
-  url = {https://github.com/farhad-vadiee/orchid-ranker}
+  url = {https://github.com/mlgorithm/orchid-ranker}
 }
 ```

@@ -4,13 +4,13 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "orchid-ranker"
-version = "0.3.0"
+version = "0.3.1"
 description = "Adaptive progression and recommender toolkit with user simulators, agentic orchestration, and offline evaluation."
 readme = "README.md"
 authors = [
   {name = "Farhad Vadiee", email = "sam.vadiee@gmail.com"}
 ]
-license = "MIT"
+license = "Apache-2.0"
 license-files = ["LICENSE"]
 requires-python = ">=3.9"
 dependencies = [
@@ -85,11 +85,11 @@ all = [
 ]
 
 [project.urls]
-Homepage = "https://github.com/farhad-vadiee/orchid-ranker"
-Source = "https://github.com/farhad-vadiee/orchid-ranker"
-Documentation = "https://github.com/farhad-vadiee/orchid-ranker/tree/main/docs"
-Changelog = "https://github.com/farhad-vadiee/orchid-ranker/blob/main/CHANGELOG.md"
-Issues = "https://github.com/farhad-vadiee/orchid-ranker/issues"
+Homepage = "https://github.com/mlgorithm/orchid-ranker"
+Source = "https://github.com/mlgorithm/orchid-ranker"
+Documentation = "https://github.com/mlgorithm/orchid-ranker/tree/main/docs"
+Changelog = "https://github.com/mlgorithm/orchid-ranker/blob/main/CHANGELOG.md"
+Issues = "https://github.com/mlgorithm/orchid-ranker/issues"
 
 [tool.setuptools]
 include-package-data = true
