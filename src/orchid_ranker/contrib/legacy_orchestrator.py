@@ -28,10 +28,9 @@ warnings.warn(
 )
 
 from orchid_ranker.agents.recommender_agent import (
+    DualRecommender,
     JSONLLogger,
     TwoTowerRecommender,
-    DualRecommender,
-    ItemMeta,
 )
 from orchid_ranker.agents.student_agent import AdaptiveAgent as StudentAgent
 
@@ -110,7 +109,7 @@ class PolicyState:
     knowledge_ma: float = 0.4
     knowledge_delta_ma: float = 0.0
     rounds: int = 0
-    
+
 
     # Backwards-compat: expose zpd_width as an alias
     @property
@@ -765,7 +764,7 @@ class MultiUserOrchestrator:
                         log_cpu = logits.detach().float().cpu().numpy().ravel()
                         _p(f"R{r} U{uid_ext} logits: mu={log_cpu.mean():.4f} sd={log_cpu.std():.4f} "
                            f"min={log_cpu.min():.4f} max={log_cpu.max():.4f} Kcand={cand_item_ids.numel()}")
-                        
+
                     except Exception:
                         pass
 
@@ -780,8 +779,8 @@ class MultiUserOrchestrator:
                     params = self._policy_next(uid_ext, paper_state)
                     self._apply_policy(params)
                     top_k = int(params.top_k)
-                    zpd_delta = float(params.zpd_delta) 
-             
+                    zpd_delta = float(params.zpd_delta)
+
                 else:
                     top_k = int(self.cfg.top_k_base)
                     zpd_delta = float(self.cfg.zpd_margin)
@@ -861,8 +860,8 @@ class MultiUserOrchestrator:
                 post_eng = float(post_state.get("engagement", prev_eng))
                 prev_k = float(prev_state.get("knowledge", 0.5))
                 post_k = float(post_state.get("knowledge", prev_k))
-                knowledge_delta = post_k - prev_k
-                engagement_delta = post_eng - prev_eng
+                post_k - prev_k
+                post_eng - prev_eng
                 top_k_eff = max(1, len(chosen_item_ids))
                 accept_rate_chosen = accepted_cnt / top_k_eff
 

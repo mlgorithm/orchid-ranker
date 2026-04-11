@@ -386,7 +386,7 @@ class AdaptiveAgent:
             return ItemMeta(difficulty=diff, skills=m.get("skills"))
         return None
 
-    
+
 
     def _ability_scalar(self, item_id: int, items_meta: Optional[Dict[int, ItemMeta]]) -> float:
         if self.knowledge_mode == "scalar":
@@ -418,7 +418,7 @@ class AdaptiveAgent:
         # num = (diff - tgt) ** 2
         # den = (0.10**2)
         # return float(max(0.0, 1.0 - min(1.0, num / (den + 1e-9))))
-        
+
         delta = self.zpd_delta if delta is None else float(delta)
         width = self.zpd_width if width is None else float(max(1e-6, width))
         tgt = float(np.clip(theta + delta, 0.0, 1.0))

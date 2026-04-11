@@ -1,7 +1,8 @@
 """Model building and training functions for Orchid Ranker experiments."""
 from __future__ import annotations
 
-from typing import Dict, Optional, Tuple, Callable
+from typing import Callable, Dict, Optional, Tuple
+
 import numpy as np
 import pandas as pd
 import torch

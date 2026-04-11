@@ -4,23 +4,21 @@ from __future__ import annotations
 
 import logging
 from itertools import product
-from typing import Any, Dict, List, Optional, Sequence
+from typing import TYPE_CHECKING, Any, Dict, List, Optional
 
 import numpy as np
 import pandas as pd
 from sklearn.model_selection import KFold
 
-from typing import TYPE_CHECKING
 if TYPE_CHECKING:
-    from .recommender import OrchidRecommender as _OrchidRecommender
+    from .recommender import OrchidRecommender
 
 from .evaluation import (
+    average_precision,
+    ndcg_at_k,
     precision_at_k,
     recall_at_k,
-    ndcg_at_k,
-    average_precision,
 )
-
 
 logger = logging.getLogger(__name__)
 

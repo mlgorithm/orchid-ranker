@@ -2,17 +2,17 @@
 from __future__ import annotations
 
 import logging
-from dataclasses import dataclass, asdict
-from typing import Dict, Iterable, List, Optional, Tuple
+from dataclasses import asdict
 from pathlib import Path
-import json
+from typing import Dict, Iterable, List, Optional, Tuple
 
 import numpy as np
-import matplotlib.pyplot as plt  # kept if you plot elsewhere
 import pandas as pd
 import torch
 
 logger = logging.getLogger(__name__)
+
+from itertools import product
 
 from orchid_ranker import (
     MultiConfig,
@@ -21,42 +21,34 @@ from orchid_ranker import (
     TwoTowerRecommender,
 )
 from orchid_ranker.agents.agentic import UserCtx
-from orchid_ranker.agents.recommender_agent import DualRecommender
-from orchid_ranker.data import DatasetLoader
-from orchid_ranker.dp import get_dp_config
 from orchid_ranker.baselines import (
     ALSBaseline,
     LinUCBBaseline,
-    PopularityBaseline,
-    RandomBaseline,
-    UserKNNBaseline,
 )
-from itertools import product
+from orchid_ranker.data import DatasetLoader
+from orchid_ranker.dp import get_dp_config
 
 # Import from new modules
 from orchid_ranker.experiments.data_prep import (
-    _resolve_id_column,
     _build_feature_matrix,
-    _prepare_item_meta,
     _flatten_round_records,
     _flatten_user_records,
+    _prepare_item_meta,
+    _resolve_id_column,
 )
 from orchid_ranker.experiments.evaluation import (
-    _fmt_scalar_or_mean,
-    _CompositeLogger,
-    _MemoryLogger,
     SummaryRow,
+    _fmt_scalar_or_mean,
+    _MemoryLogger,
 )
 from orchid_ranker.experiments.model_factory import (
-    warm_start_recommender,
     build_adaptive,
-    build_fixed,
     build_baseline,
-    train_baseline,
+    build_fixed,
     train_als,
+    train_baseline,
+    warm_start_recommender,
 )
-
-
 
 # ---------------- main class ----------------
 
@@ -518,7 +510,7 @@ class RankingExperiment:
                 profile=prof_name
             ))
         return users
-    
+
 
     def _compute_popularity(self) -> Dict[int, float]:
         grouped = self.train.groupby(self.interaction_item_col)["label"].mean().to_dict()
@@ -752,7 +744,7 @@ class RankingExperiment:
         orchestrator.logger = memory_logger
         orchestrator.cfg.console = console
 
-        result = orchestrator.run()
+        orchestrator.run()
         df_round = _flatten_round_records(memory_logger.records)   # keep if you still want cohort per-round
         df_user  = _flatten_user_records(memory_logger.records)    # <-- NEW
 

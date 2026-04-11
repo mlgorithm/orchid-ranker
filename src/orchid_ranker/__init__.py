@@ -33,22 +33,22 @@ __version__ = "0.3.1"
 
 # ── Tier 1: Torch-free educational toolkit (always available) ─────────────
 
-from .knowledge_tracing import (
-    BayesianKnowledgeTracing,
-    ProficiencyTracker,
-    ForgettingCurve,
-)
 from .curriculum import (
     DependencyGraph,
     ProgressionRecommender,
 )
 from .evaluation import (
-    progression_gain,
-    proficiency_coverage,
-    sequence_adherence,
+    ProgressionReport,
     difficulty_appropriateness,
     engagement_score,
-    ProgressionReport,
+    proficiency_coverage,
+    progression_gain,
+    sequence_adherence,
+)
+from .knowledge_tracing import (
+    BayesianKnowledgeTracing,
+    ForgettingCurve,
+    ProficiencyTracker,
 )
 
 # ── Lazy imports for torch-dependent and optional-dependency modules ──────

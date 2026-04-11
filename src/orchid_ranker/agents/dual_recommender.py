@@ -2,17 +2,13 @@
 
 from __future__ import annotations
 
-import copy
 import inspect
 import logging
 import os
 from collections import deque
-from typing import Any, Dict
 
 import numpy as np
 import torch
-
-from orchid_ranker.agents.two_tower import TwoTowerRecommender
 
 logger = logging.getLogger(__name__)
 

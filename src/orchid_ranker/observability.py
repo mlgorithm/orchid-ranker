@@ -1,18 +1,27 @@
 """Prometheus metrics, OpenTelemetry support, and health checks for Orchid Ranker."""
 from __future__ import annotations
 
-import threading
-from http.server import HTTPServer, BaseHTTPRequestHandler
-from typing import Optional
 import json
+import threading
+from http.server import BaseHTTPRequestHandler, HTTPServer
+from typing import Optional
 
-from prometheus_client import CollectorRegistry, Counter, Histogram, Gauge, generate_latest, CONTENT_TYPE_LATEST, start_http_server
+from prometheus_client import (
+    CONTENT_TYPE_LATEST,
+    CollectorRegistry,
+    Counter,
+    Gauge,
+    Histogram,
+    generate_latest,
+    start_http_server,
+)
 
 # ============================================================================
 # OpenTelemetry Support (optional)
 # ============================================================================
 try:
-    from opentelemetry import trace, metrics as otel_metrics
+    from opentelemetry import metrics as otel_metrics
+    from opentelemetry import trace
     _HAS_OTEL = True
 except ImportError:
     _HAS_OTEL = False
@@ -272,32 +281,32 @@ def setup_opentelemetry(service_name: str = "orchid-ranker") -> None:
             "Install with: pip install 'orchid-ranker[otel]'"
         )
 
-    from opentelemetry.sdk.trace import TracerProvider
-    from opentelemetry.sdk.trace.export import BatchSpanProcessor
     from opentelemetry.sdk.metrics import MeterProvider
     from opentelemetry.sdk.resources import Resource
+    from opentelemetry.sdk.trace import TracerProvider
+    from opentelemetry.sdk.trace.export import BatchSpanProcessor
 
     try:
-        from opentelemetry.exporter.otlp.proto.grpc.trace_exporter import (
-            OTLPSpanExporter as GrpcTraceExporter,
-        )
         from opentelemetry.exporter.otlp.proto.grpc.metric_exporter import (
             OTLPMetricExporter as GrpcMetricExporter,
         )
+        from opentelemetry.exporter.otlp.proto.grpc.trace_exporter import (
+            OTLPSpanExporter as GrpcTraceExporter,
+        )
 
         trace_exporter = GrpcTraceExporter()
-        metric_exporter = GrpcMetricExporter()
+        GrpcMetricExporter()
     except ImportError:
         try:
-            from opentelemetry.exporter.otlp.proto.http.trace_exporter import (
-                OTLPSpanExporter as HttpTraceExporter,
-            )
             from opentelemetry.exporter.otlp.proto.http.metric_exporter import (
                 OTLPMetricExporter as HttpMetricExporter,
             )
+            from opentelemetry.exporter.otlp.proto.http.trace_exporter import (
+                OTLPSpanExporter as HttpTraceExporter,
+            )
 
             trace_exporter = HttpTraceExporter()
-            metric_exporter = HttpMetricExporter()
+            HttpMetricExporter()
         except ImportError as e:
             raise ImportError(
                 "OpenTelemetry OTLP exporters not installed. "

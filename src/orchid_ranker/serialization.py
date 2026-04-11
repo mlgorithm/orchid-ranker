@@ -8,14 +8,14 @@ from __future__ import annotations
 
 import logging
 from pathlib import Path
-from typing import Any, Dict, Optional, TYPE_CHECKING
+from typing import TYPE_CHECKING, Any, Dict, Optional
 
 import numpy as np
 import torch
 
 if TYPE_CHECKING:
-    from .recommender import OrchidRecommender
     from .agents.recommender_agent import TwoTowerRecommender
+    from .recommender import OrchidRecommender
 
 
 __all__ = ["save_model", "load_model"]
@@ -457,9 +457,15 @@ def _restore_baseline_from_data(
         Restored baseline, ready for inference.
     """
     from .baselines import (
-        PopularityBaseline, RandomBaseline, ALSBaseline, ExplicitMFBaseline,
-        UserKNNBaseline, LinUCBBaseline, NeuralMatrixFactorizationBaseline,
-        ImplicitALSBaseline, ImplicitBPRBaseline, MatrixFactorization,
+        ALSBaseline,
+        ExplicitMFBaseline,
+        ImplicitALSBaseline,
+        ImplicitBPRBaseline,
+        LinUCBBaseline,
+        NeuralMatrixFactorizationBaseline,
+        PopularityBaseline,
+        RandomBaseline,
+        UserKNNBaseline,
     )
 
     dev = torch.device(device)

@@ -7,8 +7,7 @@ import time
 from dataclasses import dataclass
 from typing import Any, Dict, Optional
 
-from .exceptions import ConnectorError, ConnectionTimeoutError, RetryExhaustedError
-
+from .exceptions import ConnectorError, RetryExhaustedError
 
 try:  # pragma: no cover - optional import
     import snowflake.connector  # type: ignore

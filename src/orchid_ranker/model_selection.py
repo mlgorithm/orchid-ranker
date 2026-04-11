@@ -9,16 +9,17 @@ import numpy as np
 import pandas as pd
 
 from .evaluation import (
+    average_precision,
+    ndcg_at_k,
     precision_at_k,
     recall_at_k,
-    ndcg_at_k,
-    average_precision,
 )
 
 #: Supported metric names for cross_validate, evaluate_on_holdout, compare_models.
 EVALUATION_METRICS = frozenset({"precision@5", "recall@5", "ndcg@10", "map@10"})
 
 from typing import TYPE_CHECKING
+
 if TYPE_CHECKING:
     from .recommender import OrchidRecommender
 
@@ -189,7 +190,7 @@ def cross_validate(
             )
 
     strategy_kwargs = strategy_kwargs or {}
-    rng = np.random.RandomState(random_state)
+    np.random.RandomState(random_state)
     n_unique_users = interactions[user_col].nunique()
 
     if k > n_unique_users:

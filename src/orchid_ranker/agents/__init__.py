@@ -1,12 +1,12 @@
 """Agent modules: recommenders, adaptive agents, orchestrators."""
 
-from .student_agent import AdaptiveAgent, AdaptiveAgentFactory
-from .two_tower import TwoTowerRecommender
+from .config import MultiConfig, UserCtx
 from .dual_recommender import DualRecommender
 from .logging_util import JSONLLogger
-from .policies import LinUCBPolicy, BootTS
 from .orchestrator import MultiUserOrchestrator
-from .config import MultiConfig, UserCtx
+from .policies import BootTS, LinUCBPolicy
+from .student_agent import AdaptiveAgent, AdaptiveAgentFactory
+from .two_tower import TwoTowerRecommender
 
 __all__ = [
     "AdaptiveAgent",

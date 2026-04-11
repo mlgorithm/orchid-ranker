@@ -7,20 +7,17 @@ import logging
 import math
 import os
 from collections import defaultdict, deque
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Dict, List, Optional, Tuple
 
 import numpy as np
 import torch
 import torch.nn as nn
-import torch.nn.functional as F
 
-from orchid_ranker.agents.policies import LinUCBPolicy, BootTS
-from orchid_ranker.agents.logging_util import JSONLLogger
-from orchid_ranker.agents.simple_dp import SimpleDPConfig, dp_sgd_step
+from orchid_ranker.agents.policies import BootTS, LinUCBPolicy
+from orchid_ranker.agents.simple_dp import SimpleDPConfig
 from orchid_ranker.dp_accountant import build_accountant
 from orchid_ranker.native.fast_score import fast_score
 from orchid_ranker.security import AuditLogger
-from orchid_ranker.agents.student_agent import ItemMeta
 
 logger = logging.getLogger(__name__)
 
@@ -749,7 +746,7 @@ class TwoTowerRecommender(nn.Module):
                     dwell_pred = self.dwell_head(feats).squeeze(1)
                     order = torch.argsort(dwell_pred, descending=True).tolist()
                     sel_item_ids = [sel_item_ids[i] for i in order]
-                    _d(f"decide: dwell reorder applied")
+                    _d("decide: dwell reorder applied")
             except Exception:
                 pass
 
@@ -951,7 +948,7 @@ class TwoTowerRecommender(nn.Module):
         C = float(getattr(self.dp_settings, "max_grad_norm", 1.0))
         dp_enabled = bool(getattr(self.dp_settings, "enabled", False) and sigma > 0.0 and q > 0.0)
 
-        eps_before = float(getattr(self, "eps_cum", 0.0) or 0.0)
+        float(getattr(self, "eps_cum", 0.0) or 0.0)
         bce = torch.nn.BCEWithLogitsLoss(reduction="mean")
 
         steps_budget = int(getattr(self, "_dp_steps_budget", 0)) if dp_enabled else max(1, int(epochs))

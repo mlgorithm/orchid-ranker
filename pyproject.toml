@@ -107,7 +107,15 @@ target-version = "py39"
 
 [tool.ruff.lint]
 select = ["E", "F", "W", "I"]
-ignore = ["E501"]
+ignore = ["E501", "E402", "E701", "E702", "E741"]
+
+[tool.ruff.lint.per-file-ignores]
+"src/orchid_ranker/__init__.py" = ["F822"]
+"src/orchid_ranker/agents/__init__.py" = ["F822"]
+"src/orchid_ranker/agents/student_agent.py" = ["F822"]
+"src/orchid_ranker/curriculum.py" = ["F822"]
+"src/orchid_ranker/evaluation.py" = ["F822"]
+"src/orchid_ranker/knowledge_tracing.py" = ["F822"]
 
 [tool.mypy]
 python_version = "3.9"

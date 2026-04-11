@@ -1,14 +1,12 @@
 """Multi-user agentic recommendation orchestrator."""
 from __future__ import annotations
 
-import json
 import logging
 import math
 import random
-import time
 from collections import defaultdict
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional
 
 import numpy as np
 import torch
@@ -18,7 +16,7 @@ logger = logging.getLogger(__name__)
 from orchid_ranker.agents.config import MultiConfig, OnlineState, PolicyState, UserCtx
 from orchid_ranker.agents.dual_recommender import DualRecommender
 from orchid_ranker.agents.logging_util import JSONLLogger
-from orchid_ranker.agents.student_agent import AdaptiveAgent as StudentAgent, ItemMeta
+from orchid_ranker.agents.student_agent import AdaptiveAgent as StudentAgent
 from orchid_ranker.agents.timing import _TimingRecorder
 from orchid_ranker.agents.two_tower import TwoTowerRecommender
 
@@ -508,8 +506,7 @@ class MultiUserOrchestrator:
         per-student table (type="user_round") is now complete for downstream
         flattening.
         """
-        import math
-        import random
+
         import numpy as np
         import torch
 

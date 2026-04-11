@@ -1,10 +1,10 @@
 """Common data visualisations used in Orchid Ranker experiments."""
 from __future__ import annotations
 
-from typing import Optional, Tuple
-
 import math
 from itertools import cycle
+from typing import Iterable, Optional, Tuple
+
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd

@@ -1,5 +1,7 @@
 import torch
-from .metric import compute_auc, compute_accuracy
+
+from .metric import compute_accuracy, compute_auc
+
 
 def train_epoch(model, optimizer, criterion, data, device, batch_size=1024):
     model.train()

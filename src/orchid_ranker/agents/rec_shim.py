@@ -1,8 +1,11 @@
 # rec_shim.py
 from __future__ import annotations
-from typing import Any, Dict, List
+
+from typing import Dict
+
 import numpy as np
 import torch
+
 
 class RecShim:
     """Adapts your TwoTowerRecommender to the simple interface the agents expect."""

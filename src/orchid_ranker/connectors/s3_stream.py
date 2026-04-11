@@ -9,7 +9,6 @@ from typing import Iterable, Optional
 
 from .exceptions import ConnectorError, RetryExhaustedError
 
-
 try:  # pragma: no cover - optional import
     import boto3  # type: ignore
 except Exception:  # pragma: no cover - optional dependency

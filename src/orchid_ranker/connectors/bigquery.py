@@ -7,8 +7,7 @@ import time
 from dataclasses import dataclass
 from typing import Optional
 
-from .exceptions import ConnectorError, RetryExhaustedError
-
+from .exceptions import RetryExhaustedError
 
 try:  # pragma: no cover - optional import
     from google.cloud import bigquery  # type: ignore
@@ -188,7 +187,6 @@ class BigQueryConnector:
         RetryExhaustedError
             If query fails after all retry attempts.
         """
-        import pandas as pd  # type: ignore
 
         # Check dependencies before entering retry loop
         self._client()

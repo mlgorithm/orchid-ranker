@@ -11,12 +11,13 @@ __all__ = [
 import difflib
 import logging
 from dataclasses import dataclass
-from typing import Dict, Iterable, List, Optional, Sequence, Tuple
+from typing import Dict, List, Optional, Sequence, Tuple
 
 import numpy as np
 import pandas as pd
 
 from ._compat import require_torch
+
 require_torch("OrchidRecommender")
 import torch  # noqa: E402
 
@@ -26,10 +27,10 @@ from .baselines import (
     ImplicitALSBaseline,
     ImplicitBPRBaseline,
     LinUCBBaseline,
-    UserKNNBaseline,
     NeuralMatrixFactorizationBaseline,
     PopularityBaseline,
     RandomBaseline,
+    UserKNNBaseline,
 )
 from .utils.validation import ValidationError, validate_interactions_frame, validate_item_features
 

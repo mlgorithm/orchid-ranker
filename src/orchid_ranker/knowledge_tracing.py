@@ -6,8 +6,8 @@ training, rehabilitation, gaming, and more).
 """
 
 import math
-from typing import Dict, List, Optional, Tuple
 from datetime import datetime
+from typing import Dict, List, Optional
 
 
 class BayesianKnowledgeTracing:

@@ -7,15 +7,15 @@ Import from the new locations for clarity:
     from orchid_ranker.agents.dual_recommender import DualRecommender
 """
 
-from orchid_ranker.agents.policies import LinUCBPolicy, BootTS  # noqa: F401
-from orchid_ranker.agents.logging_util import JSONLLogger  # noqa: F401
-from orchid_ranker.agents.two_tower import (  # noqa: F401
-    TwoTowerRecommender,
-    enable_debug_rec_logs,
-    _DEBUG_REC,
-    _d,
-)
 from orchid_ranker.agents.dual_recommender import DualRecommender  # noqa: F401
+from orchid_ranker.agents.logging_util import JSONLLogger  # noqa: F401
+from orchid_ranker.agents.policies import BootTS, LinUCBPolicy  # noqa: F401
+from orchid_ranker.agents.two_tower import (  # noqa: F401
+    _DEBUG_REC,
+    TwoTowerRecommender,
+    _d,
+    enable_debug_rec_logs,
+)
 
 try:
     from orchid_ranker.agents.student_agent import ItemMeta  # noqa: F401

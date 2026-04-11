@@ -1,10 +1,10 @@
 """External data/lifecycle connectors."""
 
-from .exceptions import ConnectorError, ConnectionTimeoutError, RetryExhaustedError
-from .snowflake import SnowflakeConnector
 from .bigquery import BigQueryConnector
-from .s3_stream import S3StreamConnector
+from .exceptions import ConnectionTimeoutError, ConnectorError, RetryExhaustedError
 from .mlflow import MLflowTracker
+from .s3_stream import S3StreamConnector
+from .snowflake import SnowflakeConnector
 
 __all__ = [
     "ConnectorError",
