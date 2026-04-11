@@ -7,7 +7,7 @@ Orchid Ranker combines a modular orchestration engine, realistic user simulators
 [![Python 3.9–3.13](https://img.shields.io/badge/python-3.9%E2%80%933.13-blue.svg)](https://www.python.org/)
 [![PyTorch 1.13–2.9](https://img.shields.io/badge/pytorch-1.13%E2%80%932.9-ee4c2c.svg)](https://pytorch.org/)
 [![License](https://img.shields.io/badge/license-Apache%202.0-blue.svg)](LICENSE)
-[![Version](https://img.shields.io/badge/version-0.3.1-brightgreen.svg)](CHANGELOG.md)
+[![Version](https://img.shields.io/badge/version-0.3.2-brightgreen.svg)](CHANGELOG.md)
 
 ---
 
@@ -610,7 +610,7 @@ If you use Orchid Ranker in your research, please cite:
 @software{urmian2025orchid,
   author = {Urmian, Sam},
   title = {Orchid Ranker: Adaptive Progression and Recommender Toolkit},
-  version = {0.3.1},
+  version = {0.3.2},
   year = {2025},
   url = {https://github.com/mlgorithm/orchid-ranker}
 }

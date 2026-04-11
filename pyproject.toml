@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "orchid-ranker"
-version = "0.3.1"
+version = "0.3.2"
 description = "Adaptive progression and recommender toolkit with user simulators, agentic orchestration, and offline evaluation."
 readme = "README.md"
 authors = [

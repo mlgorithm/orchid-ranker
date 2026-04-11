@@ -108,8 +108,8 @@ class TestLazyImports:
         assert callable(save_model)
         assert callable(load_model)
 
-    def test_version_is_031(self):
-        assert __version__ == "0.3.1"
+    def test_version_is_032(self):
+        assert __version__ == "0.3.2"
 
     def test_compat_torch_available(self):
         """torch_available() returns True in dev environment."""

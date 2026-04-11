@@ -29,7 +29,7 @@ Installation extras
 ``pip install orchid-ranker[all]``     -- everything (ML, viz, agentic, observability, connectors)
 """
 
-__version__ = "0.3.1"
+__version__ = "0.3.2"
 
 # ── Tier 1: Torch-free educational toolkit (always available) ─────────────
 
