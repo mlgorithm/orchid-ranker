@@ -1,30 +1,30 @@
 # Orchid Ranker
 
-**Adaptive educational recommender toolkit** for personalized learning at scale.
+**Adaptive progression and recommender toolkit** for personalized learning, training, and beyond.
 
-Orchid Ranker combines a modular orchestration engine, realistic learner simulators, and a plug-and-play recommender API (similar to Surprise) into a single library purpose-built for educational technology. It grew out of large-scale tutoring experiments and now powers adaptive item selection, knowledge tracing, curriculum sequencing, and offline evaluation for learning platforms.
+Orchid Ranker combines a modular orchestration engine, realistic user simulators, and a plug-and-play recommender API into a single library for any domain with ordered progression: education, corporate training, rehabilitation, fitness, gaming, onboarding, and more. It grew out of large-scale tutoring experiments and now provides adaptive item selection, proficiency tracing, dependency-aware sequencing, and offline evaluation for any platform that needs to guide users through a progression.
 
 [![Python 3.9–3.13](https://img.shields.io/badge/python-3.9%E2%80%933.13-blue.svg)](https://www.python.org/)
 [![PyTorch 1.13–2.9](https://img.shields.io/badge/pytorch-1.13%E2%80%932.9-ee4c2c.svg)](https://pytorch.org/)
 [![License: MIT](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
-[![Version](https://img.shields.io/badge/version-0.2.1-brightgreen.svg)](CHANGELOG.md)
+[![Version](https://img.shields.io/badge/version-0.3.0-brightgreen.svg)](CHANGELOG.md)
 
 ---
 
 ## Why Orchid Ranker?
 
-Most recommender libraries target e-commerce or media. Orchid Ranker is designed from the ground up for **education**, where the goal isn't just relevance — it's learning. The library provides Bayesian knowledge tracing, prerequisite-aware curriculum sequencing, Zone of Proximal Development (ZPD) targeting, forgetting curve modeling, and educational evaluation metrics alongside traditional recommendation algorithms.
+Most recommender libraries target e-commerce or media. Orchid Ranker is designed for **adaptive progression** — any domain where users advance through ordered competencies. The library provides Bayesian proficiency tracing, dependency-aware sequencing, Zone of Proximal Development (ZPD) targeting, forgetting curve modeling, and progression metrics alongside traditional recommendation algorithms.
 
 **Key differentiators:**
 
 - **9 recommendation strategies** from popularity baselines to contextual bandits and neural models, all behind a unified `OrchidRecommender` API
-- **Knowledge tracing** with Bayesian Knowledge Tracing (BKT), mastery tracking, and Ebbinghaus forgetting curves
-- **Curriculum intelligence** via prerequisite graphs (DAG) with cycle detection, topological ordering, and ZPD-aware recommendations
-- **Learner simulation** with realistic student agents modeling knowledge, fatigue, trust, and engagement dynamics
-- **Educational metrics** including learning gain, knowledge coverage, curriculum adherence, and difficulty appropriateness
+- **Proficiency tracing** with Bayesian Knowledge Tracing (BKT), multi-competency tracking, and Ebbinghaus forgetting curves
+- **Dependency graphs** (DAG) with cycle detection, topological ordering, and ZPD-aware progression recommendations
+- **User simulation** with realistic adaptive agents modeling knowledge, fatigue, trust, and engagement dynamics
+- **Progression metrics** including progression gain, proficiency coverage, sequence adherence, and difficulty appropriateness
 - **Privacy by design** with differential privacy (DP-SGD), RBAC, and audit logging
 - **Model lifecycle** with serialization, cross-validation, grid/random search, and train/test splitting
-- **Enterprise ready** with Prometheus observability, Snowflake/BigQuery/S3 connectors, MLflow tracking, Docker/Helm/Terraform deployment
+- **Enterprise ready** with Prometheus observability, Snowflake/BigQuery/S3 connectors, MLflow tracking, DeprecationWarning on all renamed APIs
 
 ---
 
@@ -87,7 +87,7 @@ results = compare_models(
 print(results)  # DataFrame with metrics per strategy
 ```
 
-### 3. Track student mastery
+### 3. Track proficiency
 
 ```python
 from orchid_ranker import BayesianKnowledgeTracing
@@ -96,27 +96,27 @@ bkt = BayesianKnowledgeTracing(p_init=0.1, p_transit=0.1, p_slip=0.1, p_guess=0.
 for correct in [True, True, False, True, True, True]:
     bkt.update(correct=correct)
 
-print(f"P(mastery): {bkt.p_known():.3f}")
+print(f"P(mastery): {bkt.p_known:.3f}")
 print(f"Mastered: {bkt.is_mastered()}")
 ```
 
-### 4. Build a prerequisite-aware curriculum
+### 4. Build a dependency-aware progression
 
 ```python
-from orchid_ranker import PrerequisiteGraph, CurriculumRecommender
+from orchid_ranker import DependencyGraph, ProgressionRecommender
 
-graph = PrerequisiteGraph()
+graph = DependencyGraph()
 graph.add_edge("algebra", "calculus")
 graph.add_edge("algebra", "statistics")
 graph.add_edge("calculus", "differential_equations")
 
-cr = CurriculumRecommender(graph=graph, difficulty_map={
+pr = ProgressionRecommender(graph=graph, difficulty_map={
     "algebra": 0.3, "calculus": 0.6, "statistics": 0.5, "differential_equations": 0.8
 })
 
-# Student has mastered algebra — what should they learn next?
-next_items = cr.recommend(student_mastery={"algebra"}, n=3)
-print(next_items)  # ['calculus', 'statistics'] — respects prerequisites
+# User has completed algebra — what should they tackle next?
+next_items = pr.recommend(completed={"algebra"}, n=3)
+print(next_items)  # ['calculus', 'statistics'] — respects dependencies
 ```
 
 ### 5. Save and load models
@@ -191,25 +191,25 @@ bkt = BayesianKnowledgeTracing(
 )
 
 bkt.update(correct=True)
-print(bkt.p_known())      # Current mastery probability
+print(bkt.p_known)      # Current mastery probability
 print(bkt.is_mastered())   # True if p_known > threshold
 bkt.reset()                # Reset to prior
 ```
 
-### Multi-Skill Mastery Tracking
+### Multi-Competency Proficiency Tracking
 
 ```python
-from orchid_ranker import MasteryTracker
+from orchid_ranker import ProficiencyTracker
 
-tracker = MasteryTracker(
+tracker = ProficiencyTracker(
     skills=["algebra", "geometry", "calculus"],
     default_params={"p_init": 0.1, "p_transit": 0.15},
 )
 
 tracker.update("algebra", correct=True)
 tracker.update("algebra", correct=True)
-print(tracker.mastered_skills())   # Skills above mastery threshold
-print(tracker.recommend_next())    # Next skill to study
+print(tracker.mastered)            # Competencies above mastery threshold
+print(tracker.recommend_next())    # Next competency to work on
 ```
 
 ### Forgetting Curve
@@ -228,48 +228,48 @@ needs_review = fc.should_review(threshold=0.5)
 
 ---
 
-## Curriculum Sequencing
+## Dependency-Based Sequencing
 
-### Prerequisite Graph
+### Dependency Graph
 
-Model skill dependencies as a directed acyclic graph:
+Model competency dependencies as a directed acyclic graph:
 
 ```python
-from orchid_ranker import PrerequisiteGraph
+from orchid_ranker import DependencyGraph
 
-graph = PrerequisiteGraph()
+graph = DependencyGraph()
 graph.add_edge("fractions", "algebra")
 graph.add_edge("algebra", "calculus")
 graph.add_edge("algebra", "linear_algebra")
 
 # Query the graph
-print(graph.topological_order())                    # Valid learning sequence
-print(graph.prerequisites_for("calculus"))           # {'algebra'}
-print(graph.all_prerequisites_for("calculus"))       # {'fractions', 'algebra'}
-print(graph.available_skills(mastered={"fractions"}))# ['algebra']
-print(graph.is_ready("calculus", mastered={"fractions", "algebra"}))  # True
+print(graph.topological_order())                      # Valid progression sequence
+print(graph.prerequisites_for("calculus"))             # {'algebra'}
+print(graph.all_prerequisites_for("calculus"))         # {'fractions', 'algebra'}
+print(graph.available(completed={"fractions"}))        # ['algebra']
+print(graph.prerequisites_met("calculus", completed={"fractions", "algebra"}))  # True
 
-# Find the learning path to a target skill
-path = graph.learning_path("calculus", mastered={"fractions"})
+# Find the path to a target node
+path = graph.path_to("calculus", completed={"fractions"})
 print(path)  # ['algebra', 'calculus']
 
 # Cycle detection is automatic
 graph.add_edge("calculus", "fractions")  # Raises ValueError
 ```
 
-### Curriculum Recommender
+### Progression Recommender
 
-Recommends the next items to study, respecting prerequisites and targeting the learner's Zone of Proximal Development:
+Recommends the next items to tackle, respecting dependencies and targeting the user's Zone of Proximal Development:
 
 ```python
-from orchid_ranker import CurriculumRecommender
+from orchid_ranker import ProgressionRecommender
 
-cr = CurriculumRecommender(
+pr = ProgressionRecommender(
     graph=graph,
     difficulty_map={"fractions": 0.2, "algebra": 0.5, "calculus": 0.8, "linear_algebra": 0.7},
 )
 
-recommendations = cr.recommend(student_mastery={"fractions"}, n=3)
+recommendations = pr.recommend(completed={"fractions"}, n=3)
 ```
 
 ---
@@ -311,13 +311,13 @@ rs = RandomSearchCV(
 rs.fit(interactions, rating_col="rating")
 ```
 
-### Educational Metrics
+### Progression Metrics
 
 ```python
-from orchid_ranker import learning_gain, knowledge_coverage, difficulty_appropriateness
+from orchid_ranker import progression_gain, proficiency_coverage, difficulty_appropriateness
 
-gain = learning_gain(pre_score=0.4, post_score=0.8)       # Normalized learning gain
-coverage = knowledge_coverage(mastered={"a", "b"}, total_skills={"a", "b", "c", "d"})
+gain = progression_gain(pre_score=0.4, post_score=0.8)       # Normalized progression gain
+coverage = proficiency_coverage(achieved={"a", "b"}, total={"a", "b", "c", "d"})
 appropriateness = difficulty_appropriateness(
     recommended_difficulties=[0.5, 0.55, 0.6],
     student_ability=0.5,
@@ -327,29 +327,29 @@ appropriateness = difficulty_appropriateness(
 
 ---
 
-## Learner Simulation
+## Adaptive User Simulation
 
-The `StudentAgent` simulates realistic learner behavior with configurable knowledge, fatigue, engagement, and trust dynamics:
+The `AdaptiveAgent` simulates realistic user behavior with configurable knowledge, fatigue, engagement, and trust dynamics:
 
 ```python
-from orchid_ranker import StudentAgent, StudentAgentFactory
+from orchid_ranker import AdaptiveAgent, AdaptiveAgentFactory
 
-student = StudentAgentFactory.create(
+agent = AdaptiveAgentFactory.create(
     user_id=1,
     knowledge_mode="scalar",  # or "IRT", "MIRT", "ZPD", "ContextualZPD"
     seed=42,
 )
 
-response = student.accept(
+response = agent.accept(
     item_id=10,
     difficulty=0.5,
     correct=True,
     dwell_time=30.0,
     feedback="positive",
 )
-print(f"Knowledge: {student.get_knowledge():.2f}")
-print(f"Fatigue: {student.get_fatigue():.2f}")
-print(f"Engagement: {student.get_engagement():.2f}")
+print(f"Knowledge: {agent.get_knowledge():.2f}")
+print(f"Fatigue: {agent.get_fatigue():.2f}")
+print(f"Engagement: {agent.get_engagement():.2f}")
 ```
 
 ---
@@ -542,15 +542,15 @@ orchid-ranker/
     __init__.py           # Public API (74 symbols)
     recommender.py        # OrchidRecommender high-level API
     baselines.py          # 9 strategy implementations
-    knowledge_tracing.py  # BKT, MasteryTracker, ForgettingCurve
-    curriculum.py         # PrerequisiteGraph, CurriculumRecommender
-    evaluation.py         # Ranking + educational metrics
+    knowledge_tracing.py  # BKT, ProficiencyTracker, ForgettingCurve
+    curriculum.py         # DependencyGraph, ProgressionRecommender
+    evaluation.py         # Ranking + progression metrics
     model_selection.py    # Cross-validation, train/test split
     tuning.py             # GridSearchCV, RandomSearchCV
     serialization.py      # Model save/load
     dp.py                 # Differential privacy presets
     observability.py      # Prometheus metrics
-    agents/               # StudentAgent, TwoTowerRecommender, orchestrator
+    agents/               # AdaptiveAgent, TwoTowerRecommender, orchestrator
     connectors/           # Snowflake, BigQuery, S3, MLflow
     safety/               # SafeSwitch DR controller
     security/             # RBAC, audit logging
@@ -609,8 +609,8 @@ If you use Orchid Ranker in your research, please cite:
 ```bibtex
 @software{vadiee2025orchid,
   author = {Vadiee, Farhad},
-  title = {Orchid Ranker: Adaptive Educational Recommender Toolkit},
-  version = {0.2.1},
+  title = {Orchid Ranker: Adaptive Progression and Recommender Toolkit},
+  version = {0.3.0},
   year = {2025},
   url = {https://github.com/farhad-vadiee/orchid-ranker}
 }

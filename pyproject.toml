@@ -4,13 +4,14 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "orchid-ranker"
-version = "0.2.1"
-description = "Adaptive educational recommender toolkit with learner simulators, agentic orchestration, and preprocessing utilities."
+version = "0.3.0"
+description = "Adaptive progression and recommender toolkit with user simulators, agentic orchestration, and offline evaluation."
 readme = "README.md"
 authors = [
   {name = "Farhad Vadiee", email = "sam.vadiee@gmail.com"}
 ]
-license = {file = "LICENSE"}
+license = "MIT"
+license-files = ["LICENSE"]
 requires-python = ">=3.9"
 dependencies = [
   "numpy>=1.22",
@@ -19,9 +20,8 @@ dependencies = [
   "scipy>=1.9",
   "pyyaml>=6.0",
   "joblib>=1.2",
-  "torch>=1.13",
 ]
-keywords = ["recommender-systems", "education", "privacy", "bandits", "simulation"]
+keywords = ["recommender-systems", "adaptive-learning", "knowledge-tracing", "bandits", "simulation", "progression"]
 classifiers = [
   "Development Status :: 4 - Beta",
   "Programming Language :: Python :: 3",
@@ -30,7 +30,6 @@ classifiers = [
   "Programming Language :: Python :: 3.11",
   "Programming Language :: Python :: 3.12",
   "Programming Language :: Python :: 3.13",
-  "License :: OSI Approved :: MIT License",
   "Intended Audience :: Developers",
   "Intended Audience :: Science/Research",
   "Intended Audience :: Education",
@@ -41,10 +40,17 @@ classifiers = [
 ]
 
 [project.optional-dependencies]
+ml = [
+  "torch>=1.13",
+]
+torch = [
+  "torch>=1.13",
+]
 viz = [
   "matplotlib>=3.6",
 ]
 agentic = [
+  "torch>=1.13",
   "matplotlib>=3.6",
   "tqdm>=4.60",
   "opacus>=1.5",
@@ -61,8 +67,11 @@ connectors = [
 benchmarks = [
   "implicit>=0.7",
   "reclab>=0.2",
+  "scikit-surprise>=1.1",
+  "lightfm>=1.17",
 ]
 dev = [
+  "torch>=1.13",
   "pytest>=7.0",
   "pytest-cov>=4.0",
   "mypy>=1.4",
@@ -70,6 +79,9 @@ dev = [
   "build>=1.0",
   "twine>=4.0",
   "prometheus-client>=0.16",
+]
+all = [
+  "orchid-ranker[ml,viz,agentic,observability,connectors]",
 ]
 
 [project.urls]

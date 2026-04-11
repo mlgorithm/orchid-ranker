@@ -376,7 +376,8 @@ This is critical for credibility. Enterprise buyers and researchers both want nu
 - [x] Automated release pipeline: tag → build → PyPI → SBOM → GitHub Release → docs *(done — `64d0356`)*
 - [x] RELEASING.md with SemVer policy and pre-release checklist *(done — `64d0356`)*
 - [x] docs/index.md landing page with feature highlights *(done — `64d0356`)*
-- [ ] Published benchmark results vs. 4+ competitors *(requires runtime — stretch)*
+- [x] Cross-library benchmark infrastructure: bench_competitors.py vs Surprise/implicit/LightFM + nightly CI *(done — `9cee832`)*
+- [ ] Fill in actual benchmark numbers *(requires local run: `python benchmarks/bench_competitors.py`)*
 - [ ] 6+ tutorial notebooks *(stretch)*
 
 ---

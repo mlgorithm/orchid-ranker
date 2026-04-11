@@ -165,7 +165,7 @@ class PrerequisiteGraph:
 | `topological_order` | `()` | `List[str]` | Valid learning sequence (Kahn's algorithm). |
 | `learning_path` | `(target_skill, mastered=None)` | `List[str]` | Shortest path to target from current mastery. |
 | `available_skills` | `(mastered: Set[str])` | `List[str]` | Skills whose prerequisites are all mastered. |
-| `is_ready` | `(skill, mastered: Set[str])` | `bool` | Whether all prerequisites are met. |
+| `prerequisites_met` | `(skill, mastered: Set[str])` | `bool` | Whether all prerequisites are met. |
 | `validate` | `()` | `None` | Validate graph integrity. |
 | `to_dict` | `()` | `Dict` | Serialize to dictionary. |
 | `from_dict` | `(data: Dict)` | `PrerequisiteGraph` | Class method. Deserialize from dictionary. |

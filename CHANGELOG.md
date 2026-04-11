@@ -1,5 +1,57 @@
 # Changelog
 
+## 0.3.0 - 2026-04-11
+
+### Breaking Changes (with backward-compat aliases until v1.0)
+
+All renamed symbols emit `DeprecationWarning` when accessed via their old name. Old names will be removed in v1.0.
+
+- **Classes renamed** (domain-neutral terminology):
+  - `MasteryTracker` → `ProficiencyTracker`
+  - `PrerequisiteGraph` → `DependencyGraph`
+  - `CurriculumRecommender` → `ProgressionRecommender`
+  - `StudentAgent` → `AdaptiveAgent`
+  - `StudentAgentFactory` → `AdaptiveAgentFactory`
+  - `EducationalReport` → `ProgressionReport`
+
+- **Functions renamed**:
+  - `learning_gain()` → `progression_gain()`
+  - `knowledge_coverage()` → `proficiency_coverage()`
+  - `curriculum_adherence()` → `sequence_adherence()`
+
+- **Parameter renames** (old keyword-only aliases still accepted):
+  - `DependencyGraph.prerequisites_met(mastered=)` → `completed=`
+  - `DependencyGraph.available(mastered=)` → `completed=`
+  - `DependencyGraph.path_to(mastered=)` → `completed=`
+  - `ProgressionRecommender.recommend(student_mastery=)` → `completed=`
+  - `proficiency_coverage(mastered_skills=, total_skills=)` → `achieved=, total=`
+
+### Enterprise Hardening
+
+- **Logging**: Replaced all `print()` calls with `logging.getLogger(__name__)` across 30+ modules.
+- **Thread safety**: Added `threading.Lock` with double-checked locking for `fast_score.py` native extension loading and `observability.py` readiness state.
+- **Security**: `torch.load(weights_only=True)` enforced in serialization; legacy pickle fallback emits `DeprecationWarning`.
+- **Input validation**: Probability parameters validated in [0, 1], dimension parameters validated as positive, remediation guidance in error messages.
+- **Module exports**: Added `__all__` to all public modules for IDE discoverability and `from module import *` safety.
+- **Deprecation strategy**: PEP 562 `__getattr__` for lazy loading of deprecated names with `DeprecationWarning` at point of use (not import time).
+
+### Bug Fixes
+
+- Fixed `NeuralMatrixFactorizationBaseline` using unset `emb_dim` instead of `self.emb_dim` for embedding layers.
+- Fixed `UserKNNBaseline` crash when `k >= num_users`; now clamps to `num_users - 1`.
+- Fixed `LinUCBBaseline` crash on out-of-bounds item IDs in `fit()`.
+- Fixed internal imports of `StudentAgent` in `orchestrator.py` and `legacy_orchestrator.py` that triggered spurious `DeprecationWarning` at import time.
+
+### Documentation
+
+- README rewritten with domain-neutral framing and updated code examples using new API names.
+- `pyproject.toml` description and keywords updated for multi-domain positioning.
+- Full docstrings added to `TwoTowerRecommender.think()` and `decide()` methods.
+
+### Testing
+
+- All 1061 tests passing including backward-compatibility tests for all renamed APIs.
+
 ## 0.2.1 - 2025-11-04
 
 ### New Modules
