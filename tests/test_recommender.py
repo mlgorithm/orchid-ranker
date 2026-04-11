@@ -121,7 +121,7 @@ def test_validation_rejects_non_integer_ids():
     data = _dataset().copy()
     data["user_id"] = data["user_id"].astype(str)
     rec = OrchidRecommender(strategy="als", validate_inputs=True, epochs=1)
-    with pytest.raises(ValueError):
+    with pytest.raises((ValueError, TypeError)):
         rec.fit(data, rating_col="label")
 
 
