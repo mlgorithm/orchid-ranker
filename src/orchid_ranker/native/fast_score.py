@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import threading
 from pathlib import Path
 from typing import Optional
 
@@ -10,6 +11,7 @@ _EXTENSION_NAME = "orchid_fast_score"
 _SRC_ROOT = Path(__file__).resolve().parent
 _FAST_MOD = None
 _BUILD_ERROR: Optional[Exception] = None
+_LOAD_LOCK = threading.Lock()
 
 
 def ensure_fast_score(*, verbose: bool = False):
@@ -18,21 +20,28 @@ def ensure_fast_score(*, verbose: bool = False):
     Returns the loaded module on success, or None if compilation failed.
     """
     global _FAST_MOD, _BUILD_ERROR
+    # Fast path without lock (double-checked locking)
     if _FAST_MOD is not None:
         return _FAST_MOD
     if _BUILD_ERROR is not None:
         return None
-    try:
-        _FAST_MOD = load_extension(
-            name=_EXTENSION_NAME,
-            sources=[str(_SRC_ROOT / "fast_score.cpp")],
-            extra_cflags=["-O3"],
-            verbose=verbose,
-        )
-    except Exception as exc:  # pragma: no cover - build failures depend on env
-        _BUILD_ERROR = exc
-        return None
-    return _FAST_MOD
+    with _LOAD_LOCK:
+        # Re-check under lock to prevent double compilation
+        if _FAST_MOD is not None:
+            return _FAST_MOD
+        if _BUILD_ERROR is not None:
+            return None
+        try:
+            _FAST_MOD = load_extension(
+                name=_EXTENSION_NAME,
+                sources=[str(_SRC_ROOT / "fast_score.cpp")],
+                extra_cflags=["-O3"],
+                verbose=verbose,
+            )
+        except Exception as exc:  # pragma: no cover - build failures depend on env
+            _BUILD_ERROR = exc
+            return None
+        return _FAST_MOD
 
 
 def fast_score(user_vec: torch.Tensor, item_matrix: torch.Tensor, *, use_native: bool = True) -> torch.Tensor:
@@ -52,4 +61,10 @@ def fast_score(user_vec: torch.Tensor, item_matrix: torch.Tensor, *, use_native:
     if mod is None:
         return user_vec @ item_matrix.T
     return mod.fast_score(user_vec, item_matrix)
+
+
+__all__ = [
+    "ensure_fast_score",
+    "fast_score",
+]
 

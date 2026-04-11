@@ -156,3 +156,9 @@ class SafeSwitchDR:
         info.update({"p": self.p, "acc_lcb": self._acc_lcb()})
         return info
 
+
+__all__ = [
+    "SafeSwitchDRConfig",
+    "SafeSwitchDR",
+]
+

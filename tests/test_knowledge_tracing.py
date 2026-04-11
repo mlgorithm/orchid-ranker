@@ -19,15 +19,15 @@ class TestBayesianKnowledgeTracing:
         bkt = BayesianKnowledgeTracing(
             p_init=0.1, p_transit=0.1, p_slip=0.1, p_guess=0.2
         )
-        assert bkt.p_known() == 0.1
+        assert bkt.p_known == 0.1
         assert bkt.is_mastered() is False
 
     def test_initialization_boundary_values(self):
         """Test initialization with boundary values."""
         bkt = BayesianKnowledgeTracing(p_init=0.0, p_transit=1.0, p_slip=0.0, p_guess=1.0)
-        assert bkt.p_known() == 0.0
+        assert bkt.p_known == 0.0
         bkt2 = BayesianKnowledgeTracing(p_init=1.0, p_transit=0.0, p_slip=1.0, p_guess=0.0)
-        assert bkt2.p_known() == 1.0
+        assert bkt2.p_known == 1.0
 
     def test_initialization_invalid_params(self):
         """Test that invalid parameters raise ValueError."""
@@ -52,15 +52,15 @@ class TestBayesianKnowledgeTracing:
     def test_correct_observation_increases_knowledge(self):
         """Test that correct answer increases knowledge estimate."""
         bkt = BayesianKnowledgeTracing(p_init=0.1, p_transit=0.1, p_slip=0.1, p_guess=0.2)
-        initial = bkt.p_known()
+        initial = bkt.p_known
         result = bkt.update(correct=True)
         assert result > initial
-        assert bkt.p_known() == result
+        assert bkt.p_known == result
 
     def test_incorrect_observation_decreases_knowledge(self):
         """Test that incorrect answer may decrease knowledge estimate."""
         bkt = BayesianKnowledgeTracing(p_init=0.5, p_transit=0.1, p_slip=0.1, p_guess=0.2)
-        initial = bkt.p_known()
+        initial = bkt.p_known
         result = bkt.update(correct=False)
         # After observing incorrect, knowledge should decrease (uncertain, not definite)
         assert result < initial or result >= initial  # Depends on parameters
@@ -79,10 +79,10 @@ class TestBayesianKnowledgeTracing:
     def test_multiple_correct_observations(self):
         """Test learning curve with multiple correct observations."""
         bkt = BayesianKnowledgeTracing(p_init=0.1, p_transit=0.15, p_slip=0.1, p_guess=0.2)
-        initial = bkt.p_known()
+        initial = bkt.p_known
         for _ in range(5):
             bkt.update(correct=True)
-        final = bkt.p_known()
+        final = bkt.p_known
         assert final > initial
         assert bkt.is_mastered() is True or final > 0.5
 
@@ -91,17 +91,17 @@ class TestBayesianKnowledgeTracing:
         bkt = BayesianKnowledgeTracing(p_init=0.2)
         bkt.update(correct=True)
         bkt.update(correct=True)
-        assert bkt.p_known() > 0.2
+        assert bkt.p_known > 0.2
         bkt.reset()
-        assert bkt.p_known() == 0.2
+        assert bkt.p_known == 0.2
         assert bkt.is_mastered() is False
 
     def test_p_known_property(self):
         """Test p_known property returns current probability."""
         bkt = BayesianKnowledgeTracing(p_init=0.3)
-        assert bkt.p_known() == 0.3
+        assert bkt.p_known == 0.3
         bkt.update(correct=True)
-        assert bkt.p_known() > 0.3
+        assert bkt.p_known > 0.3
 
 
 class TestMasteryTracker:

@@ -54,4 +54,4 @@ def validate_item_features(item_features: np.ndarray, expected_items: int) -> No
         )
 
 
-__all__ = ["ValidationError", "validate_interactions_frame", "validate_item_features"]
+__all__ = ["REQUIRED_INTERACTION_COLUMNS", "ValidationError", "validate_interactions_frame", "validate_item_features"]

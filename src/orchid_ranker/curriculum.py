@@ -1,42 +1,33 @@
-"""Prerequisite graph support for curriculum ordering and learning path planning.
+"""Dependency graph and progression recommender for sequenced learning paths.
 
-This module provides DAG-based prerequisite modeling for educational curricula,
-enabling pedagogically valid skill sequencing and learning path recommendations.
+This module provides DAG-based dependency modeling for any domain with ordered
+progression: education (curricula), corporate training (certification paths),
+rehabilitation (therapy plans), gaming (skill trees), and more.
 """
 from __future__ import annotations
 
-import logging
+import heapq
 from collections import defaultdict, deque
 from typing import Dict, List, Optional, Set, Tuple
 
-logger = logging.getLogger(__name__)
 
+class DependencyGraph:
+    """Directed acyclic graph of dependencies for progression ordering.
 
-class PrerequisiteGraph:
-    """Directed acyclic graph of skill prerequisites for curriculum ordering.
-
-    Models the dependency structure between skills/items where mastering
-    prerequisite skills is required before advancing to dependent skills.
-    Ensures acyclic structure to enable topological ordering and learning paths.
+    Models the dependency structure between competencies/items where mastering
+    prerequisites is required before advancing to dependent items. Works for
+    any domain: education (curricula), training (cert paths), gaming (skill
+    trees), rehab (therapy sequences), etc.
 
     Parameters
     ----------
     edges : list of (str, str), optional
-        List of (prerequisite, dependent) tuples. Each tuple represents
-        a directed edge from prerequisite to dependent skill.
-
-    Attributes
-    ----------
-    _edges : dict[str, set[str]]
-        Adjacency list: {prerequisite: {dependent1, dependent2, ...}}
-    _reverse_edges : dict[str, set[str]]
-        Reverse adjacency list: {dependent: {prerequisite1, prerequisite2, ...}}
-    _vertices : set[str]
-        All skills/vertices in the graph.
+        List of (dependency, dependent) tuples. Each tuple represents
+        a directed edge from dependency to dependent item.
 
     Examples
     --------
-    >>> graph = PrerequisiteGraph()
+    >>> graph = DependencyGraph()
     >>> graph.add_edges([
     ...     ("algebra", "calculus"),
     ...     ("trigonometry", "calculus"),
@@ -63,15 +54,20 @@ class PrerequisiteGraph:
         if edges:
             self.add_edges(edges)
 
+    def __repr__(self) -> str:
+        n_nodes = len(self._vertices)
+        n_edges = sum(len(deps) for deps in self._edges.values())
+        return f"DependencyGraph(nodes={n_nodes}, edges={n_edges})"
+
     def add_edge(self, prerequisite: str, dependent: str) -> None:
-        """Add a prerequisite relationship.
+        """Add a dependency relationship.
 
         Parameters
         ----------
         prerequisite : str
-            The skill that must be mastered first.
+            The node that must be completed first.
         dependent : str
-            The skill that depends on the prerequisite.
+            The node that depends on the prerequisite.
 
         Raises
         ------
@@ -143,97 +139,87 @@ class PrerequisiteGraph:
             self._vertices.add(prereq)
             self._vertices.add(dep)
 
-    def prerequisites_for(self, skill: str) -> Set[str]:
-        """Return all direct prerequisites for a skill.
-
-        Returns the immediate prerequisites (parents) of a skill in the DAG.
-        This includes only direct dependencies, not transitive ones.
+    def prerequisites_for(self, node: str) -> Set[str]:
+        """Return direct prerequisites (parents) of a node.
 
         Parameters
         ----------
-        skill : str
-            The skill to query.
+        node : str
+            The node to query.
 
         Returns
         -------
         set of str
-            Direct prerequisites (parents) of the skill.
-            Empty set if skill has no prerequisites or doesn't exist.
+            Direct prerequisites. Empty set if none or node doesn't exist.
 
         Examples
         --------
-        >>> graph = PrerequisiteGraph([("a", "b"), ("c", "b")])
+        >>> graph = DependencyGraph([("a", "b"), ("c", "b")])
         >>> graph.prerequisites_for("b")
         {'a', 'c'}
         """
-        return self._reverse_edges.get(skill, set()).copy()
+        return self._reverse_edges.get(node, set()).copy()
 
-    def all_prerequisites_for(self, skill: str) -> Set[str]:
-        """Return all transitive prerequisites (ancestors) for a skill.
+    def all_prerequisites_for(self, node: str) -> Set[str]:
+        """Return all transitive prerequisites (ancestors) of a node.
 
-        Uses BFS to find all skills that must be mastered before this skill.
+        Uses BFS to find everything that must be completed before this node.
 
         Parameters
         ----------
-        skill : str
-            The skill to query.
+        node : str
+            The node to query.
 
         Returns
         -------
         set of str
-            All transitive prerequisites (ancestors) of the skill.
-            Empty set if skill has no prerequisites or doesn't exist.
+            All transitive prerequisites. Empty set if none or node doesn't exist.
         """
-        if skill not in self._vertices:
+        if node not in self._vertices:
             return set()
 
         visited = set()
-        queue = deque(self._reverse_edges.get(skill, set()))
+        queue = deque(self._reverse_edges.get(node, set()))
 
         while queue:
-            node = queue.popleft()
-            if node in visited:
+            current = queue.popleft()
+            if current in visited:
                 continue
-            visited.add(node)
-            queue.extend(self._reverse_edges.get(node, set()) - visited)
+            visited.add(current)
+            queue.extend(self._reverse_edges.get(current, set()) - visited)
 
         return visited
 
-    def dependents_of(self, skill: str) -> Set[str]:
-        """Return skills that directly depend on this skill.
-
-        Returns immediate dependents (children) of a skill in the DAG.
-        This includes only direct dependencies, not transitive ones.
+    def dependents_of(self, node: str) -> Set[str]:
+        """Return nodes that directly depend on this node.
 
         Parameters
         ----------
-        skill : str
-            The skill to query.
+        node : str
+            The node to query.
 
         Returns
         -------
         set of str
-            Direct dependents (children) of the skill.
-            Empty set if skill has no dependents or doesn't exist.
+            Direct dependents (children). Empty set if none or node doesn't exist.
 
         Examples
         --------
-        >>> graph = PrerequisiteGraph([("a", "b"), ("a", "c")])
+        >>> graph = DependencyGraph([("a", "b"), ("a", "c")])
         >>> graph.dependents_of("a")
         {'b', 'c'}
         """
-        return self._edges.get(skill, set()).copy()
+        return self._edges.get(node, set()).copy()
 
     def topological_order(self) -> List[str]:
-        """Return skills in valid learning order (topological sort).
+        """Return nodes in valid progression order (topological sort).
 
-        Uses Kahn's algorithm to produce a topological ordering.
+        Uses Kahn's algorithm. All prerequisites appear before their dependents.
 
         Returns
         -------
         list of str
-            Skills ordered such that all prerequisites appear before their
-            dependent skills. Empty list if graph is empty.
+            Nodes in topological order. Empty list if graph is empty.
 
         Raises
         ------
@@ -254,146 +240,158 @@ class PrerequisiteGraph:
         # Compute in-degree for all vertices
         in_degree = {v: len(self._reverse_edges.get(v, set())) for v in self._vertices}
 
-        # Initialize queue with vertices having no prerequisites
-        queue = sorted([v for v in self._vertices if in_degree[v] == 0])
+        # Initialize min-heap with vertices having no prerequisites
+        heap = sorted([v for v in self._vertices if in_degree[v] == 0])
+        heapq.heapify(heap)
 
         result = []
-        while queue:
-            # Process vertex with smallest label for determinism
-            node = queue.pop(0)
+        while heap:
+            # Pop vertex with smallest label for determinism (O(log n) vs O(n log n))
+            node = heapq.heappop(heap)
             result.append(node)
 
             # Process all dependents
-            for dependent in sorted(self._edges.get(node, set())):
+            for dependent in self._edges.get(node, set()):
                 in_degree[dependent] -= 1
                 if in_degree[dependent] == 0:
-                    queue.append(dependent)
-                    queue.sort()
+                    heapq.heappush(heap, dependent)
 
         return result
 
-    def is_ready(self, skill: str, mastered: Set[str]) -> bool:
-        """Check if all prerequisites for skill are in mastered set.
+    def prerequisites_met(self, node: str, completed: Set[str] = None, *, mastered: Set[str] = None) -> bool:
+        """Check if all prerequisites for a node have been completed.
 
-        Determines whether a learner is prepared to learn a skill based on
-        whether they have mastered all direct prerequisites.
+        A node is ready to start when all its direct prerequisites are in
+        the completed set and the node itself has not been completed yet.
 
         Parameters
         ----------
-        skill : str
-            The skill to check.
-        mastered : set of str
-            Set of skills the learner has already mastered.
+        node : str
+            The node to check readiness for.
+        completed : set of str
+            Set of nodes already completed/mastered.
 
         Returns
         -------
         bool
-            True if all direct prerequisites of skill are in mastered set.
-            True if skill has no prerequisites.
-            False if skill is already in mastered set.
+            True if all direct prerequisites are completed and node is not
+            yet completed. False otherwise.
 
         Examples
         --------
-        >>> graph = PrerequisiteGraph([("a", "b"), ("b", "c")])
-        >>> graph.is_ready("b", {"a"})
+        >>> graph = DependencyGraph([("a", "b"), ("b", "c")])
+        >>> graph.prerequisites_met("b", {"a"})
         True
-        >>> graph.is_ready("c", {"a"})
+        >>> graph.prerequisites_met("c", {"a"})  # "b" not completed
         False
         """
-        if skill in mastered:
+        # Support old 'mastered' kwarg
+        if completed is None and mastered is not None:
+            completed = mastered
+        if completed is None:
+            completed = set()
+
+        if node in completed:
             return False
 
-        prerequisites = self.prerequisites_for(skill)
-        return prerequisites.issubset(mastered)
+        prerequisites = self.prerequisites_for(node)
+        return prerequisites.issubset(completed)
 
-    def available_skills(self, mastered: Set[str]) -> List[str]:
-        """Return skills whose prerequisites are all mastered but skill itself is not.
+    # Backward-compatible aliases
+    is_ready = prerequisites_met
 
-        A skill is "available" for learning if:
-        1. All its direct prerequisites are in the mastered set
-        2. The skill itself is not in the mastered set
+    def available(self, completed: Set[str] = None, *, mastered: Set[str] = None) -> List[str]:
+        """Return nodes whose prerequisites are all completed but node itself is not.
 
         Parameters
         ----------
-        mastered : set of str
-            Set of skills already mastered.
+        completed : set of str
+            Set of nodes already completed/mastered.
 
         Returns
         -------
         list of str
-            Available skills sorted lexicographically for determinism.
+            Available nodes sorted lexicographically.
 
         Examples
         --------
-        >>> graph = PrerequisiteGraph([("a", "b"), ("b", "c")])
-        >>> graph.available_skills({"a"})
+        >>> graph = DependencyGraph([("a", "b"), ("b", "c")])
+        >>> graph.available({"a"})
         ['b']
-        >>> graph.available_skills({"a", "b"})
+        >>> graph.available({"a", "b"})
         ['c']
         """
-        available = []
-        for skill in self._vertices:
-            if skill not in mastered and self.is_ready(skill, mastered):
-                available.append(skill)
+        # Support old 'mastered' kwarg
+        if completed is None and mastered is not None:
+            completed = mastered
+        if completed is None:
+            completed = set()
 
-        return sorted(available)
+        result = []
+        for v in self._vertices:
+            if v in completed:
+                continue
+            prereqs = self._reverse_edges.get(v, set())
+            if prereqs.issubset(completed):
+                result.append(v)
 
-    def learning_path(
-        self, target_skill: str, mastered: Optional[Set[str]] = None
+        return sorted(result)
+
+    # Backward-compatible alias
+    available_skills = available
+
+    def path_to(
+        self, target: str, completed: Optional[Set[str]] = None,
+        *, mastered: Optional[Set[str]] = None,
     ) -> List[str]:
-        """Return ordered path from current state to target skill.
+        """Return the ordered progression path to reach a target node.
 
-        Finds the minimal learning path considering currently mastered skills.
-        If the target skill has unmet prerequisites, includes only those prerequisites
-        in the returned path.
+        Finds the minimal path considering already-completed nodes.
 
         Parameters
         ----------
-        target_skill : str
-            The skill to eventually master.
-        mastered : set of str, optional
-            Set of skills already mastered. Defaults to empty set.
+        target : str
+            The target node to reach.
+        completed : set of str, optional
+            Set of nodes already completed. Defaults to empty set.
 
         Returns
         -------
         list of str
-            Ordered list of skills to master, starting from unmastered prerequisites
-            and ending with target_skill. Empty list if target_skill is already mastered
-            or doesn't exist in the graph.
-
-        Raises
-        ------
-        ValueError
-            If target_skill has unmet prerequisites that form a cycle
-            (should not happen if graph is valid).
+            Ordered list of nodes to complete, ending with target.
+            Empty list if target is already completed or doesn't exist.
 
         Examples
         --------
-        >>> graph = PrerequisiteGraph([
+        >>> graph = DependencyGraph([
         ...     ("algebra", "calculus"),
         ...     ("trigonometry", "calculus"),
         ... ])
-        >>> graph.learning_path("calculus", mastered={"algebra"})
+        >>> graph.path_to("calculus", completed={"algebra"})
         ['trigonometry', 'calculus']
         """
-        if mastered is None:
-            mastered = set()
+        # Support old 'mastered' kwarg
+        if completed is None and mastered is not None:
+            completed = mastered
+        if completed is None:
+            completed = set()
 
-        if target_skill not in self._vertices:
+        if target not in self._vertices:
             return []
 
-        if target_skill in mastered:
+        if target in completed:
             return []
 
-        # Get all prerequisites
-        all_prereqs = self.all_prerequisites_for(target_skill)
-        unmet = all_prereqs - mastered
+        all_prereqs = self.all_prerequisites_for(target)
+        unmet = all_prereqs - completed
 
-        # Find topological order among unmet prerequisites + target
-        subgraph_skills = unmet | {target_skill}
-        path = [s for s in self.topological_order() if s in subgraph_skills]
+        subgraph = unmet | {target}
+        path = [s for s in self.topological_order() if s in subgraph]
 
         return path
+
+    # Backward-compatible alias
+    learning_path = path_to
 
     def validate(self) -> None:
         """Check graph is a DAG (no cycles).
@@ -455,7 +453,7 @@ class PrerequisiteGraph:
         return {"edges": sorted(edges)}
 
     @classmethod
-    def from_dict(cls, data: Dict) -> PrerequisiteGraph:
+    def from_dict(cls, data: Dict) -> DependencyGraph:
         """Deserialize graph from dict.
 
         Parameters
@@ -505,9 +503,9 @@ class PrerequisiteGraph:
         total_edges = sum(len(targets) for targets in self._edges.values())
 
         return (
-            f"PrerequisiteGraph(vertices={len(self._vertices)}, edges={total_edges})\n"
-            f"  Root skills (no prerequisites): {root_nodes}\n"
-            f"  Leaf skills (no dependents): {leaf_nodes}"
+            f"DependencyGraph(vertices={len(self._vertices)}, edges={total_edges})\n"
+            f"  Roots (no dependencies): {root_nodes}\n"
+            f"  Leaves (no dependents): {leaf_nodes}"
         )
 
     def _would_create_cycle(self, source: str, target: str) -> bool:
@@ -603,58 +601,62 @@ class PrerequisiteGraph:
         return False
 
 
-class CurriculumRecommender:
-    """Recommends next items/skills respecting prerequisite ordering and mastery.
+class ProgressionRecommender:
+    """Recommends next items respecting dependency ordering and proficiency.
 
-    Combines a PrerequisiteGraph with optional difficulty weighting to produce
-    pedagogically valid recommendations. Incorporates zone of proximal development
-    (ZPD) principles by preferring skills that match learner's current level.
+    Combines a DependencyGraph with optional difficulty weighting to produce
+    valid progression recommendations. Incorporates zone of proximal development
+    (ZPD) principles by preferring items that match the user's current level.
+
+    Works for any sequenced domain: education (curricula), training (cert paths),
+    rehab (therapy plans), gaming (skill trees), onboarding (feature rollout).
 
     Parameters
     ----------
-    graph : PrerequisiteGraph
-        DAG of skill prerequisites.
+    graph : DependencyGraph
+        DAG of item dependencies.
     difficulty_map : dict, optional
-        Mapping of skill to difficulty float in [0, 1]. If provided,
-        recommendations are sorted by difficulty preference. Defaults to None
-        (all available skills equally preferred).
+        Mapping of item to difficulty float in [0, 1]. If provided,
+        recommendations are sorted by difficulty preference.
 
     Attributes
     ----------
-    graph : PrerequisiteGraph
-        The underlying prerequisite graph.
+    graph : DependencyGraph
+        The underlying dependency graph.
     difficulty_map : dict or None
-        Optional difficulty scores for skills.
+        Optional difficulty scores for items.
 
     Examples
     --------
-    >>> graph = PrerequisiteGraph([
+    >>> graph = DependencyGraph([
     ...     ("algebra", "calculus"),
     ...     ("trigonometry", "calculus"),
     ... ])
     >>> difficulty = {"algebra": 0.3, "trigonometry": 0.4, "calculus": 0.7}
-    >>> rec = CurriculumRecommender(graph, difficulty_map=difficulty)
+    >>> rec = ProgressionRecommender(graph, difficulty_map=difficulty)
     >>> rec.recommend({"algebra"}, n=2)
     ['trigonometry', 'calculus']
     """
 
     def __init__(
         self,
-        graph: PrerequisiteGraph,
+        graph: DependencyGraph,
         difficulty_map: Optional[Dict[str, float]] = None,
     ) -> None:
         """Initialize recommender.
 
         Parameters
         ----------
-        graph : PrerequisiteGraph
-            The prerequisite graph defining skill dependencies.
+        graph : DependencyGraph
+            The dependency graph defining item dependencies.
         difficulty_map : dict, optional
-            Mapping {skill: difficulty} where difficulty is float in [0, 1].
-            Higher values indicate harder skills. Used for ZPD-aware ordering.
+            Mapping {item: difficulty} where difficulty is float in [0, 1].
+            Higher values indicate harder items.
         """
         self.graph = graph
         self.difficulty_map = difficulty_map or {}
+
+        self._has_difficulty = bool(difficulty_map)
 
         # Validate difficulty_map if provided
         if self.difficulty_map:
@@ -664,41 +666,52 @@ class CurriculumRecommender:
                         f"Difficulty for '{skill}' must be float in [0, 1], got {diff}"
                     )
 
-    def recommend(
-        self, student_mastery: Set[str], n: int = 5
-    ) -> List[str]:
-        """Recommend next skills considering prerequisites, mastery, and difficulty.
+    def __repr__(self) -> str:
+        return (f"ProgressionRecommender(graph={self.graph!r}, "
+                f"has_difficulty={self._has_difficulty})")
 
-        Produces an ordered list of skills that:
-        1. Have all prerequisites met
-        2. Are not already mastered
-        3. Are sorted by difficulty preference (if difficulty_map provided)
+    def recommend(
+        self, completed: Set[str] = None, n: int = 5,
+        *, student_mastery: Set[str] = None,
+    ) -> List[str]:
+        """Recommend next items considering dependencies, progress, and difficulty.
+
+        Returns items that:
+        1. Have all prerequisites completed
+        2. Are not already completed
+        3. Are sorted by difficulty (if difficulty_map provided)
 
         Parameters
         ----------
-        student_mastery : set of str
-            Set of skills the student has mastered.
+        completed : set of str
+            Set of items/nodes already completed/mastered.
+            (Also accepts the old name ``student_mastery``.)
         n : int, optional
-            Maximum number of recommendations to return. Defaults to 5.
+            Maximum number of recommendations (default: 5).
 
         Returns
         -------
         list of str
-            Recommended skills in order of preference, limited to n items.
-            Empty list if no available skills or graph is empty.
+            Recommended items in order of preference.
 
         Examples
         --------
-        >>> graph = PrerequisiteGraph([("a", "b"), ("b", "c")])
-        >>> rec = CurriculumRecommender(graph)
+        >>> graph = DependencyGraph([("a", "b"), ("b", "c")])
+        >>> rec = ProgressionRecommender(graph)
         >>> rec.recommend({"a"}, n=2)
-        ['b', 'c']
+        ['b']
         """
-        # Get skills whose prerequisites are met
-        candidates = self.graph.available_skills(student_mastery)
+        # Support old 'student_mastery' kwarg
+        if completed is None and student_mastery is not None:
+            completed = student_mastery
+        if completed is None:
+            completed = set()
+
+        # Get items whose prerequisites are met
+        candidates = self.graph.available(completed)
 
         # Filter to only valid candidates
-        candidates = self.filter_candidates(candidates, student_mastery)
+        candidates = self.filter_candidates(candidates, completed)
 
         # Sort by difficulty if map provided
         if self.difficulty_map:
@@ -713,36 +726,60 @@ class CurriculumRecommender:
 
         return candidates[:n]
 
-    def filter_candidates(self, candidates: List[str], mastered: Set[str]) -> List[str]:
-        """Filter candidate items to only those whose prerequisites are met.
-
-        Validates that all candidates have their direct prerequisites satisfied.
-        This is a stricter check than available_skills() as it ensures each
-        candidate individually has its prerequisites met before recommending.
+    def filter_candidates(self, candidates: List[str], completed: Set[str] = None,
+                           *, mastered: Set[str] = None) -> List[str]:
+        """Filter candidates to only those whose prerequisites are completed.
 
         Parameters
         ----------
         candidates : list of str
-            Initial list of candidate skills.
-        mastered : set of str
-            Set of mastered skills.
+            Candidate items to filter.
+        completed : set of str
+            Set of completed items. (Alias: ``mastered``.)
 
         Returns
         -------
         list of str
-            Filtered list containing only candidates with prerequisites met.
-            Order is preserved from input.
+            Filtered list preserving input order.
 
         Examples
         --------
-        >>> graph = PrerequisiteGraph([("a", "b"), ("b", "c")])
-        >>> rec = CurriculumRecommender(graph)
+        >>> graph = DependencyGraph([("a", "b"), ("b", "c")])
+        >>> rec = ProgressionRecommender(graph)
         >>> rec.filter_candidates(["b", "c"], {"a"})
         ['b']
         """
-        filtered = []
-        for candidate in candidates:
-            if self.graph.is_ready(candidate, mastered):
-                filtered.append(candidate)
+        if completed is None and mastered is not None:
+            completed = mastered
+        if completed is None:
+            completed = set()
+        return [c for c in candidates if self.graph.prerequisites_met(c, completed)]
 
-        return filtered
+
+__all__ = [
+    "DependencyGraph",
+    "ProgressionRecommender",
+    # Backward-compatible aliases (deprecated)
+    "PrerequisiteGraph",
+    "CurriculumRecommender",
+]
+
+
+# --- Deprecation handling for renamed symbols (PEP 562) ---
+_DEPRECATED_NAMES = {
+    "PrerequisiteGraph": "DependencyGraph",
+    "CurriculumRecommender": "ProgressionRecommender",
+}
+
+
+def __getattr__(name: str):
+    if name in _DEPRECATED_NAMES:
+        import warnings
+        warnings.warn(
+            f"{name} is deprecated, use {_DEPRECATED_NAMES[name]} instead. "
+            "Will be removed in v1.0.",
+            DeprecationWarning,
+            stacklevel=2,
+        )
+        return globals()[_DEPRECATED_NAMES[name]]
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")

@@ -1,10 +1,13 @@
 from __future__ import annotations
 
+import logging
 from pathlib import Path
 from typing import Iterable, Optional
 
 import json
 import pandas as pd
+
+logger = logging.getLogger(__name__)
 
 __all__ = ["create_report"]
 
@@ -18,8 +21,8 @@ def _load_jsonl(path: Path) -> list[dict]:
                 continue
             try:
                 records.append(json.loads(line))
-            except Exception:
-                pass
+            except Exception as exc:
+                logger.warning("Skipping malformed JSONL line in %s: %s", path, exc)
     return records
 
 

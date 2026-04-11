@@ -1,7 +1,8 @@
-"""Educational knowledge tracing models for learner mastery estimation.
+"""Proficiency tracing models for adaptive systems.
 
 This module implements Bayesian Knowledge Tracing (BKT), Ebbinghaus forgetting
-curves, and mastery tracking for adaptive educational systems.
+curves, and proficiency tracking for adaptive progression systems (education,
+training, rehabilitation, gaming, and more).
 """
 
 import math
@@ -159,8 +160,9 @@ class BayesianKnowledgeTracing:
 
         return self._p_known
 
+    @property
     def p_known(self) -> float:
-        """Get current probability the student knows the skill.
+        """Current probability the student knows the skill.
 
         Returns the current posterior probability estimate P(L=1) that the
         student has learned/mastered this skill, based on observed outcomes.
@@ -173,8 +175,7 @@ class BayesianKnowledgeTracing:
         Examples
         --------
         >>> bkt = BayesianKnowledgeTracing()
-        >>> p = bkt.p_known()
-        >>> 0 <= p <= 1
+        >>> 0 <= bkt.p_known <= 1
         True
         """
         return self._p_known
@@ -211,10 +212,10 @@ class BayesianKnowledgeTracing:
         --------
         >>> bkt = BayesianKnowledgeTracing()
         >>> bkt.update(True)
-        >>> bkt.p_known() > 0.1  # Changed from prior
+        >>> bkt.p_known > 0.1  # Changed from prior
         True
         >>> bkt.reset()
-        >>> bkt.p_known() == 0.1  # Back to prior
+        >>> bkt.p_known == 0.1  # Back to prior
         True
         """
         self._p_known = self.p_init
@@ -230,37 +231,43 @@ class BayesianKnowledgeTracing:
         )
 
 
-class MasteryTracker:
-    """Track mastery state across multiple skills for a single learner.
+class ProficiencyTracker:
+    """Track proficiency state across multiple competencies for a single user.
 
     Maintains a portfolio of BayesianKnowledgeTracing models for different
-    skills, enabling skill-level mastery tracking, prerequisite validation,
-    and adaptive skill recommendation.
+    competencies, enabling proficiency tracking, dependency validation,
+    and adaptive recommendations.
+
+    Works for any domain with measurable competencies: education (skills),
+    corporate training (certifications), rehabilitation (motor functions),
+    fitness (exercises), gaming (abilities), etc.
 
     Parameters
     ----------
-    skills : list of str
-        Names of skills to track.
+    competencies : list of str
+        Names of competencies to track. (Alias: ``skills``.)
     bkt_params : dict, optional
-        Per-skill BKT parameters. Keys are skill names, values are dicts with
-        keys 'p_init', 'p_transit', 'p_slip', 'p_guess', 'mastery_threshold'.
-        Example: {'algebra': {'p_init': 0.2, 'p_transit': 0.15}}.
+        Per-competency BKT parameters. Keys are competency names, values are
+        dicts with keys 'p_init', 'p_transit', 'p_slip', 'p_guess',
+        'mastery_threshold'.
+        Example: {'cardio': {'p_init': 0.2, 'p_transit': 0.15}}.
     default_params : dict, optional
-        Default BKT parameters for skills not in bkt_params.
-        Keys: 'p_init', 'p_transit', 'p_slip', 'p_guess', 'mastery_threshold'.
+        Default BKT parameters for competencies not in bkt_params.
         If None, uses BayesianKnowledgeTracing defaults.
     mastery_threshold : float, default=0.95
-        Mastery threshold. Overridden by per-skill settings in bkt_params.
+        Proficiency threshold. Overridden by per-competency settings.
 
     Attributes
     ----------
+    competencies : list of str
+        List of tracked competencies.
     skills : list of str
-        List of tracked skills.
+        Alias for ``competencies`` (backward compatibility).
 
     Examples
     --------
-    >>> tracker = MasteryTracker(
-    ...     skills=['algebra', 'geometry', 'calculus'],
+    >>> tracker = ProficiencyTracker(
+    ...     competencies=['algebra', 'geometry', 'calculus'],
     ...     bkt_params={'algebra': {'p_init': 0.2}}
     ... )
     >>> tracker.update('algebra', True)  # Correct answer
@@ -271,33 +278,42 @@ class MasteryTracker:
 
     def __init__(
         self,
-        skills: List[str],
+        competencies: Optional[List[str]] = None,
         bkt_params: Optional[Dict[str, Dict[str, float]]] = None,
         default_params: Optional[Dict[str, float]] = None,
         mastery_threshold: float = 0.95,
+        *,
+        skills: Optional[List[str]] = None,
     ):
-        """Initialize MasteryTracker.
+        """Initialize ProficiencyTracker.
 
         Parameters
         ----------
-        skills : list of str
-            Skill names to track.
+        competencies : list of str
+            Competency names to track. (Alias: ``skills``.)
         bkt_params : dict, optional
-            Per-skill BKT parameters.
+            Per-competency BKT parameters.
         default_params : dict, optional
-            Default parameters for all skills.
+            Default parameters for all competencies.
         mastery_threshold : float, default=0.95
-            Default mastery threshold.
+            Default proficiency threshold.
+        skills : list of str, optional
+            Deprecated alias for ``competencies``.
 
         Raises
         ------
         ValueError
-            If skills list is empty.
+            If competencies list is empty.
         """
-        if not skills:
-            raise ValueError("skills list cannot be empty")
+        # Support old 'skills' kwarg
+        if competencies is None and skills is not None:
+            competencies = skills
+        if competencies is None:
+            raise ValueError("competencies list cannot be empty")
+        if not competencies:
+            raise ValueError("competencies list cannot be empty")
 
-        self.skills = list(skills)
+        self.competencies = list(competencies)
         self._trackers: Dict[str, BayesianKnowledgeTracing] = {}
 
         # Set up default parameters
@@ -308,12 +324,12 @@ class MasteryTracker:
         p_guess = default.get('p_guess', 0.2)
         threshold = default.get('mastery_threshold', mastery_threshold)
 
-        # Initialize trackers for each skill
+        # Initialize trackers for each competency
         bkt_params = bkt_params or {}
-        for skill in self.skills:
-            if skill in bkt_params:
-                params = bkt_params[skill]
-                self._trackers[skill] = BayesianKnowledgeTracing(
+        for comp in self.competencies:
+            if comp in bkt_params:
+                params = bkt_params[comp]
+                self._trackers[comp] = BayesianKnowledgeTracing(
                     p_init=params.get('p_init', p_init),
                     p_transit=params.get('p_transit', p_transit),
                     p_slip=params.get('p_slip', p_slip),
@@ -321,7 +337,7 @@ class MasteryTracker:
                     mastery_threshold=params.get('mastery_threshold', threshold),
                 )
             else:
-                self._trackers[skill] = BayesianKnowledgeTracing(
+                self._trackers[comp] = BayesianKnowledgeTracing(
                     p_init=p_init,
                     p_transit=p_transit,
                     p_slip=p_slip,
@@ -329,181 +345,189 @@ class MasteryTracker:
                     mastery_threshold=threshold,
                 )
 
-    def update(self, skill: str, correct: bool) -> float:
-        """Update a skill's knowledge estimate.
+    @property
+    def skills(self) -> List[str]:
+        """Alias for ``competencies`` (backward compatibility)."""
+        return self.competencies
+
+    def update(self, competency: str, correct: bool) -> float:
+        """Update a competency's proficiency estimate.
 
         Parameters
         ----------
-        skill : str
-            Name of the skill to update.
+        competency : str
+            Name of the competency to update.
         correct : bool
-            Whether the student's response was correct.
+            Whether the response was correct.
 
         Returns
         -------
         float
-            Updated P(known) for the skill.
+            Updated P(known) for the competency.
 
         Raises
         ------
         KeyError
-            If skill is not in the tracker's skill list.
+            If competency is not tracked.
         """
-        if skill not in self._trackers:
-            raise KeyError(f"Skill '{skill}' not in tracker. Available: {self.skills}")
+        if competency not in self._trackers:
+            raise KeyError(f"Competency '{competency}' not in tracker. Available: {self.competencies}")
 
-        return self._trackers[skill].update(correct)
+        return self._trackers[competency].update(correct)
 
     def get_mastery(self) -> Dict[str, float]:
-        """Return knowledge estimates for all skills.
+        """Return proficiency estimates for all competencies.
 
         Returns
         -------
         dict
-            Mapping {skill_name: p_known} for all skills.
+            Mapping {competency_name: p_known} for all competencies.
         """
         return {
-            skill: self._trackers[skill].p_known()
-            for skill in self.skills
+            comp: self._trackers[comp].p_known
+            for comp in self.competencies
         }
 
-    def mastered_skills(self) -> List[str]:
-        """Return list of mastered skill names.
-
-        Returns all skill names for which the current knowledge probability
-        meets or exceeds the mastery threshold.
-
-        Returns
-        -------
-        list of str
-            Skill names where P(known) >= mastery_threshold, sorted alphabetically.
-
-        Examples
-        --------
-        >>> tracker = MasteryTracker(['algebra', 'geometry', 'calculus'])
-        >>> tracker.update('algebra', True)
-        >>> tracker.mastered_skills()  # Depends on initial p_init
-        []
-        """
-        return [
-            skill for skill in self.skills
-            if self._trackers[skill].is_mastered()
-        ]
-
-    def unmastered_skills(self) -> List[str]:
-        """Return list of not-yet-mastered skill names.
-
-        Returns all skill names for which the current knowledge probability
-        is below the mastery threshold.
-
-        Returns
-        -------
-        list of str
-            Skill names where P(known) < mastery_threshold, sorted alphabetically.
-
-        Examples
-        --------
-        >>> tracker = MasteryTracker(['algebra', 'geometry', 'calculus'])
-        >>> tracker.unmastered_skills()
-        ['algebra', 'geometry', 'calculus']
-        """
-        return [
-            skill for skill in self.skills
-            if not self._trackers[skill].is_mastered()
-        ]
-
-    def ready_for(
-        self,
-        skill: str,
-        prerequisites: Optional[Dict[str, List[str]]] = None,
-    ) -> bool:
-        """Check if student is ready for a skill given prerequisites.
-
-        A student is ready for a skill if:
-        1. The skill exists in the tracker.
-        2. Either no prerequisites are defined, or all prerequisites are mastered.
+    def proficiency(self, competency: str) -> float:
+        """Return proficiency estimate for a single competency.
 
         Parameters
         ----------
-        skill : str
-            Target skill name.
-        prerequisites : dict, optional
-            Prerequisite graph mapping skill name to list of prerequisite skills.
-            Example: {'calculus': ['algebra', 'precalc']}.
+        competency : str
+            Competency name.
 
         Returns
         -------
-        bool
-            True if student is ready (prerequisites met or none), False otherwise.
+        float
+            P(known) for the competency, in [0, 1].
 
         Raises
         ------
         KeyError
-            If skill is not in the tracker's skill list.
+            If competency is not tracked.
         """
-        if skill not in self._trackers:
-            raise KeyError(f"Skill '{skill}' not in tracker")
+        if competency not in self._trackers:
+            raise KeyError(f"Unknown competency '{competency}'. Tracked: {sorted(self.competencies)}")
+        return self._trackers[competency].p_known
 
-        if prerequisites is None or skill not in prerequisites:
+    # Backward-compatible alias
+    skill_mastery = proficiency
+
+    def mastered(self) -> List[str]:
+        """Return list of mastered competency names.
+
+        Returns all competency names for which the current proficiency
+        meets or exceeds the threshold.
+
+        Returns
+        -------
+        list of str
+            Competency names where P(known) >= threshold.
+        """
+        return [
+            comp for comp in self.competencies
+            if self._trackers[comp].is_mastered()
+        ]
+
+    # Backward-compatible alias
+    mastered_skills = mastered
+
+    def unmastered(self) -> List[str]:
+        """Return list of not-yet-mastered competency names.
+
+        Returns
+        -------
+        list of str
+            Competency names where P(known) < threshold.
+        """
+        return [
+            comp for comp in self.competencies
+            if not self._trackers[comp].is_mastered()
+        ]
+
+    # Backward-compatible alias
+    unmastered_skills = unmastered
+
+    def ready_for(
+        self,
+        competency: str,
+        prerequisites: Optional[Dict[str, List[str]]] = None,
+    ) -> bool:
+        """Check if user is ready for a competency given prerequisites.
+
+        Parameters
+        ----------
+        competency : str
+            Target competency name.
+        prerequisites : dict, optional
+            Dependency mapping from competency to list of prerequisite competencies.
+
+        Returns
+        -------
+        bool
+            True if prerequisites met or none defined, False otherwise.
+
+        Raises
+        ------
+        KeyError
+            If competency is not tracked.
+        """
+        if competency not in self._trackers:
+            raise KeyError(f"Competency '{competency}' not in tracker")
+
+        if prerequisites is None or competency not in prerequisites:
             return True
 
-        required = prerequisites[skill]
-        mastered = set(self.mastered_skills())
-        return all(req in mastered for req in required)
+        required = prerequisites[competency]
+        achieved = set(self.mastered())
+        return all(req in achieved for req in required)
 
     def recommend_next(
         self,
         prerequisites: Optional[Dict[str, List[str]]] = None,
         n: int = 3,
     ) -> List[str]:
-        """Recommend next skills to study based on mastery and prerequisites.
+        """Recommend next competencies based on proficiency and prerequisites.
 
-        Recommends unmastered skills for which the student has met prerequisites,
-        ordered by lowest mastery level (highest priority for learning).
+        Recommends unmastered competencies with met prerequisites,
+        ordered by lowest proficiency (highest priority).
 
         Parameters
         ----------
         prerequisites : dict, optional
-            Prerequisite graph (see ready_for).
+            Dependency mapping (see ready_for).
         n : int, default=3
-            Number of skills to recommend.
+            Number of competencies to recommend.
 
         Returns
         -------
         list of str
-            Up to n skill names, sorted by mastery (lowest first).
-
-        Examples
-        --------
-        >>> tracker = MasteryTracker(['algebra', 'geometry', 'calculus'])
-        >>> tracker.update('algebra', True)
-        >>> tracker.recommend_next(
-        ...     prerequisites={'calculus': ['algebra']},
-        ...     n=2
-        ... )
-        ['geometry', 'calculus']  # or similar, depending on mastery state
+            Up to n competency names, sorted by proficiency (lowest first).
         """
         candidates = []
-        mastery = self.get_mastery()
+        levels = self.get_mastery()
+        achieved = set(self.mastered())
 
-        for skill in self.unmastered_skills():
-            if self.ready_for(skill, prerequisites):
-                candidates.append((mastery[skill], skill))
+        for comp in self.unmastered():
+            if prerequisites is None or comp not in prerequisites:
+                candidates.append((levels[comp], comp))
+            elif all(req in achieved for req in prerequisites[comp]):
+                candidates.append((levels[comp], comp))
 
-        # Sort by mastery (ascending) and return top n
         candidates.sort()
-        return [skill for _, skill in candidates[:n]]
+        return [comp for _, comp in candidates[:n]]
 
     def __repr__(self) -> str:
         """Return string representation."""
-        mastered_count = len(self.mastered_skills())
-        total_count = len(self.skills)
+        mastered_count = len(self.mastered())
+        total_count = len(self.competencies)
         return (
-            f"MasteryTracker("
-            f"skills={total_count}, "
+            f"ProficiencyTracker("
+            f"competencies={total_count}, "
             f"mastered={mastered_count}, "
             f"progress={mastered_count}/{total_count})"
         )
+
 
 
 class ForgettingCurve:
@@ -521,10 +545,11 @@ class ForgettingCurve:
     Parameters
     ----------
     initial_strength : float, default=1.0
-        Initial memory strength in time units. Higher values indicate
-        longer retention. Range: (0, inf).
+        Initial memory strength. The unit defines the time scale: if you
+        measure time in days, strength=1.0 means ~37% retention after 1 day.
+        If you measure time in hours, it means ~37% after 1 hour. Range: (0, inf).
     strength_gain_on_review : float, default=0.5
-        Amount to increase strength on each review. Range: (0, inf).
+        Strength increase per review (same units as initial_strength). Range: (0, inf).
 
     Attributes
     ----------
@@ -697,3 +722,31 @@ class ForgettingCurve:
             f"strength={self.strength:.2f}, "
             f"retention={retention_now:.3f})"
         )
+
+
+__all__ = [
+    "BayesianKnowledgeTracing",
+    "ProficiencyTracker",
+    "ForgettingCurve",
+    # Backward-compatible alias (deprecated)
+    "MasteryTracker",
+]
+
+
+# --- Deprecation handling for renamed symbols (PEP 562) ---
+_DEPRECATED_NAMES = {
+    "MasteryTracker": "ProficiencyTracker",
+}
+
+
+def __getattr__(name: str):
+    if name in _DEPRECATED_NAMES:
+        import warnings
+        warnings.warn(
+            f"{name} is deprecated, use {_DEPRECATED_NAMES[name]} instead. "
+            "Will be removed in v1.0.",
+            DeprecationWarning,
+            stacklevel=2,
+        )
+        return globals()[_DEPRECATED_NAMES[name]]
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")

@@ -321,10 +321,13 @@ def setup_opentelemetry(service_name: str = "orchid-ranker") -> None:
 # ============================================================================
 
 _ready = False
+_ready_lock = threading.Lock()
 
 
 def set_ready(ready: bool = True) -> None:
     """Mark the service as ready to serve traffic.
+
+    Thread-safe: protected by an internal lock.
 
     Parameters
     ----------
@@ -332,7 +335,20 @@ def set_ready(ready: bool = True) -> None:
         Whether service is ready (default: True).
     """
     global _ready
-    _ready = ready
+    with _ready_lock:
+        _ready = ready
+
+
+def is_ready() -> bool:
+    """Return the current readiness state (thread-safe).
+
+    Returns
+    -------
+    bool
+        True if the service has been marked ready via ``set_ready()``.
+    """
+    with _ready_lock:
+        return _ready
 
 
 def healthz() -> dict:
@@ -354,7 +370,9 @@ def readyz() -> dict:
     dict
         Status dict with "status" key and optional message.
     """
-    if _ready:
+    with _ready_lock:
+        ready = _ready
+    if ready:
         return {"status": "ok"}
     return {"status": "not_ready", "message": "Model not loaded"}
 
@@ -437,6 +455,7 @@ __all__ = [
     "setup_opentelemetry",
     # Health checks
     "set_ready",
+    "is_ready",
     "healthz",
     "readyz",
     "start_health_server",

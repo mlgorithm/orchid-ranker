@@ -239,3 +239,12 @@ def decrypt_log(path: Path, encryption_key: bytes) -> List[str]:
             decrypted_lines.append(decrypted)
 
     return decrypted_lines
+
+
+__all__ = [
+    "VerificationResult",
+    "AuditEvent",
+    "AuditLogger",
+    "verify_log_integrity",
+    "decrypt_log",
+]

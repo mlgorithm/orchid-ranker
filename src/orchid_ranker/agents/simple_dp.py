@@ -182,3 +182,10 @@ def dp_sgd_step(
 
     optimizer.step()
     return float(total_loss / max(1, B))
+
+
+__all__ = [
+    "SimpleDPConfig",
+    "SimpleDPAccountant",
+    "dp_sgd_step",
+]

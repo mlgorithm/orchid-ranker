@@ -61,8 +61,6 @@ connectors = [
 benchmarks = [
   "implicit>=0.7",
   "reclab>=0.2",
-  "scikit-surprise>=1.1",
-  "lightfm>=1.17",
 ]
 dev = [
   "pytest>=7.0",

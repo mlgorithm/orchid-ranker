@@ -10,7 +10,10 @@ import numpy as np
 import pandas as pd
 from sklearn.model_selection import KFold
 
-from .recommender import OrchidRecommender
+from typing import TYPE_CHECKING
+if TYPE_CHECKING:
+    from .recommender import OrchidRecommender as _OrchidRecommender
+
 from .evaluation import (
     precision_at_k,
     recall_at_k,
@@ -137,6 +140,7 @@ class GridSearchCV:
         rating_col: Optional[str] = None,
     ) -> float:
         """Fit model on train fold and evaluate on test fold."""
+        from .recommender import OrchidRecommender
         metric, k = self._parse_scoring()
 
         try:
@@ -281,6 +285,7 @@ class GridSearchCV:
             )
 
         # Fit final model on full dataset with best params
+        from .recommender import OrchidRecommender
         self.best_model_ = OrchidRecommender(strategy=self.strategy, **self.best_params_)
         self.best_model_.fit(
             interactions,
@@ -442,6 +447,7 @@ class RandomSearchCV:
         rating_col: Optional[str] = None,
     ) -> float:
         """Fit model on train fold and evaluate on test fold."""
+        from .recommender import OrchidRecommender
         metric, k = self._parse_scoring()
 
         try:
@@ -587,6 +593,7 @@ class RandomSearchCV:
             )
 
         # Fit final model on full dataset with best params
+        from .recommender import OrchidRecommender
         self.best_model_ = OrchidRecommender(strategy=self.strategy, **self.best_params_)
         self.best_model_.fit(
             interactions,

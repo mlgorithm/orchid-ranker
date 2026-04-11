@@ -267,3 +267,6 @@ class S3StreamConnector:
             return obj["Body"].iter_lines()
 
         return self._retry_with_backoff(_stream)
+
+
+__all__ = ["S3StreamConnector"]

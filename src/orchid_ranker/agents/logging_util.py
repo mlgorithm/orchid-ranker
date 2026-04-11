@@ -3,17 +3,24 @@
 from __future__ import annotations
 
 import json
+import logging
 import os
 from pathlib import Path
 
 import numpy as np
-import torch
+
+logger = logging.getLogger(__name__)
+
+try:
+    import torch as _torch
+except ImportError:
+    _torch = None
 
 
 def _d(*args) -> None:
     """Debug logging (respects ORCHID_DEBUG_REC env var)."""
     if os.getenv("ORCHID_DEBUG_REC", "").lower() in {"1", "true", "yes", "on"}:
-        print("[Recommender]", *args)
+        logger.debug("%s", " ".join(str(a) for a in args))
 
 
 class JSONLLogger:
@@ -44,7 +51,7 @@ class JSONLLogger:
         except Exception:
             pass
         try:
-            if isinstance(obj, torch.Tensor):
+            if _torch is not None and isinstance(obj, _torch.Tensor):
                 return obj.detach().cpu().tolist()
         except Exception:
             pass
@@ -70,3 +77,8 @@ class JSONLLogger:
             rtype = record.get("type", "unknown")
             rround = record.get("round", None)
             _d(f"JSONL write type={rtype} round={rround}")
+
+
+__all__ = [
+    "JSONLLogger",
+]

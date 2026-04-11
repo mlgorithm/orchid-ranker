@@ -6,9 +6,12 @@ from __future__ import annotations
 #   - env var: ORCHID_DEBUG_IMPORTS=1 python your_script.py
 #   - or at runtime: from this_module import enable_debug_import_logs; enable_debug_import_logs(True)
 # ---------------------------------------------------------------------------
+import logging
 import os
 import sys
 import traceback
+
+logger = logging.getLogger(__name__)
 
 _DEBUG_IMPORTS = os.getenv("ORCHID_DEBUG_IMPORTS", "").lower() in {"1", "true", "yes", "on"}
 
@@ -19,7 +22,7 @@ def enable_debug_import_logs(flag: bool = True) -> None:
 
 def _p(*args) -> None:
     if _DEBUG_IMPORTS:
-        print("[orchid_ranker.imports]", *args)
+        logger.debug("%s", " ".join(str(a) for a in args))
 
 def _ok(name: str, obj) -> None:
     try:

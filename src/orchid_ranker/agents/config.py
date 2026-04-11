@@ -2,9 +2,10 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any, Dict, Optional, Tuple
+from typing import Any, Dict, Optional, Tuple, TYPE_CHECKING
 
-import torch
+if TYPE_CHECKING:
+    import torch
 
 
 @dataclass
@@ -164,3 +165,11 @@ class OnlineState:
 
     def get(self, uid: int) -> Dict[str, float]:
         return dict(self._state.get(int(uid), dict(knowledge=0.5, fatigue=0.2, trust=0.5, engagement=0.6, uncertainty=0.5)))
+
+
+__all__ = [
+    "MultiConfig",
+    "UserCtx",
+    "PolicyState",
+    "OnlineState",
+]

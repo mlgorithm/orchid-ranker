@@ -537,3 +537,9 @@ def load_dataset(dataset: str, base_path: str, config_path: str, *, encoding: st
         'meta': meta,
         'config': meta.get('config', {}),
     }
+
+
+__all__ = [
+    "DatasetLoader",
+    "load_dataset",
+]

@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import math
 import random
 import time
@@ -12,10 +13,12 @@ from typing import Any, Dict, List, Optional, Tuple
 import numpy as np
 import torch
 
+logger = logging.getLogger(__name__)
+
 from orchid_ranker.agents.config import MultiConfig, OnlineState, PolicyState, UserCtx
 from orchid_ranker.agents.dual_recommender import DualRecommender
 from orchid_ranker.agents.logging_util import JSONLLogger
-from orchid_ranker.agents.student_agent import StudentAgent, ItemMeta
+from orchid_ranker.agents.student_agent import AdaptiveAgent as StudentAgent, ItemMeta
 from orchid_ranker.agents.timing import _TimingRecorder
 from orchid_ranker.agents.two_tower import TwoTowerRecommender
 
@@ -530,10 +533,10 @@ class MultiUserOrchestrator:
         is_adaptive = hasattr(self.rec, "teacher") and hasattr(self.rec, "student")
         mode_label = "adaptive (teacher+student)" if is_adaptive else "fixed (single model)"
         if self._safe_gate and not is_adaptive:
-            print("[orchestrator] Safe gate requested but recommender is not adaptive; disabling gate.")
+            logger.info("Safe gate requested but recommender is not adaptive; disabling gate.")
             self._safe_gate = None
         if self._safe_gate and is_adaptive:
-            print("[orchestrator] SafeSwitchDR enabled: non-regression guard active.")
+            logger.info("SafeSwitchDR enabled: non-regression guard active.")
 
         # DP owner: student if adaptive, otherwise the single model
         dp_owner = self.rec.student if is_adaptive else self.rec
@@ -669,20 +672,22 @@ class MultiUserOrchestrator:
 
         # ---------- header ----------
         if self.cfg.console:
-            print("\n--- Orchestrator run info --------------------------------")
-            print(f"  policy mode              : {mode_label}")
-            print(f"  rounds / base top_k      : {self.cfg.rounds} / {self.cfg.top_k_base}")
-            print(f"  zpd_margin               : {self.cfg.zpd_margin}")
-            print(f"  mmr_lambda / novelty     : {self.cfg.mmr_lambda} / {self.cfg.novelty_bonus}")
-            print(f"  min_candidates           : {self.cfg.min_candidates}")
-            print(f"  DP online training       : {dp_enabled}")
-            if dp_cfg:
-                print(f"  DP sigma / q / delta     : {dp_sigma} / {dp_q} / {dp_delta}")
-                print(f"  DP max_grad_norm         : {dp_max_grad}")
-            else:
-                print("  DP config                : <none>")
-            print(f"  log_path                 : {self.cfg.log_path}")
-            print("-----------------------------------------------------------\n")
+            dp_detail = (
+                f"  DP sigma / q / delta     : {dp_sigma} / {dp_q} / {dp_delta}\n"
+                f"  DP max_grad_norm         : {dp_max_grad}"
+            ) if dp_cfg else "  DP config                : <none>"
+            logger.info(
+                "\n--- Orchestrator run info --------------------------------\n"
+                f"  policy mode              : {mode_label}\n"
+                f"  rounds / base top_k      : {self.cfg.rounds} / {self.cfg.top_k_base}\n"
+                f"  zpd_margin               : {self.cfg.zpd_margin}\n"
+                f"  mmr_lambda / novelty     : {self.cfg.mmr_lambda} / {self.cfg.novelty_bonus}\n"
+                f"  min_candidates           : {self.cfg.min_candidates}\n"
+                f"  DP online training       : {dp_enabled}\n"
+                f"{dp_detail}\n"
+                f"  log_path                 : {self.cfg.log_path}\n"
+                "-----------------------------------------------------------"
+            )
 
         eps_cum = float(getattr(dp_owner, "eps_cum", 0.0) or 0.0)
 
@@ -1050,7 +1055,7 @@ class MultiUserOrchestrator:
 
                 # ----------- PER-STUDENT CONSOLE PRINT -----------
                 if self.cfg.console and getattr(self.cfg, "console_user", True):
-                    print(
+                    logger.info(
                         f"R{r:03d} | U{uid_ext:<7d} | "
                         f"top_k={top_k:<2d} "
                         f"pre(k/f/e/t)={k_val:0.2f}/{f_val:0.2f}/{e_val:0.2f}/{t_val:0.2f} "
@@ -1188,7 +1193,7 @@ class MultiUserOrchestrator:
 
             # ---------- console round summary ----------
             if self.cfg.console:
-                print(
+                logger.info(
                     f"Round {r:03d}/{rounds} | "
                     f"mode={self._mode_label.upper()} "
                     f"DP={'ON' if dp_enabled else 'OFF'} "
@@ -1384,3 +1389,8 @@ class MultiUserOrchestrator:
             self.logger.log(record)
         except Exception:
             pass
+
+
+__all__ = [
+    "MultiUserOrchestrator",
+]

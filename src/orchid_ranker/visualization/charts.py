@@ -231,3 +231,16 @@ def plot_metric_grid(
         ax.axis("off")
     fig.tight_layout()
     return fig
+
+
+__all__ = [
+    "PALETTE",
+    "plot_user_activity",
+    "plot_item_difficulty",
+    "plot_learning_curve",
+    "plot_acceptance_heatmap",
+    "plot_round_comparison",
+    "plot_knowledge_trajectory",
+    "plot_metric_trajectory",
+    "plot_metric_grid",
+]

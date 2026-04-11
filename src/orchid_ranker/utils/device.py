@@ -57,3 +57,10 @@ def select_device(preference: DevicePreference = "auto") -> DeviceChoice:
             return DeviceChoice(name=name, torch_device=torch.device(name), reason=reason)
 
     raise RuntimeError("Failed to select a torch device (this should be unreachable)")
+
+
+__all__ = [
+    "DevicePreference",
+    "DeviceChoice",
+    "select_device",
+]

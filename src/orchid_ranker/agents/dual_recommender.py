@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import copy
 import inspect
+import logging
 import os
 from collections import deque
 from typing import Any, Dict
@@ -13,11 +14,13 @@ import torch
 
 from orchid_ranker.agents.two_tower import TwoTowerRecommender
 
+logger = logging.getLogger(__name__)
+
 
 def _d(*args) -> None:
     """Debug logging (respects ORCHID_DEBUG_REC env var)."""
     if os.getenv("ORCHID_DEBUG_REC", "").lower() in {"1", "true", "yes", "on"}:
-        print("[Recommender]", *args)
+        logger.debug("%s", " ".join(str(a) for a in args))
 
 
 class DualRecommender:
@@ -270,3 +273,8 @@ class DualRecommender:
         # best-effort fallback to update()
         out = self.update(**batch)
         return out
+
+
+__all__ = [
+    "DualRecommender",
+]

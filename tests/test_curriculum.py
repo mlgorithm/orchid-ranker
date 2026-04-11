@@ -219,7 +219,7 @@ class TestPrerequisiteGraph:
         """Test summary output for non-empty graph."""
         graph = PrerequisiteGraph([('a', 'b'), ('b', 'c'), ('c', 'd')])
         summary = graph.summary()
-        assert 'PrerequisiteGraph' in summary
+        assert 'DependencyGraph' in summary or 'PrerequisiteGraph' in summary
         assert 'vertices' in summary.lower()
         assert 'edges' in summary.lower()
 

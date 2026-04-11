@@ -209,7 +209,7 @@ class TestKnowledgeTracingPipeline:
         for correct in trajectory:
             bkt.update(correct=correct)
 
-        p = bkt.p_known()
+        p = bkt.p_known
         assert 0.0 <= p <= 1.0
         assert not math.isnan(p)
         assert not math.isinf(p)

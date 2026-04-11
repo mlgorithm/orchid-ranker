@@ -295,12 +295,17 @@ class TestRankingReport:
     def test_construction(self):
         """Test RankingReport construction."""
         report = RankingReport(
-            precision_at_5=0.8,
-            recall_at_5=0.7,
-            map_at_10=0.75,
-            ndcg_at_10=0.85,
+            precision=0.8,
+            recall=0.7,
+            map=0.75,
+            ndcg=0.85,
         )
 
+        assert report.precision == 0.8
+        assert report.recall == 0.7
+        assert report.map == 0.75
+        assert report.ndcg == 0.85
+        # Backward-compatible aliases
         assert report.precision_at_5 == 0.8
         assert report.recall_at_5 == 0.7
         assert report.map_at_10 == 0.75

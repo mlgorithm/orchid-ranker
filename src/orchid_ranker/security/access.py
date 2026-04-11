@@ -36,3 +36,11 @@ class AccessControl:
         if not self.can(role, action):
             allowed = ", ".join(sorted(self._to_set(role))) or "<none>"
             raise PermissionError(f"Role '{role}' is not permitted to perform '{action}'. Allowed: {allowed}")
+
+
+__all__ = [
+    "Action",
+    "Role",
+    "DEFAULT_POLICY",
+    "AccessControl",
+]

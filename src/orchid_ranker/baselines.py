@@ -44,9 +44,9 @@ class MatrixFactorization(nn.Module):
         self._init_weights()
 
     def _init_weights(self) -> None:
-        """Initialize embedding and bias weights from normal distribution."""
-        nn.init.normal_(self.user_emb.weight, std=0.01)
-        nn.init.normal_(self.item_emb.weight, std=0.01)
+        """Initialize embedding weights with scaled normal, biases to zero."""
+        nn.init.normal_(self.user_emb.weight, std=0.1)
+        nn.init.normal_(self.item_emb.weight, std=0.1)
         nn.init.zeros_(self.user_bias.weight)
         nn.init.zeros_(self.item_bias.weight)
 
@@ -176,7 +176,9 @@ class PopularityBaseline(BaseBaseline):
             max_id = max(popularity.keys()) + 1
         else:
             max_id = 1
-        self._pop_tensor = torch.zeros(max_id, dtype=torch.float32, device=device)
+        # Pre-allocate with buffer to avoid runtime expansion on OOV items
+        buffer_size = max(max_id, 1) + max(int(max_id * 0.2), 100)
+        self._pop_tensor = torch.zeros(buffer_size, dtype=torch.float32, device=device)
         for item_id, score in popularity.items():
             self._pop_tensor[item_id] = score
 
@@ -289,10 +291,16 @@ class ALSBaseline(BaseBaseline):
         Number of training epochs (default: 5).
     """
 
-    def __init__(self, num_users: int, num_items: int, device: torch.device, emb_dim: int = 32, lr: float = 1e-2, epochs: int = 5):
+    def __init__(self, num_users: int, num_items: int, device: torch.device,
+                 embedding_dim: int = 32, learning_rate: float = 1e-2, epochs: int = 5,
+                 *, emb_dim: Optional[int] = None, lr: Optional[float] = None):
         super().__init__(device)
-        self.model = MatrixFactorization(num_users, num_items, emb_dim=emb_dim, implicit=True).to(device)
-        self.lr = lr
+        # Support abbreviated aliases for backward compatibility
+        embedding_dim = emb_dim if emb_dim is not None else embedding_dim
+        learning_rate = lr if lr is not None else learning_rate
+        self.model = MatrixFactorization(num_users, num_items, emb_dim=embedding_dim, implicit=True).to(device)
+        self.learning_rate = learning_rate
+        self.lr = learning_rate  # alias
         self.epochs = epochs
 
     def fit(self, user_ids: Iterable[int], item_ids: Iterable[int], labels: Iterable[int]) -> None:
@@ -310,6 +318,8 @@ class ALSBaseline(BaseBaseline):
         user_tensor = torch.tensor(list(user_ids), dtype=torch.long, device=self.device)
         item_tensor = torch.tensor(list(item_ids), dtype=torch.long, device=self.device)
         label_tensor = torch.tensor(list(labels), dtype=torch.float32, device=self.device)
+        # ALS uses BCE loss which requires labels in [0, 1]; clamp to handle explicit ratings
+        label_tensor = torch.clamp(label_tensor, 0.0, 1.0)
         optimizer = torch.optim.Adam(self.model.parameters(), lr=self.lr)
         loss_fn = nn.BCELoss()
         for _ in range(self.epochs):
@@ -381,7 +391,10 @@ class UserKNNBaseline(BaseBaseline):
     def __init__(self, user_item_matrix: np.ndarray, device: torch.device, k: int = 20):
         super().__init__(device)
         self.matrix = user_item_matrix.astype(np.float32)
-        self.k = k
+        num_users = self.matrix.shape[0]
+        if k < 1:
+            raise ValueError(f"k must be >= 1, got {k}")
+        self.k = min(int(k), max(1, num_users - 1))
         self._matrix_t = torch.from_numpy(self.matrix).to(device)
         self._norms = torch.norm(self._matrix_t, dim=1, keepdim=True).clamp(min=1e-8)
         self._normed = self._matrix_t / self._norms
@@ -402,6 +415,11 @@ class UserKNNBaseline(BaseBaseline):
             Item scores of shape (1, num_items).
         """
         uid = int(user_ids.item())
+        if not (0 <= uid < self._normed.shape[0]):
+            raise ValueError(
+                f"User ID {uid} out of bounds [0, {self._normed.shape[0]}). "
+                "Pass a valid user index from the interaction matrix."
+            )
         user_vec = self._normed[uid]  # (num_items,)
         # Cosine similarity via dot product of normalized vectors
         sims = self._normed @ user_vec  # (num_users,)
@@ -457,6 +475,7 @@ class LinUCBBaseline(BaseBaseline):
         d = self.item_features.shape[1] if self.item_features.shape[1] > 0 else 1
         self.A = torch.eye(d, device=device)
         self.b = torch.zeros(d, device=device)
+        self._A_inv = None  # cached inverse, invalidated on fit()
 
     def fit(self, rewards: Dict[int, float]) -> None:
         """Update linear model parameters with observed rewards.
@@ -468,10 +487,17 @@ class LinUCBBaseline(BaseBaseline):
         """
         if self.item_features.shape[1] == 0:
             return
+        n_items = self.item_features.shape[0]
         for iid, r in rewards.items():
+            if not (0 <= int(iid) < n_items):
+                raise ValueError(
+                    f"Item ID {iid} out of bounds [0, {n_items}). "
+                    "Pass valid item indices matching the feature matrix."
+                )
             feature = self.item_features[iid]
             self.A += feature.unsqueeze(1) @ feature.unsqueeze(0)
             self.b += float(r) * feature
+        self._A_inv = None  # invalidate cached inverse
 
     def infer(self, *, item_ids: torch.Tensor, **_):
         """Compute UCB scores for candidate items.
@@ -488,11 +514,15 @@ class LinUCBBaseline(BaseBaseline):
         """
         if self.item_features.shape[1] == 0:
             return torch.zeros((1, item_ids.numel()), device=self.device)
-        A_inv = torch.inverse(self.A + 1e-6 * torch.eye(self.A.shape[0], device=self.device))
+        if self._A_inv is None:
+            self._A_inv = torch.inverse(self.A + 1e-6 * torch.eye(self.A.shape[0], device=self.device))
+        A_inv = self._A_inv
         theta = A_inv @ self.b
         feats = self.item_features[item_ids]
         means = feats @ theta
-        ucb = self.alpha * torch.sqrt((feats @ A_inv) * feats).sum(dim=1)
+        # Quadratic form x'A^{-1}x; clamp to avoid negative values from numerical noise
+        quadratic = ((feats @ A_inv) * feats).sum(dim=1).clamp(min=0.0)
+        ucb = self.alpha * torch.sqrt(quadratic)
         scores = means + ucb
         return scores.unsqueeze(0)
 
@@ -571,9 +601,9 @@ class _ImplicitBase(BaseBaseline):
         """
         import scipy.sparse
 
-        rows = np.asarray(list(user_ids), dtype=np.int32)
-        cols = np.asarray(list(item_ids), dtype=np.int32)
-        data = np.asarray(list(labels), dtype=np.float32)
+        rows = np.asarray(user_ids, dtype=np.int32) if not isinstance(user_ids, np.ndarray) else user_ids.astype(np.int32, copy=False)
+        cols = np.asarray(item_ids, dtype=np.int32) if not isinstance(item_ids, np.ndarray) else item_ids.astype(np.int32, copy=False)
+        data = np.asarray(labels, dtype=np.float32) if not isinstance(labels, np.ndarray) else labels.astype(np.float32, copy=False)
         return scipy.sparse.coo_matrix((data, (rows, cols)), shape=(num_users, num_items))
 
     def infer(self, *, user_ids: torch.Tensor, item_ids: torch.Tensor, **_) -> torch.Tensor:
@@ -598,8 +628,10 @@ class _ImplicitBase(BaseBaseline):
         """
         if self.user_factors is None or self.item_factors is None:
             raise RuntimeError("Implicit model has not been trained")
-        u = self.user_factors[user_ids.cpu().numpy()]
-        i = self.item_factors[item_ids.cpu().numpy()]
+        uid_np = user_ids.numpy() if user_ids.device.type == 'cpu' else user_ids.cpu().numpy()
+        iid_np = item_ids.numpy() if item_ids.device.type == 'cpu' else item_ids.cpu().numpy()
+        u = self.user_factors[uid_np]
+        i = self.item_factors[iid_np]
         scores = np.dot(u, i.T)
         return torch.tensor(scores, dtype=torch.float32, device=self.device)
 
@@ -760,27 +792,41 @@ class NeuralMatrixFactorizationBaseline(BaseBaseline):
         num_users: int,
         num_items: int,
         device: torch.device,
-        emb_dim: int = 32,
+        embedding_dim: int = 32,
         hidden: Tuple[int, ...] = (64, 32),
         epochs: int = 5,
-        lr: float = 1e-3,
-        loss: str = "bce",  # "bce" (default), "bpr", or "softmax"
-        neg_k: int = 10,
+        learning_rate: float = 1e-3,
+        loss: str = "bce",
+        num_negative_samples: int = 10,
         batch_size: int = 256,
+        *,
+        # Backward-compatible abbreviated aliases
+        emb_dim: Optional[int] = None,
+        lr: Optional[float] = None,
+        neg_k: Optional[int] = None,
     ) -> None:
         super().__init__(device)
+        # Support abbreviated aliases
+        embedding_dim = emb_dim if emb_dim is not None else embedding_dim
+        learning_rate = lr if lr is not None else learning_rate
+        num_negative_samples = neg_k if neg_k is not None else num_negative_samples
+
+        valid_losses = {"bce", "bpr", "softmax"}
+        if str(loss).lower() not in valid_losses:
+            raise ValueError(f"Unknown loss='{loss}'. Must be one of: {sorted(valid_losses)}")
+
         self.num_users = num_users
         self.num_items = num_items
-        self.emb_dim = emb_dim
+        self.emb_dim = embedding_dim
         self.hidden = tuple(hidden)
         self.epochs = int(epochs)
-        self.lr = float(lr)
+        self.lr = float(learning_rate)
         self.loss_type = str(loss).lower()
-        self.neg_k = int(neg_k)
+        self.neg_k = int(num_negative_samples)
         self.batch_size = int(batch_size)
 
         layers: list[nn.Module] = []
-        in_dim = emb_dim * 2
+        in_dim = self.emb_dim * 2
         for h in self.hidden:
             layers.append(nn.Linear(in_dim, h))
             layers.append(nn.ReLU())
@@ -788,8 +834,8 @@ class NeuralMatrixFactorizationBaseline(BaseBaseline):
         layers.append(nn.Linear(in_dim, 1))
         self.mlp = nn.Sequential(*layers).to(self.device)
 
-        self.user_emb = nn.Embedding(num_users, emb_dim).to(self.device)
-        self.item_emb = nn.Embedding(num_items, emb_dim).to(self.device)
+        self.user_emb = nn.Embedding(num_users, self.emb_dim).to(self.device)
+        self.item_emb = nn.Embedding(num_items, self.emb_dim).to(self.device)
         self.sigmoid = nn.Sigmoid()
         self.optimizer = torch.optim.Adam(self.parameters(), lr=self.lr)
         self.loss_fn = nn.BCELoss()
@@ -924,7 +970,8 @@ class NeuralMatrixFactorizationBaseline(BaseBaseline):
             Predicted scores of shape (1, num_items), in [0, 1].
         """
         with torch.no_grad():
-            preds = self._forward(user_ids.to(self.device), item_ids.to(self.device))
+            users = user_ids.to(self.device).expand(item_ids.numel())
+            preds = self._forward(users, item_ids.to(self.device))
         return preds.view(1, -1)
 
     def decide(self, *, logits: torch.Tensor, top_k: int, item_ids: torch.Tensor, **_):
@@ -948,24 +995,12 @@ class NeuralMatrixFactorizationBaseline(BaseBaseline):
         return [int(item_ids[i].item()) for i in top], {"policy": "neural_mf"}
 
 
-__all__ = [
-    "MatrixFactorization",
-    "PopularityBaseline",
-    "RandomBaseline",
-    "ALSBaseline",
-    "ExplicitMFBaseline",
-    "UserKNNBaseline",
-    "LinUCBBaseline",
-    "ImplicitALSBaseline",
-    "ImplicitBPRBaseline",
-    "NeuralMatrixFactorizationBaseline",
-]
-
 class ExplicitMFBaseline(BaseBaseline):
     """Matrix factorization for explicit ratings/feedback.
 
     Trains embeddings to predict real-valued user-item ratings using MSE loss.
-    Predictions are centered around the global mean rating.
+    Predictions are centered around the global mean rating. Uses mini-batch
+    training with learning rate scheduling for better convergence.
 
     Parameters
     ----------
@@ -978,22 +1013,32 @@ class ExplicitMFBaseline(BaseBaseline):
     emb_dim : int, optional
         Embedding dimension (default: 64).
     lr : float, optional
-        Adam learning rate (default: 0.001).
+        Adam learning rate (default: 0.005).
     epochs : int, optional
-        Number of training epochs (default: 10).
+        Number of training epochs (default: 20).
     weight_decay : float, optional
-        L2 regularization coefficient (default: 0.0001).
+        L2 regularization coefficient (default: 1e-5).
+    batch_size : int, optional
+        Mini-batch size for training (default: 512).
     """
 
-    def __init__(self, num_users: int, num_items: int, device: torch.device, emb_dim: int = 64, lr: float = 1e-3, epochs: int = 10, weight_decay: float = 1e-4):
+    def __init__(self, num_users: int, num_items: int, device: torch.device,
+                 embedding_dim: int = 100, learning_rate: float = 3e-3, epochs: int = 30,
+                 weight_decay: float = 1e-4, batch_size: int = 512,
+                 *, emb_dim: Optional[int] = None, lr: Optional[float] = None):
         super().__init__(device)
+        # Support abbreviated aliases
+        embedding_dim = emb_dim if emb_dim is not None else embedding_dim
+        learning_rate = lr if lr is not None else learning_rate
         # Use the shared MF with implicit=False so it outputs raw scores (no sigmoid)
-        self.model = MatrixFactorization(num_users, num_items, emb_dim=emb_dim, implicit=False).to(device)
-        self.lr = float(lr)
+        self.model = MatrixFactorization(num_users, num_items, emb_dim=embedding_dim, implicit=False).to(device)
+        self.lr = float(learning_rate)
         self.epochs = int(epochs)
         self.weight_decay = float(weight_decay)
+        self.batch_size = int(batch_size)
         self._loss_fn = nn.MSELoss()
         self._optimizer = torch.optim.Adam(self.model.parameters(), lr=self.lr, weight_decay=self.weight_decay)
+        self._scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(self._optimizer, T_max=self.epochs)
         self._global_mean: float = 0.0
         self._min_rating: float = 0.0
         self._max_rating: float = 1.0
@@ -1014,17 +1059,21 @@ class ExplicitMFBaseline(BaseBaseline):
         items = torch.tensor(list(item_ids), dtype=torch.long, device=self.device)
         y = torch.tensor(list(ratings), dtype=torch.float32, device=self.device)
         # track rating scale + mean for calibration
-        self._global_mean = float(y.mean().detach().cpu().item())
-        self._min_rating = float(y.min().detach().cpu().item())
-        self._max_rating = float(y.max().detach().cpu().item())
+        self._global_mean = float(y.mean().item())
+        self._min_rating = float(y.min().item())
+        self._max_rating = float(y.max().item())
         y_centered = y - self._global_mean
+        dataset = torch.utils.data.TensorDataset(users, items, y_centered)
+        loader = torch.utils.data.DataLoader(dataset, batch_size=self.batch_size, shuffle=True)
         for _ in range(self.epochs):
-            self._optimizer.zero_grad()
-            preds = self.model(users, items)
-            loss = self._loss_fn(preds, y_centered)
-            loss.backward()
-            self._optimizer.step()
-        self.result.train_loss = float(loss.detach().cpu().item())
+            for batch_users, batch_items, batch_y in loader:
+                self._optimizer.zero_grad()
+                preds = self.model(batch_users, batch_items)
+                loss = self._loss_fn(preds, batch_y)
+                loss.backward()
+                self._optimizer.step()
+            self._scheduler.step()
+        self.result.train_loss = float(loss.detach().item())
 
     def infer(self, *, user_ids: torch.Tensor, item_ids: torch.Tensor, **_) -> torch.Tensor:
         """Predict ratings for candidate items.
@@ -1069,3 +1118,19 @@ class ExplicitMFBaseline(BaseBaseline):
         """
         top = torch.argsort(logits[0], descending=True)[:top_k]
         return [int(item_ids[i].item()) for i in top], {"policy": "explicit_mf"}
+
+
+__all__ = [
+    "BaseBaseline",
+    "BaselineResult",
+    "MatrixFactorization",
+    "PopularityBaseline",
+    "RandomBaseline",
+    "ALSBaseline",
+    "ExplicitMFBaseline",
+    "UserKNNBaseline",
+    "LinUCBBaseline",
+    "ImplicitALSBaseline",
+    "ImplicitBPRBaseline",
+    "NeuralMatrixFactorizationBaseline",
+]

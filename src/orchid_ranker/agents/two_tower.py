@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import copy
+import logging
 import math
 import os
 from collections import defaultdict, deque
@@ -21,6 +22,8 @@ from orchid_ranker.native.fast_score import fast_score
 from orchid_ranker.security import AuditLogger
 from orchid_ranker.agents.student_agent import ItemMeta
 
+logger = logging.getLogger(__name__)
+
 
 # Global debug logging
 _DEBUG_REC = os.getenv("ORCHID_DEBUG_REC", "").lower() in {"1", "true", "yes", "on"}
@@ -35,7 +38,7 @@ def enable_debug_rec_logs(flag: bool = True) -> None:
 def _d(*args) -> None:
     """Debug logging helper."""
     if _DEBUG_REC:
-        print("[Recommender]", *args)
+        logger.debug("%s", " ".join(str(a) for a in args))
 
 
 class TwoTowerRecommender(nn.Module):
@@ -67,7 +70,10 @@ class TwoTowerRecommender(nn.Module):
     dp_cfg : dict, optional
         Differential privacy config (default: None).
     mmr_lambda : float, optional
-        Max-marginal-relevance diversity weight (default: 0.3).
+        Relevance–diversity tradeoff for Maximal Marginal Relevance (MMR).
+        0.0 = pure relevance (no diversity), 1.0 = pure diversity (ignore
+        relevance scores). Values around 0.2–0.4 work well in practice.
+        Default: 0.3.
     novelty_bonus : float, optional
         Novelty bonus factor (default: 0.10).
     zpd_width : float, optional
@@ -114,6 +120,13 @@ class TwoTowerRecommender(nn.Module):
     ):
         super().__init__()
         torch.manual_seed(seed)
+
+        # --- validate dimensions ---
+        for name, val in [("num_users", num_users), ("num_items", num_items),
+                          ("user_dim", user_dim), ("item_dim", item_dim),
+                          ("hidden", hidden), ("emb_dim", emb_dim)]:
+            if int(val) <= 0:
+                raise ValueError(f"{name} must be > 0, got {val}")
 
         # --- model dims/config ---
         self.user_dim = int(user_dim)
@@ -392,20 +405,49 @@ class TwoTowerRecommender(nn.Module):
     # Forward for scoring/ranking (adds optional BootTS/linUCB bonuses)
     def think(
         self,
-        user_vec: Optional[torch.Tensor],   # <- Optional now
+        user_vec: Optional[torch.Tensor],
         item_matrix: torch.Tensor,
         user_ids: torch.Tensor,
         item_ids: torch.Tensor,
         state_vec: Optional[torch.Tensor] = None,
         cohort_ids: Optional[torch.Tensor] = None,
         ) -> torch.Tensor:
+        """Score candidate items with optional exploration bonuses.
 
+        Runs the two-tower forward pass to produce relevance logits, then
+        optionally adds LinUCB confidence or BootTS uncertainty bonuses when
+        the model is in training mode. Call :meth:`decide` on the returned
+        logits to apply MMR diversity re-ranking and select the final slate.
+
+        Parameters
+        ----------
+        user_vec : torch.Tensor or None
+            User feature vector of shape ``(1, user_dim)``. If ``None``,
+            user features are looked up from ``user_ids``.
+        item_matrix : torch.Tensor
+            Item feature matrix of shape ``(num_items, item_dim)``.
+        user_ids : torch.Tensor
+            User index tensor of shape ``(1,)``.
+        item_ids : torch.Tensor
+            Candidate item indices of shape ``(K,)``.
+        state_vec : torch.Tensor, optional
+            Cognitive state ``[knowledge, fatigue, trust, engagement]`` of
+            shape ``(1, state_dim)``. Defaults to zeros.
+        cohort_ids : torch.Tensor, optional
+            Cohort index for cohort-aware embedding (if configured).
+
+        Returns
+        -------
+        torch.Tensor
+            Logit scores of shape ``(1, K)``. Higher means more relevant.
+            Pass these to :meth:`decide` for final slate selection.
+        """
         logits, u, I = self._scores_logits(user_vec, item_matrix, user_ids, item_ids, state_vec, cohort_ids)
         logits = torch.nan_to_num(logits, nan=-1e9, posinf=1e9, neginf=-1e9)
 
         # cache item reps for decide()
         self._last_item_reps = I.detach()
-        self._last_item_ids = item_ids.detach().cpu().tolist()
+        self._last_item_ids = item_ids.cpu().tolist()
         self._cached_item_matrix = item_matrix.detach()
         key = tuple(self._last_item_ids)
         if key in self._rep_cache:
@@ -431,28 +473,29 @@ class TwoTowerRecommender(nn.Module):
             _d(f"think: K={logits.numel()} lam_eff={lam_eff:.3f} nov_eff={nov_eff:.3f} "
                f"linucb={self.use_linucb} bootTS={self.use_bootts}")
 
-        # --------- Optional exploration bonuses ----------
+        # --------- Optional exploration bonuses (training mode only) ----------
         u_vec = u[0]
         phi = torch.cat([u_vec.expand_as(I), I, u_vec.unsqueeze(0) * I], dim=1)  # [K,3D]
         phi_np = phi.detach().cpu().numpy()
 
-        if self.use_linucb and self.linucb is not None:
-            bonuses = []
-            for j, iid in enumerate(self._last_item_ids):
-                bonuses.append(self.linucb.score(phi_np[j], base=0.0, i=int(iid)))
-            b = torch.tensor(bonuses, device=logits.device, dtype=logits.dtype)
-            b = (b - b.mean()) / (b.std(unbiased=False) + 1e-6)
-            logits = logits + b.unsqueeze(0) * self.linucb_alpha
-            if _DEBUG_REC:
-                _d(f"think: linUCB bonus applied alpha={self.linucb_alpha:.3f}")
+        if self.training and torch.is_grad_enabled():
+            if self.use_linucb and self.linucb is not None:
+                bonuses = np.array([self.linucb.score(phi_np[j], base=0.0, i=int(iid))
+                                    for j, iid in enumerate(self._last_item_ids)])
+                b = torch.from_numpy(bonuses).to(device=logits.device, dtype=logits.dtype)
+                b = (b - b.mean()) / (b.std(unbiased=False) + 1e-6)
+                logits = logits + b.unsqueeze(0) * self.linucb_alpha
+                if _DEBUG_REC:
+                    _d(f"think: linUCB bonus applied alpha={self.linucb_alpha:.3f}")
 
-        if self.use_bootts and self.bootts is not None:
-            bonuses = [self.bootts.score_vec(phi_np[j]) for j, _ in enumerate(self._last_item_ids)]
-            b = torch.tensor(bonuses, device=logits.device, dtype=logits.dtype)
-            b = (b - b.mean()) / (b.std(unbiased=False) + 1e-6)
-            logits = logits + b.unsqueeze(0) * self.ts_alpha
-            if _DEBUG_REC:
-                _d(f"think: BootTS bonus applied alpha={self.ts_alpha:.3f}")
+            if self.use_bootts and self.bootts is not None:
+                bonuses = np.array([self.bootts.score_vec(phi_np[j])
+                                    for j in range(len(self._last_item_ids))])
+                b = torch.from_numpy(bonuses).to(device=logits.device, dtype=logits.dtype)
+                b = (b - b.mean()) / (b.std(unbiased=False) + 1e-6)
+                logits = logits + b.unsqueeze(0) * self.ts_alpha
+                if _DEBUG_REC:
+                    _d(f"think: BootTS bonus applied alpha={self.ts_alpha:.3f}")
 
         # keep features for update()
         self._last_phi_np = phi_np
@@ -524,6 +567,58 @@ class TwoTowerRecommender(nn.Module):
     def decide(self, *, logits, top_k: int, item_ids, user_id: int,
            engagement: float, trust: float, difficulty_map: dict,
            knowledge: float, zpd_delta: float, policy: str = None):
+        """Select a diverse, difficulty-appropriate slate from scored candidates.
+
+        Applies Maximal Marginal Relevance (MMR) re-ranking to balance
+        relevance against intra-list diversity, plus novelty bonuses and
+        zone-of-proximal-development (ZPD) soft shaping.
+
+        Must be called after :meth:`think` (or :meth:`infer`), which
+        caches the item representations needed for similarity computation.
+
+        Parameters
+        ----------
+        logits : torch.Tensor
+            Score tensor of shape ``(1, K)`` from :meth:`think` or :meth:`infer`.
+        top_k : int
+            Number of items to select for the final slate.
+        item_ids : torch.Tensor or list[int]
+            Candidate item IDs corresponding to each column of ``logits``.
+        user_id : int
+            Active user ID (for novelty memory tracking).
+        engagement : float
+            User engagement level in ``[0, 1]`` (currently used for logging).
+        trust : float
+            User trust level in ``[0, 1]``. Higher trust reduces novelty
+            bonus (trusted users get more exploitation, less exploration).
+        difficulty_map : dict
+            Mapping ``{item_id: difficulty}`` where difficulty is in ``[0, 1]``.
+        knowledge : float
+            User's current knowledge/ability estimate in ``[0, 1]``.
+        zpd_delta : float
+            Target gap above current knowledge for ZPD centering.
+            Items at ``knowledge + zpd_delta`` get the highest ZPD bonus.
+        policy : str, optional
+            Unused; reserved for future policy routing.
+
+        Returns
+        -------
+        tuple[list[int], dict[int, float]]
+            ``(selected_item_ids, scores_dict)`` where ``scores_dict`` maps
+            each selected item ID to its MMR-adjusted score.
+
+        Notes
+        -----
+        The MMR score for each candidate combines four signals:
+
+        ``MMR = (1 - mmr_lambda) * relevance - mmr_lambda * max_similarity
+        + novelty_bonus * novelty + zpd_weight * zpd_fit``
+
+        - **mmr_lambda** (set at init): Controls relevance–diversity tradeoff.
+          0.0 = pure relevance, 1.0 = pure diversity. Default 0.3.
+        - **novelty_bonus**: Extra score for unseen items (scaled by ``1 - trust``).
+        - **zpd_weight**: Soft bonus for items near the user's ZPD.
+        """
         assert logits.ndim == 2 and logits.size(0) == 1, "decide() expects logits of shape [1, K]"
         scores = logits[0].detach().cpu().numpy()
 
@@ -560,21 +655,18 @@ class TwoTowerRecommender(nn.Module):
         I = I / (I.norm(dim=1, keepdim=True) + 1e-8)   # [K,D]
 
         if info_lambda and difficulty_map is not None and knowledge is not None:
-            info_bonus = []
             knowledge_val = float(knowledge)
             scale = max(0.05, float(abs(zpd_delta)) + 0.05)
             denom = 2.0 * (scale ** 2)
             target_gap = 0.08
-            for pos in item_ids_list:
-                ext_id = int(pos_map.get(int(pos), int(pos)))
-                diff = float(difficulty_map.get(ext_id, difficulty_map.get(int(pos), 0.5)))
-                gap = diff - knowledge_val
-                if gap >= 0.0:
-                    info = math.exp(-((gap - target_gap) ** 2) / denom)
-                else:
-                    info = -0.05 * math.exp(-(gap ** 2) / denom)
-                info_bonus.append(info)
-            scores = scores + info_lambda * np.array(info_bonus, dtype=float)
+            # Vectorized difficulty lookup and info gain computation
+            diffs = np.array([float(difficulty_map.get(int(pos_map.get(int(pos), int(pos))),
+                             difficulty_map.get(int(pos), 0.5))) for pos in item_ids_list])
+            gaps = diffs - knowledge_val
+            info_bonus = np.where(gaps >= 0.0,
+                                  np.exp(-((gaps - target_gap) ** 2) / denom),
+                                  -0.05 * np.exp(-(gaps ** 2) / denom))
+            scores = scores + info_lambda * info_bonus
 
         # effective λ, novelty (from state if available)
         lam = float(self._adapted_lam) if self._adapted_lam is not None else self.mmr_lambda
@@ -601,6 +693,14 @@ class TwoTowerRecommender(nn.Module):
         remaining = list(range(K))
         selected, selected_scores = [], {}
 
+        # Pre-compute similarity matrix for MMR: O(K²D) once vs O(K²D) per iteration
+        sim_matrix = (I @ I.T).cpu().numpy()  # [K, K]
+
+        # Pre-compute novelty and ZPD bonuses for all candidates
+        novelty_arr = np.array([novelty_of(item_ids_list[j]) for j in range(K)])
+        zpd_w = float(getattr(self, "zpd_weight", 0.05))
+        zpd_arr = np.array([zpd_bonus(item_ids_list[j]) for j in range(K)])
+
         # DEBUG preamble
         if _DEBUG_REC:
             _d(f"decide: top_k={top_k} K={K} lam={lam:.3f} nov={nov:.3f} zpd={zpd_delta:.3f} "
@@ -610,13 +710,12 @@ class TwoTowerRecommender(nn.Module):
             best_j, best_val = None, -1e18
             for j in remaining:
                 if selected:
-                    sim = torch.max(I[j].unsqueeze(0) @ I[selected].T).item()
+                    sim = float(sim_matrix[j, selected].max())
                 else:
                     sim = 0.0
-                iid_j = item_ids_list[j]
-                div_bonus = entropy_lambda * (1.0 - float(sim))
-                mmr = (1.0 - lam) * float(scores[j]) - lam * float(sim) \
-                      + nov * novelty_of(iid_j) + float(getattr(self, "zpd_weight", 0.05)) * zpd_bonus(iid_j) + div_bonus
+                div_bonus = entropy_lambda * (1.0 - sim)
+                mmr = (1.0 - lam) * float(scores[j]) - lam * sim \
+                      + nov * novelty_arr[j] + zpd_w * zpd_arr[j] + div_bonus
                 mmr += 1e-9 * (j + 1)  # tiny jitter
                 if mmr > best_val:
                     best_val, best_j = mmr, j
@@ -704,18 +803,23 @@ class TwoTowerRecommender(nn.Module):
         cohort_ids: Optional[torch.Tensor] = None,
         **kwargs,
     ) -> torch.Tensor:
+        """Pure scoring without exploration bonuses.
+
+        In fixed-policy runs the orchestrator calls ``rec.infer(...)``
+        for deterministic scoring.  Use :meth:`think` when exploration
+        bonuses (BootTS / LinUCB) are desired.
         """
-        In fixed-policy runs, the orchestrator may call rec.infer(...).
-        Mirror the adaptive container's API by routing to think().
-        """
-        out = self.think(
-            user_vec=user_vec,
-            item_matrix=item_matrix,
-            user_ids=user_ids,
-            item_ids=item_ids,
-            state_vec=state_vec,
-            cohort_ids=cohort_ids,
+        logits, _u, _I = self._scores_logits(
+            user_vec, item_matrix, user_ids, item_ids,
+            state_vec=state_vec, cohort_ids=cohort_ids,
         )
+        out = torch.nan_to_num(logits, nan=-1e9, posinf=1e9, neginf=-1e9)
+
+        # Cache item reps so decide() can use them without requiring think()
+        self._last_item_reps = _I.detach()
+        self._last_item_ids = item_ids.cpu().tolist()
+        self._cached_item_matrix = item_matrix.detach()
+
         if _DEBUG_REC:
             _d(f"infer: logits shape={tuple(out.shape)}")
         return out
@@ -756,46 +860,13 @@ class TwoTowerRecommender(nn.Module):
         torch.Tensor
             Logits of shape (N, K) — scores for each user × candidate pair.
         """
-        N = user_ids.size(0)
-        K = item_ids.size(0)
-        dev = item_matrix.device
-
-        # Move inputs to device
-        user_vecs = user_vecs.to(dev)
-        user_ids = user_ids.to(dev)
-        item_ids = item_ids.long().to(dev)
-        state_vecs = state_vecs.to(dev)
-
-        # Item tower (shared across all users — compute once)
-        I_base = self.item_net(item_matrix.index_select(0, item_ids))  # [K, H]
-        I = self.item_proj(I_base) + self.item_emb(item_ids)          # [K, D]
-        I = torch.nn.functional.normalize(I, dim=-1)
-
-        # User tower (batched for all N users)
-        xu_cat = torch.cat([user_vecs, state_vecs], dim=1)  # [N, Du+S]
-        u_base = self.user_net(xu_cat)                       # [N, H]
-
-        # FiLM gating
-        gamma_beta = self.state_to_gate(state_vecs)  # [N, 2H]
-        gamma, beta = gamma_beta.chunk(2, dim=1)
-        u_base = u_base * (1 + torch.tanh(gamma)) + beta
-
-        u = self.user_proj(u_base) + self.user_emb(user_ids)  # [N, D]
-        if (cohort_ids is not None) and (self.cohort_emb is not None):
-            u = u + self.cohort_emb(cohort_ids.to(dev))
-        u = torch.nn.functional.normalize(u, dim=-1)
-
-        # Batched dot product: [N, D] × [D, K] → [N, K]
-        logits = u @ I.t()
-
-        # Per-user calibration
-        tau = torch.clamp(self.user_temp(user_ids), 0.25, 4.0)  # [N, 1]
-        b_u = self.user_bias(user_ids)                            # [N, 1]
-        logits = logits / tau + b_u
-
-        if self.item_bias is not None:
-            logits = logits + self.item_bias(item_ids).squeeze(1).unsqueeze(0)
-
+        # Delegate to _scores_logits which handles all user/item tower logic,
+        # FiLM gating, adapters, user_pref, calibration, and item bias.
+        # This ensures infer_batch is consistent with the per-user infer() path.
+        logits, _u, _I = self._scores_logits(
+            user_vecs, item_matrix, user_ids, item_ids,
+            state_vec=state_vecs, cohort_ids=cohort_ids,
+        )
         return torch.nan_to_num(logits, nan=-1e9, posinf=1e9, neginf=-1e9)
 
     def update(self, *,
@@ -1128,11 +1199,13 @@ class TwoTowerRecommender(nn.Module):
             except Exception:
                 pass
 
-        # 3) embeddings (only if your user_net was built for emb_dim)
+        # 3) embeddings (only if embedding dim matches user_dim expected by user_net)
+        expected_dim = int(getattr(self, "user_dim", 0))
         for attr in ("user_embedding", "user_emb", "emb_user", "u_emb"):
             emb = getattr(self, attr, None)
             if emb is not None and hasattr(emb, "weight"):
-                return emb(user_ids.to(dev))
+                if expected_dim and emb.weight.shape[1] == expected_dim:
+                    return emb(user_ids.to(dev))
 
         # 4) zeros with the model's expected user_dim (NOT emb_dim)
         d = int(getattr(self, "user_dim", getattr(self, "emb_dim", 64)))
@@ -1213,3 +1286,9 @@ class TwoTowerRecommender(nn.Module):
         if _DEBUG_REC:
             _d(f"train_step: B={int(user_ids.numel())} loss={out['loss']:.4f}")
         return out
+
+
+__all__ = [
+    "TwoTowerRecommender",
+    "enable_debug_rec_logs",
+]

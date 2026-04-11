@@ -69,3 +69,6 @@ def precision_recall_ndcg_at_k(model, val_df, k, num_users, num_items, device="c
             ndcgs.append(dcg / idcg if idcg > 0 else 0.0)
 
     return np.mean(precisions), np.mean(recalls), np.mean(ndcgs)
+
+
+__all__ = ["precision_recall_ndcg_at_k"]

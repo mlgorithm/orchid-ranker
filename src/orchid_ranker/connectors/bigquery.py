@@ -232,3 +232,6 @@ class BigQueryConnector:
             return job.result(timeout=self.timeout)
 
         return self._retry_with_backoff(_load)
+
+
+__all__ = ["BigQueryConnector"]

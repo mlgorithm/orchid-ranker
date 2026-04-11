@@ -347,24 +347,24 @@ def test_bkt_p_init_zero():
     """Verify BKT with p_init=0 works (knowledge starts at 0)."""
     bkt = BayesianKnowledgeTracing(p_init=0.0)
 
-    assert bkt.p_known() == 0.0
+    assert bkt.p_known == 0.0
     assert not bkt.is_mastered()
 
     # Update with correct answer should increase knowledge
     bkt.update(correct=True)
-    assert bkt.p_known() > 0.0
+    assert bkt.p_known > 0.0
 
 
 def test_bkt_p_init_one():
     """Verify BKT with p_init=1 works (knowledge starts at 1)."""
     bkt = BayesianKnowledgeTracing(p_init=1.0)
 
-    assert bkt.p_known() == 1.0
+    assert bkt.p_known == 1.0
     assert bkt.is_mastered()
 
     # Even with incorrect answer, knowledge should stay high
     bkt.update(correct=False)
-    assert bkt.p_known() >= 0.8  # Should stay relatively high
+    assert bkt.p_known >= 0.8  # Should stay relatively high
 
 
 def test_bkt_mastery_threshold_zero():
@@ -385,19 +385,19 @@ def test_bkt_mastery_threshold_one():
         bkt.update(correct=True)
 
     # Should be very close but might not be exactly 1.0
-    assert bkt.p_known() >= 0.99
+    assert bkt.p_known >= 0.99
 
 
 def test_bkt_alternating_correct_incorrect_oscillates():
     """Verify BKT knowledge oscillates with alternating correct/incorrect."""
     bkt = BayesianKnowledgeTracing(p_init=0.5, p_transit=0.1)
 
-    knowledge_values = [bkt.p_known()]
+    knowledge_values = [bkt.p_known]
 
     for i in range(10):
         correct = i % 2 == 0  # Alternate correct/incorrect
         bkt.update(correct)
-        knowledge_values.append(bkt.p_known())
+        knowledge_values.append(bkt.p_known)
 
     # Should have variation (not monotonic)
     assert len(set(np.round(knowledge_values, 3))) > 3, (
@@ -409,19 +409,19 @@ def test_bkt_reset_returns_to_prior():
     """Verify reset() returns BKT to initial state."""
     bkt = BayesianKnowledgeTracing(p_init=0.2)
 
-    initial_p = bkt.p_known()
+    initial_p = bkt.p_known
 
     # Make many updates
     for _ in range(50):
         bkt.update(correct=True)
 
-    assert bkt.p_known() > initial_p
+    assert bkt.p_known > initial_p
 
     # Reset
     bkt.reset()
 
-    assert bkt.p_known() == 0.2
-    assert bkt.p_known() == initial_p
+    assert bkt.p_known == 0.2
+    assert bkt.p_known == initial_p
 
 
 def test_bkt_invalid_p_init_raises():

@@ -16,12 +16,15 @@ Layout (per run):
 """
 from __future__ import annotations
 
+import logging
 from pathlib import Path
 from typing import Dict, List, Optional
 
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
+
+logger = logging.getLogger(__name__)
 
 from orchid_ranker.dp import get_dp_config
 from orchid_ranker.experiments import RankingExperiment
@@ -480,11 +483,11 @@ def run_plan(plan: Dict) -> None:
         summary_rows: List[Dict] = []
 
         for mode in run["modes"]:
-            print(f"Running {dataset} / {experiment} / {mode}")
+            logger.info(f"Running {dataset} / {experiment} / {mode}")
             adaptive_kwargs = None
             if mode == "adaptive":
                 adaptive_kwargs = _build_adaptive_overrides(dataset, run, dp_cfg)
-            print(f"adaptive_kwargs={adaptive_kwargs}")
+            logger.debug(f"adaptive_kwargs={adaptive_kwargs}")
 
             res = runner.run(
                 mode,
@@ -546,6 +549,35 @@ def run_plan(plan: Dict) -> None:
 def main() -> None:
     for plan in PLANS:
         run_plan(plan)
+
+__all__ = [
+    "COHORT_SIZE",
+    "STUDENT_METHODS",
+    "INITIAL_PROFILES",
+    "ADAPTIVE_BASE_PARAMS",
+    "DATASET_ADJUSTMENTS",
+    "DP_STRENGTH_BASE",
+    "DP_POLICY_SCALE",
+    "WARM_START_CFG",
+    "BASE_CONFIG_OVERRIDES",
+    "DP_CONFIG_OVERRIDES",
+    "DP_CONFIG_OVERRIDES_STRONG",
+    "EDNET_RUNS",
+    "OULAD_RUNS",
+    "PLANS",
+    "METRIC_BOUNDS",
+    "USER_NAME_CANDIDATES",
+    "build_paths",
+    "ensure_dirs",
+    "build_user_name_map",
+    "sanitize_filename",
+    "export_per_student_csvs",
+    "export_adaptive_model_means",
+    "export_mode_means_and_plots",
+    "run_plan",
+    "main",
+]
+
 
 if __name__ == "__main__":
     main()

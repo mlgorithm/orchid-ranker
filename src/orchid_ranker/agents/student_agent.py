@@ -58,18 +58,21 @@ class ItemMeta:
     skills: Optional[List[int]] = None  # indices or boolean mask
 
 
-class StudentAgent:
-    """Simulator of a learner with adaptive behavior in educational systems.
+class AdaptiveAgent:
+    """Simulator of a user with adaptive behavior in progression systems.
 
     Maintains latent variables (knowledge, fatigue, engagement, trust) and emits
     platform-like telemetry (accepted items, feedback, dwell time, etc.).
-    Implements realistic learning dynamics with position bias, zone of proximal
+    Implements realistic progression dynamics with position bias, zone of proximal
     development (ZPD), and three-parameter logistic (3PL) response theory.
+
+    Works for any adaptive domain: education (learners), corporate training
+    (employees), rehabilitation (patients), fitness (athletes), gaming (players).
 
     Parameters
     ----------
     user_id : int
-        Unique identifier for the student.
+        Unique identifier for the user.
     knowledge_dim : int, optional
         Number of knowledge dimensions (default: 10). Used when knowledge_mode="vector".
     knowledge_mode : str, optional
@@ -138,42 +141,92 @@ class StudentAgent:
         self,
         user_id: int,
         knowledge_dim: int = 10,
-        knowledge_mode: str = "scalar",  # "scalar" | "vector"
-        lr: float = 0.2,
+        knowledge_mode: str = "scalar",
+        learning_rate: float = 0.2,
         decay: float = 0.1,
         trust_influence: bool = True,
         fatigue_growth: float = 0.05,
         fatigue_recovery: float = 0.02,
         base_topk: int = 2,
         min_topk: int = 1,
-        act_mode: str = "ZPD",  # "IRT" | "MIRT" | "ZPD" | "ContextualZPD"
+        ability_model: str = "ZPD",
         seed: int = 42,
         # --- realism knobs ---
-        zpd_delta: float = 0.10,  # shift target difficulty toward (θ + delta)
-        zpd_width: float = 0.25,  # width of the ZPD
-        pos_eta: float = 0.85,  # position bias parameter η (0<η<=1); lower -> stronger bias
-        budget_mu: float = 1.3,  # lognormal mean for attention budget
-        budget_sigma: float = 0.5,  # lognormal std for attention budget
-        budget_scale_eng: float = 2.0,  # engagement multiplier to budget
-        budget_fatigue_penalty: float = 2.0,  # fatigue reduces budget
-        # 3PL parameters (drawn per-student)
-        a_mean: float = 1.2,
-        a_std: float = 0.2,  # discrimination
-        c_alpha: float = 2.0,
-        c_beta: float = 20.0,  # guess prior Beta(α,β)
-        s_alpha: float = 2.0,
-        s_beta: float = 20.0,  # slip prior Beta(α,β)
-        # acceptance utility weight priors (means; noise added per student)
-        w_rel_mu: float = 1.0,
-        w_zpd_mu: float = 0.6,
-        w_nov_mu: float = 0.4,
-        w_pos_mu: float = 0.6,
-        w_std: float = 0.20,
-        forgetting_rate: float = 0.01,  # per-round forgetting of knowledge
-        # debug
+        zpd_delta: float = 0.10,
+        zpd_width: float = 0.25,
+        position_bias: float = 0.85,
+        budget_mu: float = 1.3,
+        budget_sigma: float = 0.5,
+        budget_scale_eng: float = 2.0,
+        budget_fatigue_penalty: float = 2.0,
+        # 3PL IRT parameters (drawn per agent from priors)
+        discrimination_mean: float = 1.2,
+        discrimination_std: float = 0.2,
+        guess_prior_alpha: float = 2.0,
+        guess_prior_beta: float = 20.0,
+        slip_prior_alpha: float = 2.0,
+        slip_prior_beta: float = 20.0,
+        # Acceptance utility weight priors (means; noise added per agent)
+        relevance_weight: float = 1.0,
+        zpd_fit_weight: float = 0.6,
+        novelty_weight: float = 0.4,
+        position_weight: float = 0.6,
+        weight_noise_std: float = 0.20,
+        forgetting_rate: float = 0.01,
         verbose: bool = False,
-
+        *,
+        # Backward-compatible abbreviated aliases
+        lr: Optional[float] = None,
+        act_mode: Optional[str] = None,
+        pos_eta: Optional[float] = None,
+        a_mean: Optional[float] = None,
+        a_std: Optional[float] = None,
+        c_alpha: Optional[float] = None,
+        c_beta: Optional[float] = None,
+        s_alpha: Optional[float] = None,
+        s_beta: Optional[float] = None,
+        w_rel_mu: Optional[float] = None,
+        w_zpd_mu: Optional[float] = None,
+        w_nov_mu: Optional[float] = None,
+        w_pos_mu: Optional[float] = None,
+        w_std: Optional[float] = None,
     ):
+        # Resolve backward-compatible aliases
+        learning_rate = lr if lr is not None else learning_rate
+        ability_model = act_mode if act_mode is not None else ability_model
+        position_bias = pos_eta if pos_eta is not None else position_bias
+        discrimination_mean = a_mean if a_mean is not None else discrimination_mean
+        discrimination_std = a_std if a_std is not None else discrimination_std
+        guess_prior_alpha = c_alpha if c_alpha is not None else guess_prior_alpha
+        guess_prior_beta = c_beta if c_beta is not None else guess_prior_beta
+        slip_prior_alpha = s_alpha if s_alpha is not None else slip_prior_alpha
+        slip_prior_beta = s_beta if s_beta is not None else slip_prior_beta
+        relevance_weight = w_rel_mu if w_rel_mu is not None else relevance_weight
+        zpd_fit_weight = w_zpd_mu if w_zpd_mu is not None else zpd_fit_weight
+        novelty_weight = w_nov_mu if w_nov_mu is not None else novelty_weight
+        position_weight = w_pos_mu if w_pos_mu is not None else position_weight
+        weight_noise_std = w_std if w_std is not None else weight_noise_std
+
+        # --- Input validation ---
+        for name, val in [
+            ("zpd_delta", zpd_delta),
+            ("zpd_width", zpd_width),
+            ("position_bias", position_bias),
+            ("decay", decay),
+            ("fatigue_growth", fatigue_growth),
+            ("fatigue_recovery", fatigue_recovery),
+            ("forgetting_rate", forgetting_rate),
+        ]:
+            if not (0.0 <= float(val) <= 1.0):
+                raise ValueError(f"{name} must be in [0, 1], got {val}")
+        for name, val in [
+            ("discrimination_std", discrimination_std),
+            ("weight_noise_std", weight_noise_std),
+            ("budget_sigma", budget_sigma),
+        ]:
+            if float(val) < 0.0:
+                raise ValueError(f"{name} must be non-negative, got {val}")
+
         # opt-in per-instance verbosity (in addition to global)
         self.verbose = bool(verbose) or _DEBUG_STUDENT
 
@@ -194,14 +247,14 @@ class StudentAgent:
         self.engagement = 1.0
 
         # Behavior knobs
-        self.lr = float(lr)
+        self.lr = float(learning_rate)
         self.decay = float(decay)
         self.trust_influence = bool(trust_influence)
         self.fatigue_growth = float(fatigue_growth)
         self.fatigue_recovery = float(fatigue_recovery)
         self.base_topk = int(base_topk)
         self.min_topk = int(min_topk)
-        self.act_mode = str(act_mode)
+        self.act_mode = str(ability_model)
 
         # Item difficulty fallback
         self.item_difficulty = defaultdict(lambda: 0.5)
@@ -212,25 +265,25 @@ class StudentAgent:
         # --- realism state ---
         self.zpd_delta = float(zpd_delta)
         self.zpd_width = float(zpd_width)
-        self.pos_eta = float(np.clip(pos_eta, 0.5, 0.99))
+        self.pos_eta = float(np.clip(position_bias, 0.5, 0.99))
         self.budget_mu = float(budget_mu)
         self.budget_sigma = float(budget_sigma)
         self.budget_scale_eng = float(budget_scale_eng)
         self.budget_fatigue_penalty = float(budget_fatigue_penalty)
 
-        # Per-student 3PL draws
-        self.a = float(max(0.2, self.rng.normal(a_mean, a_std)))
-        self.c = float(np.clip(self.rng.beta(c_alpha, c_beta), 0.01, 0.35))  # guessing floor
-        self.s = float(np.clip(self.rng.beta(s_alpha, s_beta), 0.01, 0.35))  # slip
+        # Per-agent 3PL draws (Item Response Theory parameters)
+        self.a = float(max(0.2, self.rng.normal(discrimination_mean, discrimination_std)))
+        self.c = float(np.clip(self.rng.beta(guess_prior_alpha, guess_prior_beta), 0.01, 0.35))
+        self.s = float(np.clip(self.rng.beta(slip_prior_alpha, slip_prior_beta), 0.01, 0.35))
 
         # Random coefficients (heterogeneous preferences)
         def _w(mu: float) -> float:
-            return float(max(0.0, self.rng.normal(mu, w_std)))
+            return float(max(0.0, self.rng.normal(mu, weight_noise_std)))
 
-        self.w_rel = _w(w_rel_mu)
-        self.w_zpd = _w(w_zpd_mu)
-        self.w_nov = _w(w_nov_mu)
-        self.w_pos = _w(w_pos_mu)
+        self.w_rel = _w(relevance_weight)
+        self.w_zpd = _w(zpd_fit_weight)
+        self.w_nov = _w(novelty_weight)
+        self.w_pos = _w(position_weight)
 
         # novelty memory
         self.recent = deque(maxlen=200)
@@ -760,36 +813,36 @@ class StudentAgent:
         self._update_latents_after_round(dict(feedback), items_meta)
 
 
-class StudentAgentFactory:
-    """Factory for creating pre-configured StudentAgent instances.
+class AdaptiveAgentFactory:
+    """Factory for creating pre-configured AdaptiveAgent instances.
 
-    Provides convenient factory methods to instantiate students with different
+    Provides convenient factory methods to instantiate agents with different
     ability models (IRT, MIRT, ZPD, etc.).
     """
 
     _registry = {
-        "irt": lambda **kw: StudentAgent(act_mode="IRT", **kw),
-        "mirt": lambda **kw: StudentAgent(act_mode="MIRT", knowledge_mode="vector", **kw),
-        "zpd": lambda **kw: StudentAgent(act_mode="ZPD", **kw),
-        "contextual_zpd": lambda **kw: StudentAgent(act_mode="ContextualZPD", **kw),
+        "irt": lambda **kw: AdaptiveAgent(act_mode="IRT", **kw),
+        "mirt": lambda **kw: AdaptiveAgent(act_mode="MIRT", knowledge_mode="vector", **kw),
+        "zpd": lambda **kw: AdaptiveAgent(act_mode="ZPD", **kw),
+        "contextual_zpd": lambda **kw: AdaptiveAgent(act_mode="ContextualZPD", **kw),
     }
 
     @classmethod
-    def create(cls, name: str, **kwargs) -> StudentAgent:
-        """Create a StudentAgent of a specific type.
+    def create(cls, name: str, **kwargs) -> AdaptiveAgent:
+        """Create an AdaptiveAgent of a specific type.
 
         Parameters
         ----------
         name : str
             Agent type: "irt", "mirt", "zpd", or "contextual_zpd".
         **kwargs
-            Additional keyword arguments passed to StudentAgent.__init__.
+            Additional keyword arguments passed to AdaptiveAgent.__init__.
             Supports initial latent aliases: E, T, K, F, theta.
 
         Returns
         -------
-        StudentAgent
-            Configured student agent.
+        AdaptiveAgent
+            Configured adaptive agent.
 
         Raises
         ------
@@ -799,7 +852,7 @@ class StudentAgentFactory:
         key = name.lower()
         if key not in cls._registry:
             raise ValueError(
-                f"Unknown StudentAgent type '{name}'. Available: {list(cls._registry.keys())}"
+                f"Unknown AdaptiveAgent type '{name}'. Available: {list(cls._registry.keys())}"
             )
         agent = cls._registry[key](**kwargs)
         # If caller passed initial latents in kwargs (common from run_all), apply them now.
@@ -834,4 +887,32 @@ class StudentAgentFactory:
         return list(cls._registry.keys())
 
 
-__all__ = ["ItemMeta", "StudentAgent", "StudentAgentFactory", "enable_debug_student_logs"]
+__all__ = [
+    "ItemMeta",
+    "AdaptiveAgent",
+    "AdaptiveAgentFactory",
+    # Backward-compatible aliases (deprecated)
+    "StudentAgent",
+    "StudentAgentFactory",
+    "enable_debug_student_logs",
+]
+
+
+# --- Deprecation handling for renamed symbols (PEP 562) ---
+_DEPRECATED_NAMES = {
+    "StudentAgent": "AdaptiveAgent",
+    "StudentAgentFactory": "AdaptiveAgentFactory",
+}
+
+
+def __getattr__(name: str):
+    if name in _DEPRECATED_NAMES:
+        import warnings
+        warnings.warn(
+            f"{name} is deprecated, use {_DEPRECATED_NAMES[name]} instead. "
+            "Will be removed in v1.0.",
+            DeprecationWarning,
+            stacklevel=2,
+        )
+        return globals()[_DEPRECATED_NAMES[name]]
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")

@@ -2,11 +2,14 @@
 
 from __future__ import annotations
 
+import logging
 import math
 from collections import defaultdict
 from typing import Dict
 
 import numpy as np
+
+logger = logging.getLogger(__name__)
 
 
 # Debug logging helper
@@ -14,7 +17,7 @@ def _d(*args) -> None:
     """Debug logging (respects ORCHID_DEBUG_REC env var)."""
     import os
     if os.getenv("ORCHID_DEBUG_REC", "").lower() in {"1", "true", "yes", "on"}:
-        print("[Recommender]", *args)
+        logger.debug("%s", " ".join(str(a) for a in args))
 
 
 # Global debug flag (imported from parent module)
@@ -97,12 +100,20 @@ class BootTS:
         self.rng = np.random.RandomState(rng)
         self.As = [self.l2 * np.eye(self.d, dtype=np.float64) for _ in range(self.H)]
         self.bs = [np.zeros(self.d, dtype=np.float64) for _ in range(self.H)]
+        self._thetas_dirty = [True] * self.H  # lazy theta recomputation
+        self._thetas = [np.zeros(self.d, dtype=np.float64) for _ in range(self.H)]
         _d(f"BootTS d={d} heads={heads} l2={l2}")
+
+    def _get_theta(self, h: int) -> np.ndarray:
+        """Get theta for head h, recomputing only if dirty."""
+        if self._thetas_dirty[h]:
+            self._thetas[h] = np.linalg.solve(self.As[h] + 1e-8 * np.eye(self.d), self.bs[h])
+            self._thetas_dirty[h] = False
+        return self._thetas[h]
 
     def score_vec(self, x: np.ndarray) -> float:
         h = int(self.rng.randint(self.H))
-        A, b = self.As[h], self.bs[h]
-        theta = np.linalg.solve(A + 1e-8*np.eye(self.d), b)
+        theta = self._get_theta(h)
         val = float(x @ theta + self.rng.normal(0.0, 0.01))
         if _DEBUG_REC:
             _d(f"BootTS score head={h} -> {val:.4f}")
@@ -114,5 +125,12 @@ class BootTS:
         for h in heads:
             self.As[h] += np.outer(x, x)
             self.bs[h] += float(r) * x
+            self._thetas_dirty[h] = True  # invalidate cached theta
         if _DEBUG_REC:
             _d(f"BootTS update heads={list(map(int,heads))} r={r:.3f}")
+
+
+__all__ = [
+    "LinUCBPolicy",
+    "BootTS",
+]

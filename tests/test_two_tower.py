@@ -156,13 +156,17 @@ class TestTwoTowerDecide:
             device=device,
         ).to(device)
 
-        # Generate some logits
-        logits = torch.randn(1, 5)
-        item_ids = [0, 1, 2, 3, 4]
+        # think() must be called before decide() to cache item reps
+        item_matrix = torch.randn(10, 4, device=device)
+        user_vec = torch.randn(1, 4, device=device)
+        user_ids = torch.tensor([0], dtype=torch.long, device=device)
+        item_ids_t = torch.tensor([0, 1, 2, 3, 4], dtype=torch.long, device=device)
+
+        logits = model.think(user_vec, item_matrix, user_ids, item_ids_t)
 
         chosen_items, metadata = model.decide(
             logits=logits,
-            item_ids=item_ids,
+            item_ids=item_ids_t,
             top_k=2,
             user_id=0,
             engagement=0.5,
@@ -188,13 +192,17 @@ class TestTwoTowerDecide:
             device=device,
         ).to(device)
 
-        logits = torch.randn(1, 8)
-        item_ids = list(range(8))
+        item_matrix = torch.randn(10, 4, device=device)
+        user_vec = torch.randn(1, 4, device=device)
+        user_ids = torch.tensor([0], dtype=torch.long, device=device)
+        item_ids_t = torch.tensor(list(range(8)), dtype=torch.long, device=device)
+
+        logits = model.think(user_vec, item_matrix, user_ids, item_ids_t)
 
         for k in [1, 3, 5]:
             chosen, _ = model.decide(
                 logits=logits,
-                item_ids=item_ids,
+                item_ids=item_ids_t,
                 top_k=k,
                 user_id=0,
                 engagement=0.5,
@@ -234,13 +242,17 @@ class TestTwoTowerUpdate:
 
         # Update
         model.train()
-        loss = model.update(
+        state_vec = torch.randn(2, 4, device=device)  # state_dim=4
+        feedback = {0: 1, 1: 0}  # user accepted item 0, rejected item 1
+        result = model.update(
+            feedback=feedback,
             user_vec=user_vec,
-            item_matrix=item_matrix,
+            state_vec=state_vec,
             user_ids=user_ids,
+            item_matrix=item_matrix,
             item_ids=item_ids,
-            labels=labels,
         )
+        loss = result.get("loss", 0.0) if isinstance(result, dict) else float(result)
 
         assert isinstance(loss, float)
 

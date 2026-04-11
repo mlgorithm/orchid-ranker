@@ -55,3 +55,8 @@ class RecShim:
     def mmr_lambda(self): return getattr(self.rec, "mmr_lambda", 0.30)
     @mmr_lambda.setter
     def mmr_lambda(self, v): setattr(self.rec, "mmr_lambda", float(v))
+
+
+__all__ = [
+    "RecShim",
+]

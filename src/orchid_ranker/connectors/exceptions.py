@@ -14,3 +14,10 @@ class ConnectionTimeoutError(ConnectorError):
 class RetryExhaustedError(ConnectorError):
     """Raised when all retry attempts are exhausted."""
     pass
+
+
+__all__ = [
+    "ConnectorError",
+    "ConnectionTimeoutError",
+    "RetryExhaustedError",
+]

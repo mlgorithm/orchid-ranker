@@ -106,18 +106,18 @@ class TestWelfordVarianceTracking:
 
     def test_variance_tracking_known_sequence(self):
         """Test variance tracking on a known sequence."""
-        cfg = DRCSConfig()
+        cfg = DRCSConfig()  # u_max=1.0 by default
         dr = DRConfidenceSequence(cfg)
 
-        # Sequence with known variance
-        # z_i = [1, 2, 3] -> mean = 2, variance = 1
-        z_values = [1.0, 2.0, 3.0]
+        # Sequence within [0, u_max] to avoid clamping.
+        # z_i = [0.2, 0.5, 0.8] -> mean = 0.5, variance = 0.09
+        z_values = [0.2, 0.5, 0.8]
         for z in z_values:
             dr.update(True, z, z, 0.0, 0.5)
 
         var_hat = dr.M2 / max(dr.t - 1, 1)
-        expected_var = 1.0  # variance of [1, 2, 3]
-        assert pytest.approx(var_hat, rel=1e-10) == expected_var
+        expected_var = 0.09  # variance of [0.2, 0.5, 0.8]
+        assert pytest.approx(var_hat, rel=1e-6) == expected_var
 
     def test_m2_accumulation_order(self):
         """M2 should be calculated correctly regardless of observation order."""
@@ -391,8 +391,9 @@ class TestAcceptanceGuardrail:
         )
         gate = SafeSwitchDR(cfg)
 
-        # Feed high acceptance
-        for _ in range(5):
+        # Feed high acceptance — need enough observations so the confidence
+        # radius shrinks and acc_lcb rises above accept_floor.
+        for _ in range(100):
             gate.update(True, 0.5, 3.0, 0.5, 0.3, gate.p)
 
         # acc_lcb should be >= accept_floor, so guardrail should not activate
@@ -665,19 +666,23 @@ class TestIntegrationScenarios:
     """Integration tests combining multiple correctness properties."""
 
     def test_full_scenario_positive_uplift(self):
-        """Full scenario: positive uplift should increase p over time."""
+        """Full scenario: positive uplift should increase p over time.
+
+        Use accept_floor=0 to disable the acceptance guardrail so that
+        positive DR uplift can drive p upward.
+        """
         cfg = SafeSwitchDRConfig(
             delta=0.05,
             p_min=0.1,
             p_max=1.0,
             step_up=0.1,
             step_down=0.5,
-            accept_floor=1.0,
+            accept_floor=0.0,
         )
         gate = SafeSwitchDR(cfg)
 
         p_values = [gate.p]
-        for _ in range(10):
+        for _ in range(100):
             gate.update(True, 0.9, 0.8, 0.5, 0.3, gate.p)
             p_values.append(gate.p)
 

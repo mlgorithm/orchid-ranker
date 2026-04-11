@@ -74,33 +74,45 @@ def strategie_params():
 # Parametrized tests: all strategies
 # ────────────────────────────────────────────────────────────────────────────
 
+def _fit_strategy(rec, data, strategy, item_features=None):
+    """Helper to fit a recommender, providing item_features for linucb."""
+    fit_kwargs = {"rating_col": "rating"}
+    if strategy == "linucb" and item_features is not None:
+        fit_kwargs["item_features"] = item_features
+    rec.fit(data, **fit_kwargs)
+    return rec
+
+
 @pytest.mark.parametrize("strategy", SUPPORTED_STRATEGIES)
 class TestStrategyCorrectness:
     """Test correctness of each strategy across 9 expected behaviors."""
 
-    def test_fit_succeeds_on_known_data(self, strategy, small_known_data, strategie_params):
-        """Verify fit() completes without error."""
-        kwargs = strategie_params.get(strategy, {})
-        rec = OrchidRecommender(strategy=strategy, epochs=1, **kwargs)
+    def _make_and_fit(self, strategy, small_known_data, strategie_params, linucb_item_features):
+        """Create and fit a recommender for any strategy."""
+        if strategy in ("implicit_als", "implicit_bpr"):
+            pytest.importorskip("implicit")
+        kwargs = {**strategie_params.get(strategy, {})}
+        if strategy not in ("implicit_als", "implicit_bpr"):
+            kwargs["epochs"] = 1
+        rec = OrchidRecommender(strategy=strategy, **kwargs)
+        fit_kw = {"rating_col": "rating"}
+        if strategy == "linucb":
+            fit_kw["item_features"] = linucb_item_features
+        rec.fit(small_known_data, **fit_kw)
+        return rec
 
-        # Fit should not raise
-        rec.fit(small_known_data, rating_col="rating")
+    def test_fit_succeeds_on_known_data(self, strategy, small_known_data, strategie_params, linucb_item_features):
+        """Verify fit() completes without error."""
+        rec = self._make_and_fit(strategy, small_known_data, strategie_params, linucb_item_features)
         assert rec._baseline is not None, f"{strategy} baseline not initialized"
         assert len(rec.all_users()) > 0
         assert len(rec.all_items()) > 0
 
     def test_recommend_returns_recommendation_objects(
-        self, strategy, small_known_data, strategie_params
+        self, strategy, small_known_data, strategie_params, linucb_item_features
     ):
         """Verify recommend() returns list of Recommendation objects."""
-        if strategy == "implicit_als" or strategy == "implicit_bpr":
-            pytest.importorskip("implicit")
-
-        kwargs = strategie_params.get(strategy, {})
-        rec = OrchidRecommender(strategy=strategy, epochs=1, **kwargs)
-        rec.fit(small_known_data, rating_col="rating")
-
-        # Pick a known user
+        rec = self._make_and_fit(strategy, small_known_data, strategie_params, linucb_item_features)
         user_id = small_known_data["user_id"].iloc[0]
         recs = rec.recommend(user_id, top_k=5)
 
@@ -110,108 +122,64 @@ class TestStrategyCorrectness:
         assert all(isinstance(r.item_id, int) for r in recs)
         assert all(isinstance(r.score, float) for r in recs)
 
-    def test_all_scores_finite(self, strategy, small_known_data, strategie_params):
+    def test_all_scores_finite(self, strategy, small_known_data, strategie_params, linucb_item_features):
         """Verify all returned scores are finite (no NaN, Inf)."""
-        if strategy == "implicit_als" or strategy == "implicit_bpr":
-            pytest.importorskip("implicit")
-
-        kwargs = strategie_params.get(strategy, {})
-        rec = OrchidRecommender(strategy=strategy, epochs=1, **kwargs)
-        rec.fit(small_known_data, rating_col="rating")
-
+        rec = self._make_and_fit(strategy, small_known_data, strategie_params, linucb_item_features)
         user_id = small_known_data["user_id"].iloc[0]
         recs = rec.recommend(user_id, top_k=10)
 
         for r in recs:
             assert np.isfinite(r.score), f"{strategy}: score is not finite: {r.score}"
-            assert not np.isnan(r.score), f"{strategy}: score is NaN"
-            assert not np.isinf(r.score), f"{strategy}: score is Inf"
 
     def test_filter_seen_excludes_seen_items(
-        self, strategy, small_known_data, strategie_params
+        self, strategy, small_known_data, strategie_params, linucb_item_features
     ):
         """Verify filter_seen=True excludes items user has interacted with."""
-        if strategy == "implicit_als" or strategy == "implicit_bpr":
-            pytest.importorskip("implicit")
-
-        kwargs = strategie_params.get(strategy, {})
-        rec = OrchidRecommender(strategy=strategy, epochs=1, **kwargs)
-        rec.fit(small_known_data, rating_col="rating")
-
-        # Get a user who has interacted with items
+        rec = self._make_and_fit(strategy, small_known_data, strategie_params, linucb_item_features)
         user_id = small_known_data.iloc[0]["user_id"]
         seen_items = set(
             small_known_data[small_known_data["user_id"] == user_id]["item_id"].unique()
         )
-
         if not seen_items:
             pytest.skip(f"User {user_id} has no interactions")
 
         recs_with_filter = rec.recommend(user_id, top_k=100, filter_seen=True)
         rec_item_ids = {r.item_id for r in recs_with_filter}
-
         overlap = rec_item_ids & seen_items
-        assert len(overlap) == 0, (
-            f"{strategy}: filter_seen=True returned {len(overlap)} seen items. "
-            f"Seen: {seen_items}, Got: {rec_item_ids}"
-        )
+        assert len(overlap) == 0, f"{strategy}: filter_seen=True returned seen items"
 
     def test_predict_returns_finite_float(
-        self, strategy, small_known_data, strategie_params
+        self, strategy, small_known_data, strategie_params, linucb_item_features
     ):
         """Verify predict(user, item) returns finite float."""
-        if strategy == "implicit_als" or strategy == "implicit_bpr":
-            pytest.importorskip("implicit")
-
-        kwargs = strategie_params.get(strategy, {})
-        rec = OrchidRecommender(strategy=strategy, epochs=1, **kwargs)
-        rec.fit(small_known_data, rating_col="rating")
-
-        # Get a known user-item pair
+        rec = self._make_and_fit(strategy, small_known_data, strategie_params, linucb_item_features)
         user_id = small_known_data.iloc[0]["user_id"]
         item_id = small_known_data.iloc[0]["item_id"]
-
         score = rec.predict(user_id, item_id)
 
         assert isinstance(score, float)
         assert np.isfinite(score), f"{strategy}: predict() returned non-finite score"
-        assert not np.isnan(score)
-        assert not np.isinf(score)
 
     def test_predict_many_shape_and_dtype(
-        self, strategy, small_known_data, strategie_params
+        self, strategy, small_known_data, strategie_params, linucb_item_features
     ):
         """Verify predict_many() returns correct shape and dtype."""
-        if strategy == "implicit_als" or strategy == "implicit_bpr":
-            pytest.importorskip("implicit")
-
-        kwargs = strategie_params.get(strategy, {})
-        rec = OrchidRecommender(strategy=strategy, epochs=1, **kwargs)
-        rec.fit(small_known_data, rating_col="rating")
-
-        # Get multiple known pairs
-        user_ids = small_known_data["user_id"].iloc[:10].values
-        item_ids = small_known_data["item_id"].iloc[:10].values
-
+        rec = self._make_and_fit(strategy, small_known_data, strategie_params, linucb_item_features)
+        user_ids = small_known_data["user_id"].iloc[:10].tolist()
+        item_ids = small_known_data["item_id"].iloc[:10].tolist()
         scores = rec.predict_many(user_ids, item_ids)
 
         assert isinstance(scores, np.ndarray)
         assert scores.dtype in (np.float32, np.float64)
-        assert scores.shape == (len(user_ids),), (
-            f"{strategy}: predict_many shape {scores.shape} != ({len(user_ids)},)"
-        )
+        assert scores.shape == (len(user_ids),)
 
     def test_predict_and_predict_many_consistency(
-        self, strategy, small_known_data, strategie_params
+        self, strategy, small_known_data, strategie_params, linucb_item_features
     ):
         """Verify predict() and predict_many() return same score for same pair."""
-        if strategy == "implicit_als" or strategy == "implicit_bpr":
-            pytest.importorskip("implicit")
-
-        kwargs = strategie_params.get(strategy, {})
-        rec = OrchidRecommender(strategy=strategy, epochs=1, **kwargs)
-        rec.fit(small_known_data, rating_col="rating")
-
+        if strategy == "random":
+            pytest.skip("random strategy is non-deterministic")
+        rec = self._make_and_fit(strategy, small_known_data, strategie_params, linucb_item_features)
         user_id = small_known_data.iloc[0]["user_id"]
         item_id = small_known_data.iloc[0]["item_id"]
 
@@ -219,30 +187,21 @@ class TestStrategyCorrectness:
         scores_many = rec.predict_many([user_id], [item_id])
 
         assert len(scores_many) == 1
-        assert np.isclose(
-            score_single, scores_many[0], rtol=1e-5, atol=1e-7
-        ), (
+        assert np.isclose(score_single, scores_many[0], rtol=1e-5, atol=1e-7), (
             f"{strategy}: predict() and predict_many() disagree. "
             f"Single: {score_single}, Many: {scores_many[0]}"
         )
 
     def test_top_k_ranking_highest_score_first(
-        self, strategy, small_known_data, strategie_params
+        self, strategy, small_known_data, strategie_params, linucb_item_features
     ):
         """Verify recommendations are ordered by score (highest first)."""
-        if strategy == "implicit_als" or strategy == "implicit_bpr":
-            pytest.importorskip("implicit")
-
-        kwargs = strategie_params.get(strategy, {})
-        rec = OrchidRecommender(strategy=strategy, epochs=1, **kwargs)
-        rec.fit(small_known_data, rating_col="rating")
-
+        rec = self._make_and_fit(strategy, small_known_data, strategie_params, linucb_item_features)
         user_id = small_known_data.iloc[0]["user_id"]
         recs = rec.recommend(user_id, top_k=5, filter_seen=False)
 
         scores = [r.score for r in recs]
         sorted_scores = sorted(scores, reverse=True)
-
         assert scores == sorted_scores, (
             f"{strategy}: recommendations not sorted by score. "
             f"Got {scores}, expected {sorted_scores}"
@@ -312,8 +271,10 @@ def test_different_strategies_produce_different_rankings(
     kwargs1 = strategie_params.get(strategy1, {})
     kwargs2 = strategie_params.get(strategy2, {})
 
-    rec1 = OrchidRecommender(strategy=strategy1, epochs=1, **kwargs1)
-    rec2 = OrchidRecommender(strategy=strategy2, epochs=1, **kwargs2)
+    kwargs1 = {**kwargs1, "epochs": 1}
+    kwargs2 = {**kwargs2, "epochs": 1}
+    rec1 = OrchidRecommender(strategy=strategy1, **kwargs1)
+    rec2 = OrchidRecommender(strategy=strategy2, **kwargs2)
 
     rec1.fit(small_known_data, rating_col="rating")
     rec2.fit(small_known_data, rating_col="rating")
@@ -344,8 +305,8 @@ def test_scores_remain_finite_across_many_recommendations(
     strategy, small_known_data, strategie_params
 ):
     """Verify scores don't drift to NaN/Inf with repeated recommendations."""
-    kwargs = strategie_params.get(strategy, {})
-    rec = OrchidRecommender(strategy=strategy, epochs=1, **kwargs)
+    kwargs = {**strategie_params.get(strategy, {}), "epochs": 1}
+    rec = OrchidRecommender(strategy=strategy, **kwargs)
     rec.fit(small_known_data, rating_col="rating")
 
     user_id = small_known_data.iloc[0]["user_id"]
@@ -364,8 +325,8 @@ def test_predict_many_batch_vs_individual(
     strategy, small_known_data, strategie_params
 ):
     """Verify predict_many() batch processing matches individual predictions."""
-    kwargs = strategie_params.get(strategy, {})
-    rec = OrchidRecommender(strategy=strategy, epochs=1, **kwargs)
+    kwargs = {**strategie_params.get(strategy, {}), "epochs": 1}
+    rec = OrchidRecommender(strategy=strategy, **kwargs)
     rec.fit(small_known_data, rating_col="rating")
 
     # Get multiple pairs

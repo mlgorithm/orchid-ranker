@@ -32,3 +32,6 @@ def evaluate(model, data, device, batch_size=1024):
     auc = compute_auc(all_labels, all_preds)
     acc = compute_accuracy(all_labels, all_preds)
     return auc, acc
+
+
+__all__ = ["train_epoch", "evaluate"]

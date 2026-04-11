@@ -55,3 +55,6 @@ class _TimingRecorder:
         self._written += 1
         if self._written >= self._max_rounds:
             self.enabled = False
+
+
+__all__: list[str] = []

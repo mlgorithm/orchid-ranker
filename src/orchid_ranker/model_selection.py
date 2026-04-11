@@ -14,7 +14,13 @@ from .evaluation import (
     ndcg_at_k,
     average_precision,
 )
-from .recommender import OrchidRecommender
+
+#: Supported metric names for cross_validate, evaluate_on_holdout, compare_models.
+EVALUATION_METRICS = frozenset({"precision@5", "recall@5", "ndcg@10", "map@10"})
+
+from typing import TYPE_CHECKING
+if TYPE_CHECKING:
+    from .recommender import OrchidRecommender
 
 logger = logging.getLogger(__name__)
 
@@ -217,6 +223,7 @@ def cross_validate(
             continue
 
         # Fit model on training fold
+        from .recommender import OrchidRecommender
         model = OrchidRecommender(strategy=strategy, **strategy_kwargs)
         model.fit(train_df, user_col=user_col, item_col=item_col)
 
@@ -379,7 +386,7 @@ def compare_models(
     strategies: Sequence[str],
     k: int = 5,
     metrics: Optional[List[str]] = None,
-    strategy_kwargs_list: Optional[List[Dict]] = None,
+    strategy_configs: Optional[List[Dict]] = None,
     random_state: Optional[int] = 42,
     user_col: str = "user_id",
     item_col: str = "item_id",
@@ -401,8 +408,8 @@ def compare_models(
     metrics : list of str, optional
         Metric names to compute. Options: "precision@5", "recall@5", "ndcg@10",
         "map@10". If None, defaults to all (default: None).
-    strategy_kwargs_list : list of dict, optional
-        List of kwargs dicts (one per strategy). If shorter than strategies,
+    strategy_configs : list of dict, optional
+        One kwargs dict per strategy. If shorter than strategies list,
         remaining strategies use empty dicts (default: None).
     random_state : int, optional
         Random seed for reproducibility (default: 42).
@@ -435,16 +442,17 @@ def compare_models(
     if metrics is None:
         metrics = ["precision@5", "recall@5", "ndcg@10", "map@10"]
 
-    if strategy_kwargs_list is None:
-        strategy_kwargs_list = [{} for _ in strategies]
+    if strategy_configs is None:
+        strategy_configs = [{} for _ in strategies]
     else:
         # Pad with empty dicts if needed
-        while len(strategy_kwargs_list) < len(strategies):
-            strategy_kwargs_list.append({})
+        strategy_configs = list(strategy_configs)
+        while len(strategy_configs) < len(strategies):
+            strategy_configs.append({})
 
     results_by_strategy = {}
 
-    for strategy, kwargs in zip(strategies, strategy_kwargs_list):
+    for strategy, kwargs in zip(strategies, strategy_configs):
         logger.info(f"Cross-validating strategy: {strategy}")
         cv_results = cross_validate(
             interactions,
@@ -485,6 +493,7 @@ def compare_models(
 
 
 __all__ = [
+    "EVALUATION_METRICS",
     "train_test_split",
     "cross_validate",
     "evaluate_on_holdout",

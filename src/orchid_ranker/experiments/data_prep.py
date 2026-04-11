@@ -1,8 +1,11 @@
 """Data preparation and feature matrix building utilities for Orchid Ranker experiments."""
+import logging
 from typing import Dict, List, Tuple
 import numpy as np
 import pandas as pd
 import torch
+
+logger = logging.getLogger(__name__)
 
 
 def _resolve_id_column(df: pd.DataFrame, preferred: str, fallbacks: tuple[str, ...] = ()) -> str:
@@ -86,7 +89,7 @@ def _build_feature_matrix(
         msg = f"[{kind}] id_col='{resolved}', kept_num={len(kept)}, dropped_non_num={len(dropped)}"
         if dropped:
             msg += f", dropped={dropped[:8]}{'…' if len(dropped) > 8 else ''}"
-        print("[RankingExperiment]", msg)
+        logger.debug("%s", msg)
 
     return ids, feats
 

@@ -129,7 +129,10 @@ class TestNoiseInjection:
 
     def test_noise_zero_when_multiplier_is_zero(self):
         """Test that noise_multiplier=0 produces zero noise (deterministic)."""
+        torch.manual_seed(42)
         model = nn.Linear(10, 1)
+        model.weight.data.fill_(0.1)
+        model.bias.data.fill_(0.0)
         params = list(model.parameters())
 
         x = torch.randn(8, 10)
@@ -219,41 +222,24 @@ class TestNoiseInjection:
         assert True, "Noise injection should execute without error"
 
     def test_noise_nonzero_with_positive_multiplier(self):
-        """Test that positive noise multiplier produces different gradients."""
-        model = nn.Linear(10, 1)
+        """Test that positive noise multiplier produces different parameter updates."""
+        init_state = nn.Linear(10, 1).state_dict()
 
         x = torch.randn(6, 10)
         y = torch.randn(6, 1)
 
-        def loss_fn(x_batch, y_batch):
-            return torch.mean((model(x_batch) - y_batch) ** 2)
-
-        # Run with zero noise
-        model_no_noise = nn.Linear(10, 1)
-        model_no_noise.load_state_dict(model.state_dict())
-        params_no_noise = list(model_no_noise.parameters())
-        optimizer_no_noise = torch.optim.SGD(params_no_noise, lr=0.01)
-
-        loss_no_noise = dp_sgd_step(
-            model=model_no_noise,
-            params=params_no_noise,
-            optimizer=optimizer_no_noise,
-            loss_fn=loss_fn,
-            batch_inputs=(x, y),
-            max_grad_norm=1.0,
-            noise_multiplier=0.0,
-            device=torch.device("cpu"),
-        )
-
-        # Run with noise (multiple times to check variance)
-        losses_with_noise = []
+        # Run with noise (multiple times to check that updated params differ)
+        final_weights = []
         for _ in range(5):
             model_noise = nn.Linear(10, 1)
-            model_noise.load_state_dict(model.state_dict())
+            model_noise.load_state_dict(init_state)
             params_noise = list(model_noise.parameters())
             optimizer_noise = torch.optim.SGD(params_noise, lr=0.01)
 
-            loss_noise = dp_sgd_step(
+            def loss_fn(x_batch, y_batch, _m=model_noise):
+                return torch.mean((_m(x_batch) - y_batch) ** 2)
+
+            dp_sgd_step(
                 model=model_noise,
                 params=params_noise,
                 optimizer=optimizer_noise,
@@ -263,11 +249,11 @@ class TestNoiseInjection:
                 noise_multiplier=1.0,
                 device=torch.device("cpu"),
             )
-            losses_with_noise.append(loss_noise)
+            final_weights.append(model_noise.weight.data.clone().flatten().numpy())
 
-        # Losses with noise should have variance
-        loss_variance = np.var(losses_with_noise)
-        assert loss_variance > 0, "Noise should introduce variance"
+        # Parameters after noise injection should have variance across runs
+        param_variance = np.var(np.stack(final_weights), axis=0).sum()
+        assert param_variance > 0, "Noise should introduce variance in updated parameters"
 
 
 class TestAccountantFormula:
@@ -784,9 +770,8 @@ class TestNumericalStability:
         assert not math.isinf(loss)
 
     def test_zero_gradient_handling(self):
-        """Test handling when gradients are zero."""
+        """Test handling when gradients are zero (zero input/output)."""
         model = nn.Linear(5, 1)
-        # Initialize to zero (unlikely but test edge case)
         model.weight.data.zero_()
         model.bias.data.zero_()
 
@@ -796,7 +781,8 @@ class TestNumericalStability:
         y = torch.zeros(4, 1)
 
         def loss_fn(x_batch, y_batch):
-            return torch.tensor(0.0)
+            # Must produce a graph-connected loss for backward()
+            return torch.mean((model(x_batch) - y_batch) ** 2)
 
         optimizer = torch.optim.SGD(params, lr=0.01)
 

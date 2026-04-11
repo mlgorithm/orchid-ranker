@@ -451,3 +451,6 @@ class SnowflakeConnector:
                     cur.close()
 
         self._retry_with_backoff(_execute)
+
+
+__all__ = ["SnowflakeConnector"]

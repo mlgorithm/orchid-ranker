@@ -208,7 +208,7 @@ class TestBKTStress:
         rng = np.random.RandomState(0)
         for _ in range(10_000):
             bkt.update(correct=bool(rng.randint(0, 2)))
-        p = bkt.p_known()
+        p = bkt.p_known
         assert 0.0 <= p <= 1.0
         assert not math.isnan(p)
         assert not math.isinf(p)
@@ -217,19 +217,19 @@ class TestBKTStress:
         bkt = BayesianKnowledgeTracing()
         for _ in range(500):
             bkt.update(correct=True)
-        assert bkt.p_known() > 0.95
+        assert bkt.p_known > 0.95
 
     def test_all_incorrect_stays_low(self):
         bkt = BayesianKnowledgeTracing()
         for _ in range(500):
             bkt.update(correct=False)
-        assert bkt.p_known() < 0.5
+        assert bkt.p_known < 0.5
 
     def test_alternating_correct_incorrect(self):
         bkt = BayesianKnowledgeTracing()
         for i in range(1000):
             bkt.update(correct=(i % 2 == 0))
-        p = bkt.p_known()
+        p = bkt.p_known
         assert 0.0 <= p <= 1.0
 
     def test_extreme_parameters(self):
@@ -238,7 +238,7 @@ class TestBKTStress:
         )
         for _ in range(100):
             bkt.update(correct=True)
-        p = bkt.p_known()
+        p = bkt.p_known
         assert 0.0 <= p <= 1.0
         assert not math.isnan(p)
 
@@ -248,7 +248,7 @@ class TestBKTStress:
         )
         try:
             bkt.update(correct=False)
-            p = bkt.p_known()
+            p = bkt.p_known
             # may be 0/0 degenerate
             assert isinstance(p, float)
         except (ZeroDivisionError, ValueError):
@@ -260,7 +260,7 @@ class TestBKTStress:
         )
         try:
             bkt.update(correct=True)
-            p = bkt.p_known()
+            p = bkt.p_known
             assert isinstance(p, float)
         except (ZeroDivisionError, ValueError):
             pass
@@ -269,9 +269,9 @@ class TestBKTStress:
         bkt = BayesianKnowledgeTracing()
         for _ in range(100):
             bkt.update(correct=True)
-        high = bkt.p_known()
+        high = bkt.p_known
         bkt.reset()
-        low = bkt.p_known()
+        low = bkt.p_known
         assert low < high
 
 
@@ -765,7 +765,7 @@ class TestConcurrency:
                 rng = np.random.RandomState(seed)
                 for _ in range(1000):
                     bkt.update(correct=bool(rng.randint(0, 2)))
-                p = bkt.p_known()
+                p = bkt.p_known
                 assert 0.0 <= p <= 1.0
             except Exception as e:
                 errors.append((seed, str(e)))
@@ -820,7 +820,7 @@ class TestMutationSafety:
         bkt2 = copy.deepcopy(bkt)
         bkt2.update(correct=False)
         # Original should be unaffected
-        assert bkt.p_known() >= bkt2.p_known() or True  # at least no crash
+        assert bkt.p_known >= bkt2.p_known or True  # at least no crash
 
     def test_graph_deepcopy(self):
         g = PrerequisiteGraph()
@@ -849,7 +849,7 @@ class TestNumericalStability:
                                 bkt.update(correct=True)
                             for _ in range(20):
                                 bkt.update(correct=False)
-                            p = bkt.p_known()
+                            p = bkt.p_known
                             if not math.isnan(p):
                                 assert 0.0 <= p <= 1.0
                         except (ZeroDivisionError, ValueError):

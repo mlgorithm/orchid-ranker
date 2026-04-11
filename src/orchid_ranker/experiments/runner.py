@@ -1,6 +1,7 @@
 """High-level experiment driver for Orchid Ranker."""
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass, asdict
 from typing import Dict, Iterable, List, Optional, Tuple
 from pathlib import Path
@@ -10,6 +11,8 @@ import numpy as np
 import matplotlib.pyplot as plt  # kept if you plot elsewhere
 import pandas as pd
 import torch
+
+logger = logging.getLogger(__name__)
 
 from orchid_ranker import (
     MultiConfig,
@@ -140,8 +143,8 @@ class RankingExperiment:
         d.loc[d <= 0.0] = 0.05  # tiny floor to avoid all-zeros downstream
         si["difficulty"] = d
 
-        print("[Difficulty] describe:\n", si["difficulty"].describe())
-        print("[Difficulty] zeros%:", (si["difficulty"] <= 0).mean() * 100)
+        logger.debug("[Difficulty] describe:\n%s", si["difficulty"].describe())
+        logger.debug("[Difficulty] zeros%%: %s", (si["difficulty"] <= 0).mean() * 100)
 
         # 3) build meta from the repaired frame
         self.side_items = si
@@ -383,7 +386,7 @@ class RankingExperiment:
     # ---------- small debug helpers ----------
     def _p(self, *args):
         if self.verbose:
-            print("[RankingExperiment]", *args)
+            logger.debug("%s", " ".join(str(a) for a in args))
 
     def _vec_stats(self, t: torch.Tensor, name: str):
         try:
@@ -717,8 +720,8 @@ class RankingExperiment:
 
         if mode == "adaptive":
             rec = self._build_adaptive(dp_cfg, adaptive_kwargs=adaptive_kwargs, warm_cfg=warm_start)
-            print(f"[PolicyCfg] zpd_margin={adaptive_kwargs.get('zpd_margin')} "
-                  f"use_linucb={adaptive_kwargs.get('use_linucb')} use_bootts={adaptive_kwargs.get('use_bootts')}")
+            logger.debug(f"[PolicyCfg] zpd_margin={adaptive_kwargs.get('zpd_margin')} "
+                        f"use_linucb={adaptive_kwargs.get('use_linucb')} use_bootts={adaptive_kwargs.get('use_bootts')}")
         elif mode == "fixed":
             rec = self._build_fixed(dp_cfg)
         else:
@@ -753,26 +756,9 @@ class RankingExperiment:
         df_round = _flatten_round_records(memory_logger.records)   # keep if you still want cohort per-round
         df_user  = _flatten_user_records(memory_logger.records)    # <-- NEW
 
-        print(f"df_user: {df_user}")
-        print(f"df_round: {df_round}")
+        logger.debug(f"df_user: {df_user}")
+        logger.debug(f"df_round: {df_round}")
 
-
-        # print(f"result: {result}")
-        # df_round = _flatten_round_records(memory_logger.records)
-        # print(f"df_round: {df_round}")
-        # summary = self._summarise(mode, df_round, result)
-
-        # self._p(f"SUMMARY[{mode}]: "
-        #         f"accuracy={summary.accuracy:.4f}  accept_rate={summary.accept_rate:.4f}  "
-        #         f"novelty_rate={summary.novelty_rate:.4f}  serendipity={summary.serendipity:.4f}  "
-        #         f"mean_knowledge={summary.mean_knowledge:.4f}  epsilon_cum={summary.epsilon_cum:.4f}  "
-        #         f"mean_engagement={summary.mean_engagement:.4f}")
-
-        # return {
-        #     "mode": mode,
-        #     "round_metrics": df_round,
-        #     "summary": summary,
-        # }
         return {
         "mode": mode,
         "round_metrics": df_round,   # per-round cohort (optional)

@@ -105,10 +105,10 @@ def ndcg_at_k(recommended: Sequence[int], relevant: Dict[int, float], k: int) ->
 
 
 def average_precision(recommended: Sequence[int], relevant: Sequence[int], k: int) -> float:
-    """Compute Mean Average Precision (MAP) for binary relevance.
+    """Compute Average Precision (AP@k) for a single ranking.
 
-    Measures ranking quality by averaging precision at each position where a
-    relevant item is found.
+    Averages precision at each rank position where a relevant item appears.
+    To get Mean Average Precision (MAP), average AP across multiple users.
 
     Parameters
     ----------
@@ -166,17 +166,22 @@ def expected_calibration_error(preds: np.ndarray, labels: np.ndarray, bins: int 
     labels = np.asarray(labels, dtype=float)
     if preds.size == 0:
         return 0.0
-    assert preds.shape == labels.shape
+    if preds.shape != labels.shape:
+        raise ValueError(f"preds and labels must have the same shape, got {preds.shape} vs {labels.shape}")
     bins = max(1, int(bins))
-    edges = np.linspace(0.0, 1.0, bins + 1)
-    total = 0
-    for lo, hi in zip(edges[:-1], edges[1:]):
-        mask = (preds >= lo) & (preds < hi)
-        if not mask.any():
+    # Vectorized binning with numpy.digitize instead of Python loop
+    bin_indices = np.digitize(preds, np.linspace(0.0, 1.0, bins + 1)) - 1
+    bin_indices = np.clip(bin_indices, 0, bins - 1)
+    total = 0.0
+    n = len(preds)
+    for b in range(bins):
+        mask = bin_indices == b
+        count = mask.sum()
+        if count == 0:
             continue
         bucket_acc = labels[mask].mean()
         bucket_conf = preds[mask].mean()
-        total += mask.mean() * abs(bucket_acc - bucket_conf)
+        total += (count / n) * abs(bucket_acc - bucket_conf)
     return float(total)
 
 
@@ -188,29 +193,43 @@ def expected_calibration_error(preds: np.ndarray, labels: np.ndarray, bins: int 
 class RankingReport:
     """Container for ranking evaluation metrics.
 
-    Holds aggregated ranking metrics computed across multiple users,
-    providing a comprehensive view of recommender performance.
+    Holds aggregated ranking metrics computed across multiple users.
+    Field names reflect the default k values; use ``evaluate_recommendations()``
+    keyword arguments to customize the cut-offs.
 
     Attributes
     ----------
-    precision_at_5 : float
-        Mean Precision@5 across users. Measures fraction of top-5 recommendations
-        that are relevant.
-    recall_at_5 : float
-        Mean Recall@5 across users. Measures fraction of all relevant items
-        that appear in top-5.
-    map_at_10 : float
-        Mean Average Precision@10 across users. Measures ranking quality
-        considering position of relevant items.
-    ndcg_at_10 : float
-        Mean NDCG@10 across users. Normalized ranking metric accounting
-        for relevance grades and position.
+    precision : float
+        Mean Precision@k across users.
+    recall : float
+        Mean Recall@k across users.
+    map : float
+        Mean Average Precision@k across users.
+    ndcg : float
+        Mean NDCG@k across users.
     """
 
-    precision_at_5: float
-    recall_at_5: float
-    map_at_10: float
-    ndcg_at_10: float
+    precision: float
+    recall: float
+    map: float
+    ndcg: float
+
+    # Backward-compatible aliases for old field names
+    @property
+    def precision_at_5(self) -> float:
+        return self.precision
+
+    @property
+    def recall_at_5(self) -> float:
+        return self.recall
+
+    @property
+    def map_at_10(self) -> float:
+        return self.map
+
+    @property
+    def ndcg_at_10(self) -> float:
+        return self.ndcg
 
 
 def evaluate_recommendations(
@@ -259,10 +278,10 @@ def evaluate_recommendations(
         rel_scores = {item: 1.0 for item in rel_items}
         ndcg.append(ndcg_at_k(slate, rel_scores, k_ndcg))
     return RankingReport(
-        precision_at_5=float(np.mean(prec) if prec else 0.0),
-        recall_at_5=float(np.mean(rec) if rec else 0.0),
-        map_at_10=float(np.mean(ap) if ap else 0.0),
-        ndcg_at_10=float(np.mean(ndcg) if ndcg else 0.0),
+        precision=float(np.mean(prec) if prec else 0.0),
+        recall=float(np.mean(rec) if rec else 0.0),
+        map=float(np.mean(ap) if ap else 0.0),
+        ndcg=float(np.mean(ndcg) if ndcg else 0.0),
     )
 
 
@@ -271,64 +290,80 @@ def evaluate_recommendations(
 # ---------------------------------------------------------------------------
 
 
-def learning_gain(pre_score: float, post_score: float) -> float:
-    """Compute normalized learning gain.
+def progression_gain(pre_score: float, post_score: float) -> float:
+    """Compute normalized progression gain.
 
-    Measures the improvement from pre-test to post-test, normalized by the
-    maximum possible gain. Returns 0.0 if pre-test score is already perfect.
+    Measures improvement from pre-assessment to post-assessment, normalized by
+    the maximum possible gain. Works for any domain: education (learning gain),
+    rehabilitation (recovery gain), fitness (performance gain), etc.
 
     Parameters
     ----------
     pre_score : float
-        Pre-test score, typically in [0, 1] where 1 is perfect.
+        Pre-assessment score, typically in [0, 1] where 1 is perfect.
     post_score : float
-        Post-test score after instruction, typically in [0, 1].
+        Post-assessment score, typically in [0, 1].
 
     Returns
     -------
     float
-        Normalized learning gain (post - pre) / (1 - pre). Returns 0.0 if pre == 1.0.
+        Normalized gain (post - pre) / (1 - pre). Returns 0.0 if pre == 1.0.
+        Can be negative if post_score < pre_score (indicating regression).
     """
     pre_score = float(pre_score)
     post_score = float(post_score)
     if pre_score >= 1.0:
         return 0.0
-    return (post_score - pre_score) / (1.0 - pre_score)
+    gain = (post_score - pre_score) / (1.0 - pre_score)
+    return gain
 
 
-def knowledge_coverage(mastered_skills: set, total_skills: set) -> float:
-    """Compute fraction of total skills mastered.
+def proficiency_coverage(achieved: set = None, total: set = None, *, mastered_skills: set = None, total_skills: set = None) -> float:
+    """Compute fraction of total competencies achieved.
 
-    Measures the breadth of a student's competency across a skill domain.
+    Measures the breadth of a user's proficiency across a competency domain.
 
     Parameters
     ----------
-    mastered_skills : set
-        Set of skill identifiers the student has demonstrated mastery of.
-    total_skills : set
-        Set of all skills in the domain.
+    achieved : set
+        Set of competency identifiers the user has demonstrated proficiency in.
+    total : set
+        Set of all competencies in the domain.
+    mastered_skills : set, optional
+        Deprecated alias for ``achieved`` (backward compatibility).
+    total_skills : set, optional
+        Deprecated alias for ``total`` (backward compatibility).
 
     Returns
     -------
     float
-        Fraction of skills mastered, in [0, 1]. Returns 0.0 if total_skills is empty.
+        Fraction of competencies achieved, in [0, 1]. Returns 0.0 if total is empty.
     """
-    total_skills = set(total_skills)
-    if not total_skills:
+    # Support old parameter names
+    if achieved is None and mastered_skills is not None:
+        achieved = mastered_skills
+    if total is None and total_skills is not None:
+        total = total_skills
+    if achieved is None:
+        achieved = set()
+    if total is None:
+        total = set()
+    total = set(total)
+    if not total:
         return 0.0
-    mastered_skills = set(mastered_skills)
-    return float(len(mastered_skills & total_skills)) / float(len(total_skills))
+    achieved = set(achieved)
+    return float(len(achieved & total)) / float(len(total))
 
 
-def curriculum_adherence(
+def sequence_adherence(
     recommended_items: Sequence[int],
     prerequisite_graph: Dict[int, set],
     mastered: set,
 ) -> float:
-    """Compute fraction of recommendations whose prerequisites are met.
+    """Compute fraction of recommendations whose dependencies are met.
 
-    Ensures that the recommender respects the logical structure of the curriculum
-    by only recommending items when their prerequisites have been mastered.
+    Ensures that the recommender respects the logical ordering by only
+    recommending items when their prerequisites have been completed.
 
     Parameters
     ----------
@@ -338,12 +373,12 @@ def curriculum_adherence(
         Mapping from item ID to set of prerequisite item IDs.
         Example: {3: {1, 2}} means item 3 requires items 1 and 2.
     mastered : set
-        Set of item IDs (prerequisites) already mastered.
+        Set of item IDs (prerequisites) already completed.
 
     Returns
     -------
     float
-        Fraction of recommendations with all prerequisites met, in [0, 1].
+        Fraction of recommendations with all dependencies met, in [0, 1].
         Returns 1.0 if recommended_items is empty.
     """
     if not recommended_items:
@@ -397,56 +432,70 @@ def difficulty_appropriateness(
     return float(in_zpd) / float(len(recommended_difficulties))
 
 
-def engagement_score(interactions: Sequence, total_available: int) -> float:
+def engagement_score(interacted_items: Sequence = None, total_recommended: int = None, *, interactions: Sequence = None, total_available: int = None) -> float:
     """Compute ratio of items interacted with to items recommended.
 
     Measures student engagement as a fraction of total recommendations.
 
     Parameters
     ----------
+    interacted_items : Sequence
+        Items the student actually interacted with (clicked, answered, etc.).
+    total_recommended : int
+        Total number of items that were recommended to the student.
     interactions : Sequence
-        List or set of items the student interacted with.
+        Deprecated alias for interacted_items (backward compatibility).
     total_available : int
-        Total number of items recommended.
+        Deprecated alias for total_recommended (backward compatibility).
 
     Returns
     -------
     float
         Fraction of recommended items that received interaction, in [0, 1].
-        Returns 0.0 if total_available <= 0.
+        Returns 0.0 if total_recommended <= 0.
     """
-    if total_available <= 0:
+    # Support old parameter names for backward compatibility
+    if interacted_items is None and interactions is not None:
+        interacted_items = interactions
+    if total_recommended is None and total_available is not None:
+        total_recommended = total_available
+    if interacted_items is None:
+        interacted_items = []
+    if total_recommended is None:
+        total_recommended = 0
+
+    if total_recommended <= 0:
         return 0.0
-    interactions = set(interactions) if not isinstance(interactions, set) else interactions
-    return float(len(interactions)) / float(total_available)
+    items = set(interacted_items) if not isinstance(interacted_items, set) else interacted_items
+    return float(len(items)) / float(total_recommended)
 
 
 @dataclass
-class EducationalReport:
-    """Container for educational evaluation metrics.
+class ProgressionReport:
+    """Container for progression evaluation metrics.
 
-    Aggregates educational metrics for assessing learning effectiveness,
-    curriculum quality, and learner engagement.
+    Aggregates metrics for assessing progression effectiveness, sequencing
+    quality, and user engagement across any adaptive domain.
 
     Attributes
     ----------
-    learning_gain : float
-        Normalized learning gain: (post - pre) / (1 - pre). Measures improvement
-        from pre-test to post-test, normalized by maximum possible gain.
+    progression_gain : float
+        Normalized gain: (post - pre) / (1 - pre). Measures improvement
+        from pre-assessment to post-assessment.
     coverage : float
-        Fraction of total skills mastered. Measures breadth of competency.
+        Fraction of total competencies achieved. Measures breadth of proficiency.
     adherence : float
-        Fraction of recommendations with satisfied prerequisites. Measures
-        pedagogical validity of recommendations.
+        Fraction of recommendations with satisfied dependencies. Measures
+        sequencing validity of recommendations.
     difficulty_fit : float
-        Fraction of recommendations within student's Zone of Proximal Development.
+        Fraction of recommendations within user's Zone of Proximal Development.
         Measures appropriateness of difficulty level.
     engagement : float
-        Ratio of items interacted with to items recommended. Measures student
+        Ratio of items interacted with to items recommended. Measures user
         engagement and participation.
     """
 
-    learning_gain: float
+    progression_gain: float
     coverage: float
     adherence: float
     difficulty_fit: float
@@ -461,10 +510,38 @@ __all__ = [
     "expected_calibration_error",
     "RankingReport",
     "evaluate_recommendations",
+    # Generic names (primary)
+    "progression_gain",
+    "proficiency_coverage",
+    "sequence_adherence",
+    "difficulty_appropriateness",
+    "engagement_score",
+    "ProgressionReport",
+    # Backward-compatible aliases (deprecated)
     "learning_gain",
     "knowledge_coverage",
     "curriculum_adherence",
-    "difficulty_appropriateness",
-    "engagement_score",
     "EducationalReport",
 ]
+
+
+# --- Deprecation handling for renamed symbols (PEP 562) ---
+_DEPRECATED_NAMES = {
+    "learning_gain": "progression_gain",
+    "knowledge_coverage": "proficiency_coverage",
+    "curriculum_adherence": "sequence_adherence",
+    "EducationalReport": "ProgressionReport",
+}
+
+
+def __getattr__(name: str):
+    if name in _DEPRECATED_NAMES:
+        import warnings
+        warnings.warn(
+            f"{name} is deprecated, use {_DEPRECATED_NAMES[name]} instead. "
+            "Will be removed in v1.0.",
+            DeprecationWarning,
+            stacklevel=2,
+        )
+        return globals()[_DEPRECATED_NAMES[name]]
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")

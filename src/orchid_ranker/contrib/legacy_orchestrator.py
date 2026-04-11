@@ -33,7 +33,7 @@ from orchid_ranker.agents.recommender_agent import (
     DualRecommender,
     ItemMeta,
 )
-from orchid_ranker.agents.student_agent import StudentAgent
+from orchid_ranker.agents.student_agent import AdaptiveAgent as StudentAgent
 
 logger = logging.getLogger(__name__)
 if not logger.handlers:
@@ -128,7 +128,7 @@ class PolicyState:
 class OnlineState:
     def __init__(self):
         self._state: Dict[int, Dict[str, float]] = {}  # user_id -> {k,f,t,e,uncertainty}
-        print(f'online state init')
+        logger.debug("online state init")
 
     def set_initial(self, uid: int, *, knowledge: float, fatigue: float, engagement: float, trust: float, uncertainty: float):
         self._state[int(uid)] = dict(knowledge=float(knowledge),
@@ -136,7 +136,8 @@ class OnlineState:
                                      engagement=float(engagement),
                                      trust=float(trust),
                                      uncertainty=float(uncertainty))
-        print(f'hellloooo knowledge: {knowledge}, fatigue: {fatigue}, engagement: {engagement}, trust: {trust}, uncertainty: {uncertainty}')
+        logger.debug("online state set_initial: knowledge=%s, fatigue=%s, engagement=%s, trust=%s, uncertainty=%s",
+                     knowledge, fatigue, engagement, trust, uncertainty)
 
     def get(self, uid: int) -> Dict[str, float]:
         return dict(self._state.get(int(uid), dict(knowledge=0.4, fatigue=0.2, trust=0.5, engagement=0.3, uncertainty=0.5)))
@@ -296,11 +297,9 @@ class MultiUserOrchestrator:
                 model.ts_alpha = float(max(0.05, params.alpha * 0.6))
 
     def _policy_next(self, uid: int, state_dict: Dict[str, float]) -> PolicyState:
-        print(
-            f"[POLICY_IN] uid={uid} "
-            f"k={state_dict.get('knowledge')} "
-            f"e={state_dict.get('engagement')} "
-            f"u={state_dict.get('uncertainty')}"
+        logger.debug(
+            "[POLICY_IN] uid=%s k=%s e=%s u=%s",
+            uid, state_dict.get('knowledge'), state_dict.get('engagement'), state_dict.get('uncertainty'),
         )
 
         ps = self._policy_state.setdefault(uid, self._init_policy_state())
@@ -360,10 +359,10 @@ class MultiUserOrchestrator:
 
         _p(f"policy uid={uid} -> k={ps.top_k} delta={ps.zpd_delta:.3f} lam={ps.lam:.3f} "
         f"nov={ps.novelty:.3f} alpha={ps.alpha:.3f} (e={engagement:.2f}, u={uncertainty:.2f}, k={knowledge:.2f})")
-        print(
-            f"[POLICY_OUT] uid={uid} "
-            f"K={ps.top_k} Δ={getattr(ps,'zpd_delta',getattr(ps,'zpd_width',float('nan'))):.3f} "
-            f"λ={ps.lam:.3f} α={ps.alpha:.3f}"
+        logger.debug(
+            "[POLICY_OUT] uid=%s K=%s delta=%.3f lam=%.3f alpha=%.3f",
+            uid, ps.top_k, getattr(ps, 'zpd_delta', getattr(ps, 'zpd_width', float('nan'))),
+            ps.lam, ps.alpha,
         )
 
 
@@ -416,13 +415,13 @@ class MultiUserOrchestrator:
         s["avg_reward"] = float(0.85 * s.get("avg_reward", 0.6) + 0.15 * reward)
         # global counter used in bonus term
         self._total_visits = float(self._total_visits) + 1.0
-        print(
-            f"[POLICY_UPD] uid={uid} "
-            f"acc_cnt={accepted_cnt} cor_cnt={correct_cnt} top_k={top_k} "
-            f"acc_ma={ps.accept_ma:.3f} accy_ma={ps.acc_ma:.3f} "
-            f"nov_ma={ps.novelty_ma:.3f} rew_ma={ps.reward_ma:.3f} "
-            f"k_ma={ps.knowledge_ma:.3f} dk_ma={ps.knowledge_delta_ma:.4f} "
-            f"rounds={ps.rounds}"
+        logger.debug(
+            "[POLICY_UPD] uid=%s acc_cnt=%s cor_cnt=%s top_k=%s "
+            "acc_ma=%.3f accy_ma=%.3f nov_ma=%.3f rew_ma=%.3f "
+            "k_ma=%.3f dk_ma=%.4f rounds=%s",
+            uid, accepted_cnt, correct_cnt, top_k,
+            ps.accept_ma, ps.acc_ma, ps.novelty_ma, ps.reward_ma,
+            ps.knowledge_ma, ps.knowledge_delta_ma, ps.rounds,
         )
 
 
@@ -669,20 +668,25 @@ class MultiUserOrchestrator:
 
         # ---------- header ----------
         if self.cfg.console:
-            print("\n--- Orchestrator run info --------------------------------")
-            print(f"  policy mode              : {mode_label}")
-            print(f"  rounds / base top_k      : {self.cfg.rounds} / {self.cfg.top_k_base}")
-            print(f"  zpd_margin               : {self.cfg.zpd_margin}")
-            print(f"  mmr_lambda / novelty     : {self.cfg.mmr_lambda} / {self.cfg.novelty_bonus}")
-            print(f"  min_candidates           : {self.cfg.min_candidates}")
-            print(f"  DP online training       : {dp_enabled}")
-            if dp_cfg:
-                print(f"  DP sigma / q / delta     : {dp_sigma} / {dp_q} / {dp_delta}")
-                print(f"  DP max_grad_norm         : {dp_max_grad}")
-            else:
-                print("  DP config                : <none>")
-            print(f"  log_path                 : {self.cfg.log_path}")
-            print("-----------------------------------------------------------\n")
+            dp_detail = (
+                f"  DP sigma / q / delta     : {dp_sigma} / {dp_q} / {dp_delta}\n"
+                f"  DP max_grad_norm         : {dp_max_grad}"
+            ) if dp_cfg else "  DP config                : <none>"
+            logger.info(
+                "\n--- Orchestrator run info --------------------------------\n"
+                "  policy mode              : %s\n"
+                "  rounds / base top_k      : %s / %s\n"
+                "  zpd_margin               : %s\n"
+                "  mmr_lambda / novelty     : %s / %s\n"
+                "  min_candidates           : %s\n"
+                "  DP online training       : %s\n"
+                "%s\n"
+                "  log_path                 : %s\n"
+                "-----------------------------------------------------------",
+                mode_label, self.cfg.rounds, self.cfg.top_k_base,
+                self.cfg.zpd_margin, self.cfg.mmr_lambda, self.cfg.novelty_bonus,
+                self.cfg.min_candidates, dp_enabled, dp_detail, self.cfg.log_path,
+            )
 
         eps_cum = float(getattr(dp_owner, "eps_cum", 0.0) or 0.0)
 
@@ -948,15 +952,22 @@ class MultiUserOrchestrator:
 
                 # ----------- PER-STUDENT CONSOLE PRINT -----------
                 if self.cfg.console and getattr(self.cfg, "console_user", True):
-                    print(
-                        f"R{r:03d} | U{uid_ext:<7d} | "
-                        f"top_k={top_k:<2d} "
-                        f"k={k_val:0.2f} f={f_val:0.2f} e={e_val:0.2f} t={t_val:0.2f} | "
-                        f"shown={len(chosen_item_ids):<2d} acc={accepted_cnt:<2d} cor={correct_cnt:<2d} "
-                        f"acc_rate={accept_rate_user:0.3f} at4={(accept_at4 if not math.isnan(accept_at4) else float('nan')):0.3f} "
-                        f"novel={('nan' if not accepted_cnt else f'{novelty_rate_user:0.3f}')} "
-                        f"serend={('nan' if math.isnan(serend_user) else f'{serend_user:0.3f}')} "
-                        f"dwell={dwell_s:0.1f}s lat={latency_s:0.1f}s"
+                    logger.info(
+                        "R%03d | U%-7d | "
+                        "top_k=%-2d "
+                        "k=%.2f f=%.2f e=%.2f t=%.2f | "
+                        "shown=%-2d acc=%-2d cor=%-2d "
+                        "acc_rate=%.3f at4=%.3f "
+                        "novel=%s "
+                        "serend=%s "
+                        "dwell=%.1fs lat=%.1fs",
+                        r, uid_ext, top_k,
+                        k_val, f_val, e_val, t_val,
+                        len(chosen_item_ids), accepted_cnt, correct_cnt,
+                        accept_rate_user, accept_at4 if not math.isnan(accept_at4) else float('nan'),
+                        'nan' if not accepted_cnt else f'{novelty_rate_user:.3f}',
+                        'nan' if math.isnan(serend_user) else f'{serend_user:.3f}',
+                        dwell_s, latency_s,
                     )
 
                 # ---- cohort-level novelty/serendipity accounting (after logging) ----
@@ -1036,15 +1047,19 @@ class MultiUserOrchestrator:
 
             # ---------- console round summary ----------
             if self.cfg.console:
-                print(
-                    f"Round {r:03d}/{rounds} | "
-                    f"mode={self._mode_label.upper()} "
-                    f"DP={'ON' if dp_enabled else 'OFF'} "
-                    f"eps_cum={eps_cum:.3f} | "
-                    f"shown={shown_total} acc={accept_total} cor={correct_total} "
-                    f"acc_rate={acc_rate:.3f} accept_rate={accept_rate:.3f} at4={(mean_accept_at4 if not math.isnan(mean_accept_at4) else float('nan')):0.3f} "
-                    f"novel={novelty_rate:.3f} serend={('nan' if math.isnan(serendipity) else f'{serendipity:.3f}')} | "
-                    f"mean k/f/e/t = {mean_k:.2f}/{mean_f:.2f}/{mean_e:.2f}/{mean_t:.2f}"
+                logger.info(
+                    "Round %03d/%s | mode=%s DP=%s eps_cum=%.3f | "
+                    "shown=%s acc=%s cor=%s acc_rate=%.3f accept_rate=%.3f at4=%.3f "
+                    "novel=%.3f serend=%s | "
+                    "mean k/f/e/t = %.2f/%.2f/%.2f/%.2f",
+                    r, rounds, self._mode_label.upper(),
+                    'ON' if dp_enabled else 'OFF', eps_cum,
+                    shown_total, accept_total, correct_total,
+                    acc_rate, accept_rate,
+                    mean_accept_at4 if not math.isnan(mean_accept_at4) else float('nan'),
+                    novelty_rate,
+                    'nan' if math.isnan(serendipity) else f'{serendipity:.3f}',
+                    mean_k, mean_f, mean_e, mean_t,
                 )
 
             _p(
@@ -1087,3 +1102,13 @@ class MultiUserOrchestrator:
                     pass
 
         return {"epsilon_cum": float(eps_cum)}
+
+
+__all__ = [
+    "enable_debug_orch_logs",
+    "MultiConfig",
+    "UserCtx",
+    "PolicyState",
+    "OnlineState",
+    "MultiUserOrchestrator",
+]

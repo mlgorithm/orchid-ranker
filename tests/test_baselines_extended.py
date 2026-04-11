@@ -73,7 +73,7 @@ class TestALSBaseline:
 
         # Create dummy data
         user_ids = [0, 1, 2, 0, 1]
-        item_ids = [5, 10, 15, 20, 5]
+        item_ids = [5, 10, 15, 19, 5]
         labels = [1.0, 1.0, 0.0, 1.0, 1.0]
 
         baseline.fit(user_ids, item_ids, labels)
@@ -239,7 +239,7 @@ class TestExplicitMFBaseline:
 
         # Create dummy rating data
         user_ids = [0, 1, 2, 0, 1]
-        item_ids = [5, 10, 15, 20, 5]
+        item_ids = [5, 10, 15, 19, 5]
         ratings = [3.0, 4.0, 2.0, 5.0, 3.5]
 
         baseline.fit(user_ids, item_ids, ratings)
@@ -293,7 +293,7 @@ class TestNeuralMatrixFactorization:
         )
 
         user_ids = [0, 1, 2, 0, 1]
-        item_ids = [5, 10, 15, 20, 5]
+        item_ids = [5, 10, 15, 19, 5]
         labels = [1.0, 1.0, 0.0, 1.0, 1.0]
 
         baseline.fit(user_ids, item_ids, labels)
@@ -318,7 +318,7 @@ class TestNeuralMatrixFactorization:
         )
 
         user_ids = [0, 1, 2, 0, 1]
-        item_ids = [5, 10, 15, 20, 5]
+        item_ids = [5, 10, 15, 19, 5]
         labels = [1.0, 0.0, 1.0, 1.0, 1.0]
 
         baseline.fit(user_ids, item_ids, labels)
@@ -343,7 +343,7 @@ class TestNeuralMatrixFactorization:
         )
 
         user_ids = [0, 1, 2, 0, 1]
-        item_ids = [5, 10, 15, 20, 5]
+        item_ids = [5, 10, 15, 19, 5]
         labels = [1.0, 1.0, 0.0, 1.0, 1.0]
 
         baseline.fit(user_ids, item_ids, labels)
