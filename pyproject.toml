@@ -8,7 +8,7 @@ version = "0.3.1"
 description = "Adaptive progression and recommender toolkit with user simulators, agentic orchestration, and offline evaluation."
 readme = "README.md"
 authors = [
-  {name = "Farhad Vadiee", email = "sam.vadiee@gmail.com"}
+  {name = "Sam Urmian", email = "sam.urmian@gmail.com"}
 ]
 license = "Apache-2.0"
 license-files = ["LICENSE"]

@@ -1,0 +1,38 @@
+name: Nightly Benchmarks
+
+on:
+  schedule:
+    - cron: "0 3 * * 1"  # Every Monday at 3am UTC
+  workflow_dispatch: {}  # Allow manual trigger
+
+jobs:
+  benchmark:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        run: |
+          pip install -e ".[dev,benchmarks]"
+          pip install scikit-surprise implicit lightfm || true
+
+      - name: Run internal benchmarks
+        run: python benchmarks/bench_strategies.py --save-golden
+
+      - name: Run cross-library benchmarks
+        run: python benchmarks/bench_competitors.py --output benchmarks/golden/competitors.json
+
+      - name: Check regression against golden baselines
+        run: python benchmarks/check_regression.py
+
+      - name: Upload benchmark artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: benchmark-results-${{ github.run_number }}
+          path: benchmarks/golden/
+          retention-days: 90

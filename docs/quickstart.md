@@ -48,10 +48,9 @@ Sample CSVs are auto-generated when you run `examples/quickstart.py`. The CLI ou
 
 - Prometheus metrics: `orchid_ranker.start_metrics_server()`.
 - Differential privacy: pass `dp_cfg` with engine `"opacus"` or `"per_sample"` (see `docs/privacy.md`).
-- Agentic simulations: install `[agentic]` extra and explore `docs/customer_success/design_partner_pilot.md` for workflows.
+- Agentic simulations: install `[agentic]` extra and see the examples in `examples/`.
 
 ## Next Steps
 
 - Browse `docs/overview.md` for module map.
-- Consult `docs/customer_success/onboarding_playbook.md` for pilot timelines.
 - Deployment recipes live in `docs/deployment.md`.

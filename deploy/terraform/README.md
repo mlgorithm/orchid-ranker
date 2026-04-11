@@ -2,7 +2,7 @@
 
 ```hcl
 module "orchid_ranker" {
-  source = "git::https://github.com/farhad.vadiee/orchid-ranker//deploy/terraform/module"
+  source = "git::https://github.com/mlgorithm/orchid-ranker//deploy/terraform/module"
 
   name            = "orchid-ranker"
   namespace       = "learning"

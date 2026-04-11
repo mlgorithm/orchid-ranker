@@ -607,8 +607,8 @@ Apache License 2.0. See [LICENSE](LICENSE) for details.
 If you use Orchid Ranker in your research, please cite:
 
 ```bibtex
-@software{vadiee2025orchid,
-  author = {Vadiee, Farhad},
+@software{urmian2025orchid,
+  author = {Urmian, Sam},
   title = {Orchid Ranker: Adaptive Progression and Recommender Toolkit},
   version = {0.3.1},
   year = {2025},
