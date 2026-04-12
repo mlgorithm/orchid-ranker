@@ -11,7 +11,7 @@ jobs:
     runs-on: ubuntu-latest
     strategy:
       matrix:
-        python-version: ["3.11", "3.12"]
+        python-version: ["3.11", "3.12", "3.13"]
 
     steps:
       - name: Checkout repository
@@ -41,11 +41,18 @@ jobs:
       - name: Run ruff linting
         run: python -m ruff check src/
 
-      - name: Run mypy type checking
-        run: python -m mypy src/orchid_ranker --ignore-missing-imports || true
+      - name: Run mypy type checking on hardened core modules
+        run: |
+          python -m mypy \
+            src/orchid_ranker/recommender.py \
+            src/orchid_ranker/model_selection.py \
+            src/orchid_ranker/evaluation.py \
+            src/orchid_ranker/serialization.py \
+            --ignore-missing-imports \
+            --follow-imports=silent
 
       - name: Run full test suite with coverage
         run: |
           python -m pytest tests/ -x --tb=short \
             --cov=orchid_ranker --cov-report=term-missing \
-            --cov-fail-under=40
+            --cov-fail-under=45

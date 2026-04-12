@@ -6,8 +6,9 @@ import copy
 import logging
 import math
 import os
+import threading
 from collections import defaultdict, deque
-from typing import Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
 import numpy as np
 import torch
@@ -225,7 +226,7 @@ class TwoTowerRecommender(nn.Module):
         self.optimizer = torch.optim.Adam([p for p in core_params if p.requires_grad], lr=lr)
 
         # --- Teacher + KL anchor (teacher overridden by DualRecommender) ---
-        self.teacher = copy.deepcopy(self).to(device)
+        self.teacher = copy.deepcopy(self).to(device).eval()
         for p in self.teacher.parameters():
             p.requires_grad_(False)
         self.kl_beta = float(self._extra_kwargs.get("kl_beta", 0.05))
@@ -257,7 +258,7 @@ class TwoTowerRecommender(nn.Module):
         self.dp_settings = SimpleDPConfig(
             enabled=bool(self.dp_cfg.get("enabled", True)),
             noise_multiplier=float(self.dp_cfg.get("noise_multiplier", self.dp_cfg.get("sigma", 1.0))),
-            max_grad_norm=float(self.dp_cfg.get("max_grad", 1.0)),
+            max_grad_norm=float(self.dp_cfg.get("max_grad_norm", self.dp_cfg.get("max_grad", 1.0))),
             sample_rate=float(self.dp_cfg.get("sample_rate", 0.02)),
             delta=float(self.dp_cfg.get("delta", 1e-5)),
         )
@@ -276,12 +277,18 @@ class TwoTowerRecommender(nn.Module):
         self._cached_item_matrix: Optional[torch.Tensor] = None
         self._last_item_reps: Optional[torch.Tensor] = None
         self._last_item_ids: Optional[List[int]] = None
+        self._decision_contexts: Dict[int, Dict[str, Any]] = {}
+        self._decision_context_cap = 64
+        self._decision_context_lock = threading.Lock()
         if hasattr(self, "teacher"):
             self.teacher._rep_cache = {}
             self.teacher._rep_cache_cap = self._rep_cache_cap
             self.teacher._cached_item_matrix = None
             self.teacher._last_item_reps = None
             self.teacher._last_item_ids = None
+            self.teacher._decision_contexts = {}
+            self.teacher._decision_context_cap = self._decision_context_cap
+            self.teacher._decision_context_lock = threading.Lock()
         self._adapted_lam: Optional[float] = None
         self._adapted_nov: Optional[float] = None
 
@@ -310,10 +317,66 @@ class TwoTowerRecommender(nn.Module):
     def _slot_for(self, user_id: int) -> str:
         return str(hash(user_id) % self.num_adapter_slots)
 
+    def _resolve_feedback_indices(self, feedback: Dict[int, int], item_ids: torch.Tensor) -> Tuple[List[int], List[float]]:
+        """Resolve feedback keys against either candidate positions or external item IDs."""
+        candidate_ids = [int(i) for i in item_ids.detach().cpu().tolist()]
+        candidate_lookup = {iid: idx for idx, iid in enumerate(candidate_ids)}
+
+        pos2id_map = getattr(self, "pos2id_map", {}) or {}
+        id2pos_map = {int(ext): int(pos) for pos, ext in pos2id_map.items()}
+
+        idx: List[int] = []
+        y: List[float] = []
+        for raw_key, raw_val in feedback.items():
+            key = int(raw_key)
+            local_idx = candidate_lookup.get(key)
+            if local_idx is None and key in pos2id_map:
+                ext_id = int(pos2id_map[key])
+                local_idx = candidate_lookup.get(ext_id)
+            if local_idx is None and key in id2pos_map:
+                pos = int(id2pos_map[key])
+                local_idx = candidate_lookup.get(pos)
+            if local_idx is None:
+                continue
+            idx.append(int(local_idx))
+            y.append(float(raw_val))
+
+        return idx, y
+
     def attach_audit_logger(self, logger: AuditLogger, *, actor: str | None = None) -> None:
         self.audit_logger = logger
         if actor:
             self._audit_actor = str(actor)
+
+    def _store_decide_context(
+        self,
+        logits: torch.Tensor,
+        *,
+        item_reps: torch.Tensor,
+        item_ids: torch.Tensor,
+        item_matrix: torch.Tensor,
+        adapted_lam: float,
+        adapted_nov: float,
+        user_context: Optional[torch.Tensor],
+    ) -> None:
+        """Store per-inference state keyed by the returned logits tensor."""
+        ctx = {
+            "item_reps": item_reps.detach(),
+            "item_ids": [int(i) for i in item_ids.detach().cpu().tolist()],
+            "item_matrix": item_matrix.detach(),
+            "adapted_lam": float(adapted_lam),
+            "adapted_nov": float(adapted_nov),
+            "user_context": user_context.detach() if torch.is_tensor(user_context) else None,
+        }
+        with self._decision_context_lock:
+            self._decision_contexts[id(logits)] = ctx
+            if len(self._decision_contexts) > self._decision_context_cap:
+                oldest = next(iter(self._decision_contexts))
+                self._decision_contexts.pop(oldest, None)
+
+    def _pop_decide_context(self, logits: torch.Tensor) -> Optional[Dict[str, Any]]:
+        with self._decision_context_lock:
+            return self._decision_contexts.pop(id(logits), None)
 
     def _apply_film(self, u_base: torch.Tensor, state_vec: torch.Tensor) -> torch.Tensor:
         gamma_beta = self.state_to_gate(state_vec)   # [B, 2H]
@@ -439,8 +502,12 @@ class TwoTowerRecommender(nn.Module):
             Logit scores of shape ``(1, K)``. Higher means more relevant.
             Pass these to :meth:`decide` for final slate selection.
         """
+        was_training = self.training
+        self.eval()
         logits, u, I = self._scores_logits(user_vec, item_matrix, user_ids, item_ids, state_vec, cohort_ids)
         logits = torch.nan_to_num(logits, nan=-1e9, posinf=1e9, neginf=-1e9)
+        if was_training:
+            self.train()
 
         # cache item reps for decide()
         self._last_item_reps = I.detach()
@@ -496,6 +563,15 @@ class TwoTowerRecommender(nn.Module):
 
         # keep features for update()
         self._last_phi_np = phi_np
+        self._store_decide_context(
+            logits,
+            item_reps=self._last_item_reps,
+            item_ids=item_ids,
+            item_matrix=item_matrix,
+            adapted_lam=lam_eff,
+            adapted_nov=nov_eff,
+            user_context=getattr(self, "_user_context_vec_cache", None),
+        )
         return logits  # [1,K]
 
     # ---------------- uncertainty widths for policy mapping (paper §3.1) ----------------
@@ -628,28 +704,37 @@ class TwoTowerRecommender(nn.Module):
         entropy_lambda = float(getattr(self, "entropy_lambda", 0.0))
         info_lambda = float(getattr(self, "info_gain_lambda", 0.0))
 
+        ctx = self._pop_decide_context(logits)
+        user_context = None
+
         # get (or compute) item reps for this candidate set
         key = tuple(item_ids_list)
-        if getattr(self, "_last_item_reps", None) is not None and self._last_item_ids == item_ids_list:
-            I = self._last_item_reps
+        if ctx is not None and ctx.get("item_ids") == item_ids_list:
+            item_reps = ctx["item_reps"]
             cache_hit = True
+            user_context = ctx.get("user_context")
         elif key in self._rep_cache:
-            I = self._rep_cache[key]
+            item_reps = self._rep_cache[key]
             cache_hit = True
         else:
             ids_t = torch.tensor(item_ids_list, dtype=torch.long, device=logits.device)
-            mat = self._cached_item_matrix.to(logits.device) if self._cached_item_matrix is not None else None
+            mat = ctx.get("item_matrix") if ctx is not None else None
+            if torch.is_tensor(mat):
+                mat = mat.to(logits.device)
             if mat is None:
-                raise RuntimeError("Item matrix cache missing; call think() before decide().")
+                raise RuntimeError(
+                    "Decide context missing for candidate set; call think()/infer() and pass the returned logits "
+                    "directly to decide()."
+                )
             I_base = self.item_net(mat.index_select(0, ids_t))
-            I = self.item_proj(I_base) + self.item_emb(ids_t)
-            self._rep_cache[key] = I.detach()
+            item_reps = self.item_proj(I_base) + self.item_emb(ids_t)
+            self._rep_cache[key] = item_reps.detach()
             if len(self._rep_cache) > self._rep_cache_cap:
                 oldest = next(iter(self._rep_cache))
                 self._rep_cache.pop(oldest, None)
             cache_hit = False
 
-        I = I / (I.norm(dim=1, keepdim=True) + 1e-8)   # [K,D]
+        I = item_reps / (item_reps.norm(dim=1, keepdim=True) + 1e-8)   # [K,D]
 
         if info_lambda and difficulty_map is not None and knowledge is not None:
             knowledge_val = float(knowledge)
@@ -666,8 +751,14 @@ class TwoTowerRecommender(nn.Module):
             scores = scores + info_lambda * info_bonus
 
         # effective λ, novelty (from state if available)
-        lam = float(self._adapted_lam) if self._adapted_lam is not None else self.mmr_lambda
-        nov = float(self._adapted_nov) if self._adapted_nov is not None else self.novelty_bonus
+        lam_ctx = ctx.get("adapted_lam") if ctx is not None else None
+        nov_ctx = ctx.get("adapted_nov") if ctx is not None else None
+        lam = float(lam_ctx) if lam_ctx is not None else (
+            float(self._adapted_lam) if self._adapted_lam is not None else self.mmr_lambda
+        )
+        nov = float(nov_ctx) if nov_ctx is not None else (
+            float(self._adapted_nov) if self._adapted_nov is not None else self.novelty_bonus
+        )
         if trust is not None:
             nov = nov * (1.0 - float(trust))
 
@@ -684,7 +775,7 @@ class TwoTowerRecommender(nn.Module):
             d = float(difficulty_map.get(ext_id, difficulty_map.get(int(iid), 0.5)))
             tgt = float(np.clip(knowledge + zpd_delta, 0.0, 1.0))
             width = float(getattr(self, "zpd_width", 0.10) or 0.10)
-            return 1.0 - min(1.0, ((d - tgt) ** 2) / (max(1e-6, width) ** 2))
+            return float(np.exp(-0.5 * ((d - tgt) / max(1e-6, width)) ** 2))
 
         K = len(item_ids_list)
         remaining = list(range(K))
@@ -736,9 +827,10 @@ class TwoTowerRecommender(nn.Module):
         # Optional dwell-based reordering within the chosen slate
         if self._extra_kwargs.get("use_dwell", False) and hasattr(self, "dwell_head"):
             try:
-                idxs = [self._last_item_ids.index(i) for i in sel_item_ids]
-                I_sel = self._last_item_reps[idxs]
-                U = getattr(self, "_user_context_vec_cache", None)
+                item_pos = {int(iid): pos for pos, iid in enumerate(item_ids_list)}
+                idxs = [item_pos[i] for i in sel_item_ids]
+                I_sel = item_reps[idxs]
+                U = user_context
                 if U is not None:
                     U = U.expand_as(I_sel)
                     feats = torch.cat([U, I_sel, U * I_sel,
@@ -747,6 +839,8 @@ class TwoTowerRecommender(nn.Module):
                     order = torch.argsort(dwell_pred, descending=True).tolist()
                     sel_item_ids = [sel_item_ids[i] for i in order]
                     _d("decide: dwell reorder applied")
+                elif _DEBUG_REC:
+                    _d("decide: dwell reorder skipped (missing decide context)")
             except Exception:
                 pass
 
@@ -816,6 +910,23 @@ class TwoTowerRecommender(nn.Module):
         self._last_item_reps = _I.detach()
         self._last_item_ids = item_ids.cpu().tolist()
         self._cached_item_matrix = item_matrix.detach()
+        key = tuple(self._last_item_ids)
+        if key in self._rep_cache:
+            val = self._rep_cache.pop(key)
+            self._rep_cache[key] = val
+        else:
+            self._rep_cache[key] = self._last_item_reps
+            if len(self._rep_cache) > self._rep_cache_cap:
+                self._rep_cache.pop(next(iter(self._rep_cache)), None)
+        self._store_decide_context(
+            out,
+            item_reps=self._last_item_reps,
+            item_ids=item_ids,
+            item_matrix=item_matrix,
+            adapted_lam=self.mmr_lambda,
+            adapted_nov=self.novelty_bonus,
+            user_context=getattr(self, "_user_context_vec_cache", None),
+        )
 
         if _DEBUG_REC:
             _d(f"infer: logits shape={tuple(out.shape)}")
@@ -923,10 +1034,8 @@ class TwoTowerRecommender(nn.Module):
                 "sample_rate": None,
             }
 
-        # map catalog positions -> local indices within item_ids tensor
         with torch.no_grad():
-            pos2idx = {int(p): i for i, p in enumerate(item_ids.detach().cpu().tolist())}
-            idx = [pos2idx[p] for p in feedback.keys() if p in pos2idx]
+            idx, y_vals = self._resolve_feedback_indices(feedback, item_ids)
             if not idx:
                 _d("update: no matching item_ids for feedback keys; skip")
                 return {
@@ -938,8 +1047,7 @@ class TwoTowerRecommender(nn.Module):
                     "sample_rate": None,
                 }
             idx_t = torch.tensor(idx, dtype=torch.long, device=device)
-            y = torch.tensor([feedback[int(p)] for p in feedback.keys() if p in pos2idx],
-                             dtype=torch.float32, device=device)
+            y = torch.tensor(y_vals, dtype=torch.float32, device=device)
 
         # DP settings
         sigma = float(getattr(self.dp_settings, "noise_multiplier", 0.0) or 0.0)
@@ -947,28 +1055,50 @@ class TwoTowerRecommender(nn.Module):
         delta = float(getattr(self.dp_settings, "delta", 1e-5))
         C = float(getattr(self.dp_settings, "max_grad_norm", 1.0))
         dp_enabled = bool(getattr(self.dp_settings, "enabled", False) and sigma > 0.0 and q > 0.0)
+        requested_steps = max(0, int(epochs))
 
         float(getattr(self, "eps_cum", 0.0) or 0.0)
         bce = torch.nn.BCEWithLogitsLoss(reduction="mean")
 
-        steps_budget = int(getattr(self, "_dp_steps_budget", 0)) if dp_enabled else max(1, int(epochs))
-        steps_done = max(1, min(int(epochs), steps_budget)) if dp_enabled else max(1, int(epochs))
+        if dp_enabled:
+            steps_budget = max(0, int(getattr(self, "_dp_steps_budget", 0)))
+            steps_done = min(requested_steps, steps_budget)
+        else:
+            steps_budget = requested_steps
+            steps_done = requested_steps
+
+        if steps_done <= 0:
+            return {
+                "loss": 0.0,
+                "epsilon_delta": 0.0,
+                "epsilon_cum": float(getattr(self, "eps_cum", 0.0)),
+                "noise_multiplier": (sigma if dp_enabled else None),
+                "delta": (delta if dp_enabled else None),
+                "sample_rate": (q if dp_enabled else None),
+            }
+
         if dp_enabled:
             self._dp_steps_budget = max(0, steps_budget - steps_done)
 
+        executed_steps = 0
         if dp_enabled and self.dp_engine == "per_sample":
-            loss_val = self._dp_update_per_sample(
-                idx_t=idx_t,
-                y=y,
-                user_vec=user_vec,
-                state_vec=state_vec,
-                user_ids=user_ids,
-                item_matrix=item_matrix,
-                item_ids=item_ids,
-                trainable=trainable,
-                sigma=sigma,
-                C=C,
-            )
+            loss_val = 0.0
+            for step in range(steps_done):
+                loss_val = self._dp_update_per_sample(
+                    idx_t=idx_t,
+                    y=y,
+                    user_vec=user_vec,
+                    state_vec=state_vec,
+                    user_ids=user_ids,
+                    item_matrix=item_matrix,
+                    item_ids=item_ids,
+                    trainable=trainable,
+                    sigma=sigma,
+                    C=C,
+                )
+                executed_steps += 1
+                if _DEBUG_REC:
+                    _d(f"update: per-sample step {step+1}/{steps_done} loss={loss_val:.4f}")
         else:
             loss_val = 0.0
             for step in range(steps_done):
@@ -1017,6 +1147,7 @@ class TwoTowerRecommender(nn.Module):
                             p.grad.add_(noise)
 
                 self._opt.step()
+                executed_steps += 1
                 loss_val = float(loss.detach().item())
                 if _DEBUG_REC:
                     _d(f"update: step {step+1}/{steps_done} loss={loss_val:.4f}")
@@ -1024,8 +1155,8 @@ class TwoTowerRecommender(nn.Module):
         # ----- DP accountant (RDP approx) -----
         eps_delta = 0.0
         if dp_enabled:
-            eps_delta, self.eps_cum = self._dp_accountant.step(int(steps_done))
-            self._dp_steps_total += int(steps_done)
+            eps_delta, self.eps_cum = self._dp_accountant.step(int(executed_steps))
+            self._dp_steps_total += int(executed_steps)
             self.eps_last = eps_delta
         else:
             self.eps_cum = 0.0

@@ -222,8 +222,9 @@ class TestSafeSwitchDR:
 
         # Multiple rounds with positive uplift (adaptive better than baseline)
         for _ in range(50):
+            served_adaptive = sw.p > 0.0
             sw.update(
-                served_adaptive=True,
+                served_adaptive=served_adaptive,
                 reward=0.9,  # high reward
                 accepts_per_user=5.5,  # high acceptance rate
                 Qa_pred=0.9,

@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import logging
 import os
+import threading
 import time
 from dataclasses import dataclass
 from typing import Any, Dict, Optional
@@ -16,6 +17,7 @@ except Exception:  # pragma: no cover
 
 
 logger = logging.getLogger(__name__)
+_MLFLOW_STATE_LOCK = threading.RLock()
 
 
 @dataclass
@@ -104,11 +106,17 @@ class MLflowTracker:
         """
         if mlflow is None:  # pragma: no cover
             raise ImportError("mlflow is required. Install via `pip install orchid-ranker[connectors]`")
-        if self.tracking_uri:
-            mlflow.set_tracking_uri(self.tracking_uri)
-        if self.experiment:
-            mlflow.set_experiment(self.experiment)
         return mlflow
+
+    def _with_tracking_context(self, fn, *args, **kwargs):
+        """Run an MLflow operation while holding the process-global config lock."""
+        client = self._client()
+        with _MLFLOW_STATE_LOCK:
+            if self.tracking_uri:
+                client.set_tracking_uri(self.tracking_uri)
+            if self.experiment:
+                client.set_experiment(self.experiment)
+            return fn(client, *args, **kwargs)
 
     def __enter__(self):
         """Context manager entry."""
@@ -128,8 +136,7 @@ class MLflowTracker:
             If run startup fails.
         """
         try:
-            client = self._client()
-            client.start_run()
+            self._with_tracking_context(lambda client: client.start_run())
             logger.info("MLflow run started")
         except Exception as e:
             raise ConnectorError(f"Failed to start MLflow run: {e}") from e
@@ -140,8 +147,7 @@ class MLflowTracker:
         Logs a warning if run termination fails but does not raise.
         """
         try:
-            client = self._client()
-            client.end_run()
+            self._with_tracking_context(lambda client: client.end_run())
             logger.info("MLflow run ended")
         except Exception as e:
             logger.warning(f"Error ending MLflow run: {e}")
@@ -206,12 +212,10 @@ class MLflowTracker:
         RetryExhaustedError
             If logging fails after all retry attempts.
         """
-        # Check dependencies before entering retry loop
-        self._client()
-
         def _log():
-            client = self._client()
-            client.log_metrics(metrics, step=step)
+            self._with_tracking_context(
+                lambda client: client.log_metrics(metrics, step=step)
+            )
 
         self._retry_with_backoff(_log)
 
@@ -230,12 +234,8 @@ class MLflowTracker:
         RetryExhaustedError
             If logging fails after all retry attempts.
         """
-        # Check dependencies before entering retry loop
-        self._client()
-
         def _log():
-            client = self._client()
-            client.log_params(params)
+            self._with_tracking_context(lambda client: client.log_params(params))
 
         self._retry_with_backoff(_log)
 

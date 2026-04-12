@@ -640,6 +640,40 @@ class TestDualRecommender:
         assert dual._replay_buf is not None
         assert dual._replay_steps == 1
 
+    def test_student_teacher_anchor_tracks_wrapper_teacher(self, teacher_student):
+        from orchid_ranker.agents.dual_recommender import DualRecommender
+        teacher, student, device = teacher_student
+        dual = DualRecommender(teacher, student, device=device)
+
+        with torch.no_grad():
+            for param in dual.student.parameters():
+                param.add_(0.5)
+
+        dual._after_student_update()
+
+        for anchor_param, teacher_param in zip(dual.student.teacher.parameters(), dual.teacher.parameters()):
+            assert torch.allclose(anchor_param, teacher_param)
+
+    def test_train_step_replay_samples_buffer(self, teacher_student, monkeypatch):
+        from orchid_ranker.agents.dual_recommender import DualRecommender
+
+        teacher, student, device = teacher_student
+        dual = DualRecommender(teacher, student, device=device, replay_size=10, replay_steps=1)
+
+        calls = []
+
+        def fake_train_step(batch):
+            calls.append(batch["tag"])
+            return {"loss": 0.0}
+
+        monkeypatch.setattr(student, "train_step", fake_train_step)
+        dual._replay_buf.extend([{"tag": "oldest"}, {"tag": "sampled"}])
+        monkeypatch.setattr(np.random, "randint", lambda n: 1)
+
+        dual.train_step({"tag": "current"})
+
+        assert calls == ["current", "sampled"]
+
     def test_update_no_method_returns_noop(self):
         """When student has no update/train_step, returns noop."""
         from orchid_ranker.agents.dual_recommender import DualRecommender
@@ -709,6 +743,35 @@ class TestRecShim:
         shim = RecShim(rec)
         shim.mmr_lambda = 0.5
         assert shim.mmr_lambda == 0.5
+
+    def test_update_normalizes_external_feedback_ids(self):
+        from orchid_ranker.agents.rec_shim import RecShim
+
+        class DummyRec:
+            def __init__(self):
+                self.device = torch.device("cpu")
+                self.dp_cfg = {"enabled": False}
+                self.eps_cum = 0.0
+                self.pos2id_map = {0: 100, 1: 200}
+                self.received_feedback = None
+
+            def update(self, **kwargs):
+                self.received_feedback = dict(kwargs["feedback"])
+                return {"loss": 0.0}
+
+        rec = DummyRec()
+        shim = RecShim(rec)
+        shim.update(
+            feedback={100: 1, 200: 0},
+            user_vec=[0.0],
+            state_vec=[0.0],
+            user_ids=[0],
+            item_matrix=[[0.0]],
+            item_ids=[0, 1],
+            epochs=1,
+        )
+
+        assert rec.received_feedback == {0: 1, 1: 0}
 
 
 # ─────────────────────────────────────────────
@@ -913,4 +976,4 @@ class TestMultiUserOrchestratorAdaptive:
     def test_warmup_buffer_exists(self, adaptive_setup):
         orch, _ = adaptive_setup
         assert hasattr(orch, "_warmup_buffer")
-        assert orch._warmup_buffer == []
+        assert len(orch._warmup_buffer) == 0

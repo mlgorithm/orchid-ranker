@@ -12,6 +12,14 @@ from orchid_ranker.agents.student_agent import (
 )
 
 
+class _ZeroNoiseRng:
+    def normal(self, *args, **kwargs):
+        size = kwargs.get("size")
+        if size is None and len(args) >= 3:
+            size = args[2]
+        return np.zeros(size if size is not None else (), dtype=float)
+
+
 class TestStudentAgentInitialization:
     """Test StudentAgent initialization with different modes."""
 
@@ -41,20 +49,21 @@ class TestStudentAgentInitialization:
         agent = StudentAgent(user_id=1)
         assert 0.0 <= agent.fatigue <= 1.0
         assert 0.0 <= agent.trust <= 1.0
-        assert 0.0 <= agent.engagement <= 1.2
+        assert 0.0 <= agent.engagement <= 1.0
         assert agent.fatigue == 0.0  # starts at 0
         assert agent.trust == 0.5  # default
 
     def test_init_custom_params(self):
-        """Test initialization with custom parameters."""
-        agent = StudentAgent(
-            user_id=1,
-            lr=0.3,
-            decay=0.2,
-            base_topk=5,
-            act_mode="MIRT",
-            seed=99,
-        )
+        """Test initialization with custom parameters (deprecated aliases)."""
+        with pytest.warns(DeprecationWarning, match="deprecated"):
+            agent = StudentAgent(
+                user_id=1,
+                lr=0.3,
+                decay=0.2,
+                base_topk=5,
+                act_mode="MIRT",
+                seed=99,
+            )
         assert agent.lr == 0.3
         assert agent.decay == 0.2
         assert agent.base_topk == 5
@@ -127,10 +136,10 @@ class TestSetInitialLatents:
         assert agent.trust == 0.0
 
     def test_clamps_engagement(self):
-        """Test that engagement is clamped to [0,1.2]."""
+        """Test that engagement is clamped to [0,1.0]."""
         agent = StudentAgent(user_id=1)
         agent.set_initial_latents(engagement=1.5)
-        assert agent.engagement == 1.2
+        assert agent.engagement == 1.0
         agent.set_initial_latents(engagement=-0.1)
         assert agent.engagement == 0.0
 
@@ -456,12 +465,12 @@ class TestStudentAgentFactory:
         agent.set_initial_latents(
             knowledge=0.8,
             trust=0.9,
-            engagement=1.1,
+            engagement=0.9,
             fatigue=0.1,
         )
         assert abs(agent.knowledge - 0.8) < 1e-6
         assert abs(agent.trust - 0.9) < 1e-6
-        assert abs(agent.engagement - 1.1) < 1e-6
+        assert abs(agent.engagement - 0.9) < 1e-6
         assert abs(agent.fatigue - 0.1) < 1e-6
 
     def test_create_invalid_mode_raises(self):
@@ -509,6 +518,28 @@ class TestLegacyAPI:
         # Knowledge should change after update
         assert agent.knowledge != initial_k or True  # depends on randomness
 
+    def test_empty_update_does_not_replay_stale_actions(self):
+        """Test that empty feedback is treated as an idle round, not stale actions."""
+        agent = StudentAgent(
+            user_id=1,
+            knowledge_mode="scalar",
+            forgetting_rate=0.0,
+            fatigue_recovery=0.0,
+            seed=42,
+        )
+        agent.knowledge = 0.55
+        agent.fatigue = 0.25
+        agent.trust = 0.6
+        agent.engagement = 0.7
+
+        agent.act({"accepted": [1, 2, 3]})
+        agent.update({})
+
+        assert agent.knowledge == pytest.approx(0.55)
+        assert agent.fatigue == pytest.approx(0.25)
+        assert agent.trust == pytest.approx(0.6)
+        assert agent.engagement == pytest.approx(0.7)
+
 
 class TestItemMeta:
     """Test ItemMeta dataclass."""
@@ -525,3 +556,28 @@ class TestItemMeta:
         meta = ItemMeta(difficulty=0.7, skills=skills)
         assert meta.difficulty == 0.7
         assert meta.skills == skills
+
+    def test_skill_index_lists_are_not_treated_as_masks(self):
+        """Test that explicit skill indices select the intended dimensions."""
+        agent = StudentAgent(
+            user_id=1,
+            knowledge_dim=6,
+            knowledge_mode="vector",
+            lr=1.0,
+            decay=0.0,
+            seed=42,
+        )
+        agent.rng = _ZeroNoiseRng()
+        agent.knowledge = [0.0, 0.0, 0.2, 0.0, 0.0, 0.4]
+
+        meta = {1: ItemMeta(difficulty=0.5, skills=[2, 5])}
+
+        ability = agent._ability_scalar(1, meta)
+        assert ability == pytest.approx(0.3)
+
+        agent._apply_learning_update(1, correct=1, p_correct=0.0, items_meta=meta)
+
+        assert agent.knowledge[2] == pytest.approx(1.0)
+        assert agent.knowledge[5] == pytest.approx(1.0)
+        assert agent.knowledge[0] == pytest.approx(0.0)
+        assert agent.knowledge[1] == pytest.approx(0.0)

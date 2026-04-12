@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.3.2 - 2026-04-12
+
+### Enterprise Hardening
+
+- Fixed offline evaluation correctness so cross-validation uses in-user holdouts, explicit ratings flow into training, and missing users count as zero in aggregate ranking metrics.
+- Tightened security and serialization by requiring HTTPS for JWT issuer/JWKS configuration, preserving encrypted audit-log verification, and removing unsafe pickle-based model loading.
+- Corrected agentic and DP runtime behavior across `TwoTowerRecommender`, `AdaptiveAgent`, and safety-gating paths, including feedback ID normalization, DP budget enforcement, and boundary-probability handling.
+- Serialized shared mutable state in `OrchidRecommender`, `BigQueryConnector`, and MLflow tracking flows to eliminate mixed-state races under concurrent use.
+- Aligned the published support contract and docs with the tested runtime matrix (Python 3.11–3.13), repaired the docs landing page quick start, and restored changelog coverage for the current release.
+
 ## 0.3.1 - 2026-04-11
 
 - Changed license from MIT to Apache 2.0 (adds patent grant for enterprise adoption).

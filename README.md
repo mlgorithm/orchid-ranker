@@ -4,7 +4,7 @@
 
 Orchid Ranker combines a modular orchestration engine, realistic user simulators, and a plug-and-play recommender API into a single library for any domain with ordered progression: education, corporate training, rehabilitation, fitness, gaming, onboarding, and more. It grew out of large-scale tutoring experiments and now provides adaptive item selection, proficiency tracing, dependency-aware sequencing, and offline evaluation for any platform that needs to guide users through a progression.
 
-[![Python 3.9–3.13](https://img.shields.io/badge/python-3.9%E2%80%933.13-blue.svg)](https://www.python.org/)
+[![Python 3.11–3.13](https://img.shields.io/badge/python-3.11%E2%80%933.13-blue.svg)](https://www.python.org/)
 [![PyTorch 1.13–2.9](https://img.shields.io/badge/pytorch-1.13%E2%80%932.9-ee4c2c.svg)](https://pytorch.org/)
 [![License](https://img.shields.io/badge/license-Apache%202.0-blue.svg)](LICENSE)
 [![Version](https://img.shields.io/badge/version-0.3.2-brightgreen.svg)](CHANGELOG.md)
@@ -526,7 +526,7 @@ datasets:
 
 | Component | Supported Versions |
 |-----------|-------------------|
-| Python | 3.9 - 3.13 |
+| Python | 3.11 - 3.13 |
 | PyTorch | 1.13 - 2.9 |
 | OS | Ubuntu 22.04, macOS 14+, Windows Server 2022 |
 

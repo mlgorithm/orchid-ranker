@@ -48,7 +48,6 @@ class MultiConfig:
     lam_bounds: Tuple[float, float] = (0.05, 0.60)
     k_bounds: Tuple[int, int] = (2, 6)
     zpd_bounds: Tuple[float, float] = (0.08, 0.18)
-    console: bool = True
     console_user: bool = True
     policy_gain: float = 1.0
     # Training augmentation knobs (adaptive only)
@@ -58,6 +57,32 @@ class MultiConfig:
     # then pretrain the student for `warmup_steps` passes before online updates
     warmup_rounds: int = 0
     warmup_steps: int = 1
+
+    def __post_init__(self):
+        """Validate configuration bounds.
+
+        Raises
+        ------
+        ValueError
+            If any bound tuple is invalid (e.g. lo >= hi), rounds < 1,
+            or top_k_base < 1.
+        """
+        if self.rounds < 1:
+            raise ValueError(f"rounds must be >= 1, got {self.rounds}")
+        if self.top_k_base < 1:
+            raise ValueError(f"top_k_base must be >= 1, got {self.top_k_base}")
+        lo, hi = self.alpha_bounds
+        if lo < 0.0 or hi > 1.0 or lo >= hi:
+            raise ValueError(f"alpha_bounds must satisfy 0 <= lo < hi <= 1, got {self.alpha_bounds}")
+        lo, hi = self.lam_bounds
+        if lo < 0.0 or hi > 1.0 or lo >= hi:
+            raise ValueError(f"lam_bounds must satisfy 0 <= lo < hi <= 1, got {self.lam_bounds}")
+        lo, hi = self.k_bounds
+        if lo < 1 or lo >= hi:
+            raise ValueError(f"k_bounds must satisfy 1 <= lo < hi, got {self.k_bounds}")
+        lo, hi = self.zpd_bounds
+        if lo < 0.0 or lo >= hi:
+            raise ValueError(f"zpd_bounds must satisfy 0 <= lo < hi, got {self.zpd_bounds}")
     warmup_top_k_boost: int = 0
     warmup_diversity_scale: float = 1.0  # multiply mmr_lambda and novelty_bonus during warmup
     warmup_preloop: bool = False  # if True, run a pseudo-labeled warmup before online rounds

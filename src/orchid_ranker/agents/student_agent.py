@@ -7,7 +7,7 @@ import random
 import traceback
 from collections import defaultdict, deque
 from dataclasses import dataclass
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Union
 
 import numpy as np
 
@@ -68,6 +68,15 @@ class AdaptiveAgent:
 
     Works for any adaptive domain: education (learners), corporate training
     (employees), rehabilitation (patients), fitness (athletes), gaming (players).
+
+    .. warning:: Thread Safety
+
+        This class is **NOT** thread-safe. Each instance mutates internal state
+        (knowledge, fatigue, engagement, trust, RNG, history deque) on every call
+        to :meth:`interact`, :meth:`act`, or :meth:`update`. Concurrent access
+        from multiple threads will cause data races and non-deterministic results.
+        Use one instance per thread, or protect all method calls with an external
+        lock.
 
     Parameters
     ----------
@@ -191,7 +200,32 @@ class AdaptiveAgent:
         w_pos_mu: Optional[float] = None,
         w_std: Optional[float] = None,
     ):
-        # Resolve backward-compatible aliases
+        # Resolve backward-compatible aliases (with deprecation warnings)
+        import warnings as _warnings
+        _deprecated_aliases = {
+            "lr": ("learning_rate", lr),
+            "act_mode": ("ability_model", act_mode),
+            "pos_eta": ("position_bias", pos_eta),
+            "a_mean": ("discrimination_mean", a_mean),
+            "a_std": ("discrimination_std", a_std),
+            "c_alpha": ("guess_prior_alpha", c_alpha),
+            "c_beta": ("guess_prior_beta", c_beta),
+            "s_alpha": ("slip_prior_alpha", s_alpha),
+            "s_beta": ("slip_prior_beta", s_beta),
+            "w_rel_mu": ("relevance_weight", w_rel_mu),
+            "w_zpd_mu": ("zpd_fit_weight", w_zpd_mu),
+            "w_nov_mu": ("novelty_weight", w_nov_mu),
+            "w_pos_mu": ("position_weight", w_pos_mu),
+            "w_std": ("weight_noise_std", w_std),
+        }
+        for old_name, (new_name, value) in _deprecated_aliases.items():
+            if value is not None:
+                _warnings.warn(
+                    f"Parameter '{old_name}' is deprecated, use '{new_name}' instead. "
+                    "Will be removed in v1.0.",
+                    DeprecationWarning,
+                    stacklevel=2,
+                )
         learning_rate = lr if lr is not None else learning_rate
         ability_model = act_mode if act_mode is not None else ability_model
         position_bias = pos_eta if pos_eta is not None else position_bias
@@ -260,7 +294,10 @@ class AdaptiveAgent:
         self.item_difficulty = defaultdict(lambda: 0.5)
 
         # History of per-round correctness (for internal updates)
-        self._history: List[Dict[int, int]] = []
+        # Bounded to prevent OOM on long simulations; 1000 rounds is sufficient
+        # for learning rate decay convergence.
+        self._history: deque = deque(maxlen=1000)
+        self._total_obs: int = 0
 
         # --- realism state ---
         self.zpd_delta = float(zpd_delta)
@@ -288,6 +325,10 @@ class AdaptiveAgent:
         # novelty memory
         self.recent = deque(maxlen=200)
 
+        # action tracking (initialized here to avoid AttributeError before first act())
+        self._last_items_meta: Optional[Dict[int, Any]] = None
+        self._last_action_ids: List[int] = []
+
         # forgetting
         self.forgetting_rate = float(np.clip(forgetting_rate, 0.0, 0.10))
 
@@ -308,7 +349,7 @@ class AdaptiveAgent:
         *,
         engagement: Optional[float] = None,
         trust: Optional[float] = None,
-        knowledge: Optional[float | List[float]] = None,
+        knowledge: Optional[Union[float, List[float]]] = None,
         fatigue: Optional[float] = None,
         **kwargs,
     ) -> None:
@@ -317,7 +358,7 @@ class AdaptiveAgent:
         Values are clamped; vector knowledge is respected when knowledge_mode='vector'.
         """
         if engagement is not None:
-            self.engagement = float(np.clip(engagement, 0.0, 1.2))
+            self.engagement = float(np.clip(engagement, 0.0, 1.0))
         if trust is not None:
             self.trust = float(np.clip(trust, 0.0, 1.0))
         if fatigue is not None:
@@ -366,6 +407,21 @@ class AdaptiveAgent:
             return float(self.knowledge)
         return float(np.mean(np.array(self.knowledge, dtype=float)))
 
+    def _record_history(self, entry: Any) -> None:
+        """Append *entry* to the history deque, logging a warning on eviction.
+
+        When the deque is already at capacity the oldest entry will be silently
+        dropped by :class:`collections.deque`.  This wrapper emits a one-time
+        warning so that callers can detect unexpectedly long simulations.
+        """
+        if len(self._history) == self._history.maxlen:
+            logger.warning(
+                "user=%s history deque at capacity (%d); oldest entry will be evicted",
+                self.user_id,
+                self._history.maxlen,
+            )
+        self._history.append(entry)
+
     def _topk_given_state(self, base_k: int) -> int:
         k = max(self.min_topk, int(round(base_k * (1.0 - 0.5 * self.fatigue))))
         if self.trust_influence:
@@ -387,14 +443,50 @@ class AdaptiveAgent:
         return None
 
 
+    def _skill_indices(
+        self,
+        skills: Optional[List[int]],
+        *,
+        max_dim: Optional[int] = None,
+    ) -> Optional[np.ndarray]:
+        """Return skill indices from either an index list or a boolean mask."""
+        if skills is None:
+            return None
+
+        arr = np.asarray(skills)
+        if arr.size == 0:
+            return None
+
+        flat = arr.reshape(-1)
+        values = flat.tolist()
+        if not isinstance(values, list):
+            values = [values]
+        is_bool_mask = np.issubdtype(flat.dtype, np.bool_) or all(
+            isinstance(x, (bool, np.bool_)) for x in values
+        )
+        if is_bool_mask:
+            return np.flatnonzero(flat.astype(bool))
+
+        try:
+            idx = np.asarray(skills, dtype=int).reshape(-1)
+        except Exception:
+            return None
+        if idx.size == 0:
+            return None
+        if max_dim is not None:
+            idx = idx[(idx >= 0) & (idx < int(max_dim))]
+        return idx
 
     def _ability_scalar(self, item_id: int, items_meta: Optional[Dict[int, ItemMeta]]) -> float:
         if self.knowledge_mode == "scalar":
             return float(self.knowledge)
         m = self._coerce_meta(items_meta, item_id)
-        if m and m.skills:
-            mask = np.array(m.skills, dtype=bool)
-            sel = np.array(self.knowledge)[mask]
+        idx = self._skill_indices(
+            m.skills if m is not None else None,
+            max_dim=len(self.knowledge),
+        )
+        if idx is not None and idx.size > 0:
+            sel = np.array(self.knowledge, dtype=float)[idx]
             if sel.size > 0:
                 return float(sel.mean())
         return float(np.mean(self.knowledge))
@@ -442,8 +534,9 @@ class AdaptiveAgent:
         return max(1, int(round(max(1.0, base))))
 
     def _gumbel(self, size: int) -> np.ndarray:
-        u = self.rng.rand(size)
-        return -np.log(-np.log(np.clip(u, 1e-8, 1 - 1e-8)))
+        eps = 1e-10
+        u = np.clip(self.rng.rand(size), eps, 1.0 - eps)
+        return -np.log(-np.log(u))
 
     def _prob_correct_3pl(self, theta: float, diff: float) -> float:
         # p = c + (1-c-s)*sigmoid(a(θ-b) - β*fatigue)
@@ -451,9 +544,6 @@ class AdaptiveAgent:
         logit = self.a * (theta - diff) - beta_fatigue * float(self.fatigue)
         sig = 1.0 / (1.0 + math.exp(-logit))
         return float(np.clip(self.c + (1.0 - self.c - self.s) * sig, 0.0, 1.0))
-
-        self._last_items_meta: Optional[Dict[int, Any]] = None
-        self._last_action_ids: List[int] = []
 
     def _apply_forgetting(self) -> None:
         # decay knowledge a bit each round
@@ -472,27 +562,30 @@ class AdaptiveAgent:
         p_correct: float,
         items_meta: Optional[Dict[int, ItemMeta]],
     ) -> None:
+        self._total_obs += 1
         if self.knowledge_mode == "scalar":
             delta = self.lr * (correct - p_correct)
-            t = max(1, len(self._history))
+            t = max(1, self._total_obs)
             delta += self.rng.normal(0, 0.005 * (1.0 / np.sqrt(t)))
             self.knowledge = float(
                 np.clip((1 - self.decay) * self.knowledge + delta, 0.0, 1.0)
             )
         else:
             m = self._coerce_meta(items_meta, item_id)
-            skills = m.skills if (m and m.skills is not None) else None
-            if not skills:
+            skills = self._skill_indices(
+                m.skills if m is not None else None,
+                max_dim=len(self.knowledge),
+            )
+            if skills is None or skills.size == 0:
                 grad = self.lr * (correct - p_correct)
                 self.knowledge = np.clip(
                     (1 - self.decay) * np.array(self.knowledge) + grad, 0.0, 1.0
                 ).tolist()
             else:
                 kvec = np.array(self.knowledge, dtype=float)
-                smask = np.array(skills, dtype=bool)
                 grad = np.zeros_like(kvec, dtype=float)
-                grad[smask] = self.lr * (correct - p_correct)
-                t = max(1, len(self._history))
+                grad[skills] = self.lr * (correct - p_correct)
+                t = max(1, self._total_obs)
                 grad += self.rng.normal(0, 0.005 * (1.0 / np.sqrt(t)), size=grad.shape)
                 self.knowledge = np.clip((1 - self.decay) * kvec + grad, 0.0, 1.0).tolist()
 
@@ -535,16 +628,16 @@ class AdaptiveAgent:
                     + 0.1 * (acc - 0.5)
                     - 0.05 * self.fatigue
                     + 0.05 * (self.trust - 0.5),
-                    0.2,
-                    1.2,
+                    0.0,
+                    1.0,
                 )
             )
         else:
             self.engagement = float(
                 np.clip(
                     self.engagement + 0.1 * (acc - 0.5) - 0.05 * self.fatigue,
-                    0.2,
-                    1.2,
+                    0.0,
+                    1.0,
                 )
             )
 
@@ -552,7 +645,7 @@ class AdaptiveAgent:
         try:
             if feedback:
                 self.engagement = float(
-                    np.clip(self.engagement + 0.04 * (acc - 0.5), 0.2, 1.2)
+                    np.clip(self.engagement + 0.04 * (acc - 0.5), 0.0, 1.0)
                 )
         except Exception:
             pass
@@ -672,7 +765,7 @@ class AdaptiveAgent:
         self.recent.extend(accepted)
 
         # record + update latents and forgetting
-        self._history.append(feedback)
+        self._record_history(feedback)
         self._apply_forgetting()
         self._update_latents_after_round(feedback, items_meta)
 
@@ -718,7 +811,7 @@ class AdaptiveAgent:
         Returns
         -------
         float
-            Reward in [0, 1.2], where 0.6*accuracy + 0.25*(1-fatigue) + 0.15*engagement.
+            Reward in [0, 1.0], where 0.6*accuracy + 0.25*(1-fatigue) + 0.15*engagement.
         """
         if not feedback:
             acc = 0.0
@@ -730,7 +823,7 @@ class AdaptiveAgent:
                 + 0.25 * (1.0 - float(self.fatigue))
                 + 0.15 * float(self.engagement),
                 0.0,
-                1.2,
+                1.0,
             )
         )
         if self.verbose:
@@ -795,7 +888,7 @@ class AdaptiveAgent:
             items_meta = self._last_items_meta
 
         items_meta = items_meta or {}
-        accepted_ids = list(feedback.keys()) if feedback else list(self._last_action_ids)
+        accepted_ids = list(feedback.keys()) if feedback else []
 
         for item in accepted_ids:
             meta = self._coerce_meta(items_meta, item)
@@ -808,7 +901,7 @@ class AdaptiveAgent:
         if accepted_ids:
             self.recent.extend(accepted_ids)
 
-        self._history.append(dict(feedback))
+        self._record_history(dict(feedback))
         self._apply_forgetting()
         self._update_latents_after_round(dict(feedback), items_meta)
 

@@ -3,6 +3,7 @@ import math
 import pytest
 
 from orchid_ranker.safety import SafeSwitchDR, SafeSwitchDRConfig
+from orchid_ranker.safety.dr_cs import DRCSConfig, DRConfidenceSequence
 
 
 def _simulate_rounds(gate, n, *, reward, accepts, qa, qf):
@@ -63,3 +64,23 @@ def test_safe_switch_increases_probability_on_positive_uplift():
 
     gate.update(True, 1.0, 1.0, 0.95, 0.1, gate.p)
     assert gate.p > initial_p
+
+
+def test_dr_confidence_sequence_handles_boundary_propensities():
+    cfg = DRCSConfig(delta=0.05, u_max=1.0, p_min=0.2)
+
+    baseline_only = DRConfidenceSequence(cfg)
+    baseline_only.update(False, reward=0.3, Qa=0.7, Qf=0.3, p_used=0.0)
+    assert math.isclose(baseline_only.mean, 0.4)
+
+    adaptive_only = DRConfidenceSequence(cfg)
+    adaptive_only.update(True, reward=0.8, Qa=0.8, Qf=0.2, p_used=1.0)
+    assert math.isclose(adaptive_only.mean, 0.6)
+
+
+def test_dr_confidence_sequence_rejects_impossible_boundary_events():
+    cs = DRConfidenceSequence(DRCSConfig())
+    with pytest.raises(ValueError, match="p_used=0.0"):
+        cs.update(True, reward=0.5, Qa=0.5, Qf=0.5, p_used=0.0)
+    with pytest.raises(ValueError, match="p_used=1.0"):
+        cs.update(False, reward=0.5, Qa=0.5, Qf=0.5, p_used=1.0)

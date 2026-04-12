@@ -17,6 +17,22 @@ except Exception:  # pragma: no cover - optional dependency
 
 logger = logging.getLogger(__name__)
 
+_TRANSIENT_S3_ERROR_CODES = {
+    "RequestTimeout",
+    "RequestTimeoutException",
+    "Throttling",
+    "ThrottlingException",
+    "SlowDown",
+    "ServiceUnavailable",
+    "InternalError",
+}
+_TRANSIENT_S3_EXCEPTION_NAMES = {
+    "ConnectTimeoutError",
+    "ReadTimeoutError",
+    "EndpointConnectionError",
+    "ConnectionClosedError",
+}
+
 
 @dataclass
 class S3StreamConnector:
@@ -187,9 +203,7 @@ class S3StreamConnector:
                 return func(*args, **kwargs)
             except Exception as e:
                 last_error = e
-                # Only retry on transient errors
-                error_msg = str(e).lower()
-                if any(x in error_msg for x in ['timeout', 'throttling', 'serviceunava']):
+                if self._is_transient_error(e):
                     if attempt < self.max_retries - 1:
                         delay = delays[attempt]
                         logger.warning(
@@ -205,6 +219,37 @@ class S3StreamConnector:
         raise RetryExhaustedError(
             f"Failed after {self.max_retries} attempts: {last_error}"
         ) from last_error
+
+    @staticmethod
+    def _is_transient_error(exc: Exception) -> bool:
+        """Best-effort classification of transient boto/botocore failures."""
+        if exc.__class__.__name__ in _TRANSIENT_S3_EXCEPTION_NAMES:
+            return True
+
+        response = getattr(exc, "response", None)
+        if isinstance(response, dict):
+            code = str(response.get("Error", {}).get("Code", ""))
+            if code in _TRANSIENT_S3_ERROR_CODES:
+                return True
+            status = response.get("ResponseMetadata", {}).get("HTTPStatusCode")
+            if status in {429, 500, 502, 503, 504}:
+                return True
+
+        error_msg = str(exc).lower()
+        return any(
+            token in error_msg
+            for token in (
+                "timeout",
+                "timed out",
+                "throttling",
+                "slowdown",
+                "serviceunavailable",
+                "service unavailable",
+                "connection reset",
+                "connection aborted",
+                "temporarily unavailable",
+            )
+        )
 
     def list_objects(self) -> Iterable[str]:
         """List all S3 object keys matching the bucket and prefix with retry support.

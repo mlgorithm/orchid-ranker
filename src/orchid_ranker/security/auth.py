@@ -5,7 +5,7 @@ import threading
 import time
 from dataclasses import dataclass
 from typing import Any, Dict, Optional, Sequence
-from urllib.parse import urljoin
+from urllib.parse import urljoin, urlsplit
 
 try:
     import jwt
@@ -138,16 +138,39 @@ class JWTAuthenticator:
                 "Install it with: pip install 'orchid-ranker[auth]'"
             )
 
+        self._require_https_uri(issuer, "issuer")
         self.issuer = issuer
         self.audience = audience
         self.role_claim = role_claim
+        # Prevent algorithm confusion attacks: reject mixing symmetric
+        # (HS*) with asymmetric (RS*/ES*/PS*) algorithms.
+        _symmetric = {"HS256", "HS384", "HS512"}
+        _asymmetric = {"RS256", "RS384", "RS512", "ES256", "ES384", "ES512", "PS256", "PS384", "PS512"}
+        algs = set(algorithms)
+        if not algs:
+            raise ValueError("algorithms list must not be empty")
+        if algs & _symmetric and algs & _asymmetric:
+            raise ValueError(
+                "Cannot mix symmetric (HS*) and asymmetric (RS*/ES*/PS*) "
+                "algorithms — this enables algorithm confusion attacks. "
+                f"Got: {list(algorithms)}"
+            )
         self.algorithms = list(algorithms)
 
         # Derive JWKS URI from issuer if not provided (OIDC standard)
         if jwks_uri is None:
             jwks_uri = urljoin(issuer.rstrip("/") + "/", ".well-known/jwks.json")
+        else:
+            self._require_https_uri(jwks_uri, "jwks_uri")
 
         self._jwks_cache = _JWKSCache(jwks_uri, cache_ttl)
+
+    @staticmethod
+    def _require_https_uri(uri: str, label: str) -> None:
+        """Reject non-HTTPS transport for issuer and JWKS discovery."""
+        parsed = urlsplit(uri)
+        if parsed.scheme.lower() != "https":
+            raise ValueError(f"{label} must use https:// transport, got {uri!r}")
 
     def authenticate(self, token: str) -> TokenPayload:
         """Decode and validate JWT token.

@@ -37,13 +37,49 @@ class RecShim:
         return self.rec.decide(logits=logits, top_k=int(top_k), item_ids=item_ids,
                                user_id=int(user_id), engagement=float(engagement), trust=float(trust))
 
+    def _normalize_feedback_keys(self, feedback: Dict[int, int], item_ids):
+        """Map feedback keys to the key space used by the wrapped recommender."""
+        if not feedback:
+            return {}
+
+        try:
+            candidate_ids = [int(i) for i in self._to_t(item_ids, torch.long).detach().cpu().tolist()]
+        except Exception:
+            candidate_ids = [int(i) for i in item_ids]
+        candidate_lookup = {iid: idx for idx, iid in enumerate(candidate_ids)}
+
+        pos2id_map = getattr(self.rec, "pos2id_map", {}) or {}
+        id2pos_map = {int(ext): int(pos) for pos, ext in pos2id_map.items()}
+
+        normalized = {}
+        for raw_key, raw_val in feedback.items():
+            key = int(raw_key)
+            resolved = None
+
+            if key in candidate_lookup:
+                resolved = key
+            elif key in pos2id_map:
+                ext_id = int(pos2id_map[key])
+                if ext_id in candidate_lookup:
+                    resolved = ext_id
+            elif key in id2pos_map:
+                pos = int(id2pos_map[key])
+                if pos in candidate_lookup:
+                    resolved = pos
+
+            if resolved is not None:
+                normalized[int(resolved)] = int(raw_val)
+
+        return normalized
+
     def update(self, *, feedback: Dict[int,int], user_vec, state_vec, user_ids, item_matrix, item_ids, epochs: int=5):
         u = self._to_t(user_vec, torch.float32)
         s = self._to_t(state_vec, torch.float32)
         uids = self._to_t(user_ids, torch.long)
         Xi = self._to_t(item_matrix, torch.float32)
         iids = self._to_t(item_ids, torch.long)
-        out = self.rec.update(feedback=feedback, user_vec=u, state_vec=s, user_ids=uids,
+        normalized_feedback = self._normalize_feedback_keys(feedback, iids)
+        out = self.rec.update(feedback=normalized_feedback, user_vec=u, state_vec=s, user_ids=uids,
                               item_matrix=Xi, item_ids=iids, epochs=int(epochs))
         self.eps_cum = float(getattr(self.rec, "eps_cum", self.eps_cum))
         return out

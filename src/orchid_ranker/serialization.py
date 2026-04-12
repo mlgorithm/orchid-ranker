@@ -7,11 +7,33 @@ models to/from disk, preserving their internal state and enabling reproducible i
 from __future__ import annotations
 
 import logging
+import os
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Dict, Optional
+from typing import TYPE_CHECKING, Any, Dict, Optional, cast
 
 import numpy as np
 import torch
+
+# Register numpy types as safe for torch.load(weights_only=True).
+# Our checkpoints contain numpy arrays/dtypes; this allows safe loading
+# without falling back to full pickle.
+_numpy_reconstruct = getattr(np.core.multiarray, "_reconstruct", None)
+_NUMPY_SAFE_GLOBALS = [
+    np.ndarray,
+    np.dtype,
+    np.dtypes.Float32DType,
+    np.dtypes.Float64DType,
+    np.dtypes.Int32DType,
+    np.dtypes.Int64DType,
+    np.dtypes.UInt8DType,
+    np.dtypes.BoolDType,
+]
+if _numpy_reconstruct is not None:
+    _NUMPY_SAFE_GLOBALS.insert(0, _numpy_reconstruct)
+try:
+    torch.serialization.add_safe_globals(cast(list[Any], _NUMPY_SAFE_GLOBALS))
+except AttributeError:
+    pass  # older torch versions without add_safe_globals
 
 if TYPE_CHECKING:
     from .agents.recommender_agent import TwoTowerRecommender
@@ -69,10 +91,22 @@ def save_model(model: Any, path: str | Path) -> None:
         "state": state,
     }
 
+    # Atomic write: save to temp file then os.replace to avoid partial/corrupt checkpoints
+    import tempfile
     try:
-        torch.save(checkpoint, path)
+        fd, tmp_path = tempfile.mkstemp(
+            dir=str(path.parent), suffix=".tmp", prefix=".orchid_save_"
+        )
+        os.close(fd)
+        torch.save(checkpoint, tmp_path)
+        os.replace(tmp_path, str(path))
         _logger.info(f"Model saved to {path} (type={model_type}, version={_CHECKPOINT_VERSION})")
     except Exception as exc:
+        # Clean up temp file on failure
+        try:
+            os.unlink(tmp_path)
+        except OSError:
+            pass
         raise RuntimeError(f"Failed to save model to {path}: {exc}") from exc
 
 
@@ -113,26 +147,14 @@ def load_model(path: str | Path) -> Any:
 
     try:
         # Try safe loading first (weights_only=True rejects pickle payloads).
-        # Fall back to weights_only=False only for legacy pre-0.3.0 checkpoints
-        # that stored pickled baseline objects.
         try:
             checkpoint = torch.load(path, weights_only=True)
-        except Exception:
-            import warnings
-            warnings.warn(
-                "Safe loading failed; falling back to pickle-based loading. "
-                "This checkpoint may be from a pre-0.3.0 version and could "
-                "contain arbitrary code. Re-save the model with save_model() "
-                "to upgrade to the safe format. Pickle-based loading will be "
-                "removed in v1.0.",
-                DeprecationWarning,
-                stacklevel=2,
-            )
-            _logger.warning(
-                "Falling back to weights_only=False for legacy checkpoint. "
-                "Re-save to upgrade: save_model(load_model('%s'), 'safe.pt')", path
-            )
-            checkpoint = torch.load(path, weights_only=False)
+        except Exception as exc:
+            raise RuntimeError(
+                f"Safe loading failed for {path}. Unsafe pickle-based "
+                "checkpoints are not supported. Re-save the model from a "
+                "trusted environment using save_model()."
+            ) from exc
     except Exception as exc:
         raise RuntimeError(f"Failed to load checkpoint from {path}: {exc}") from exc
 
@@ -141,8 +163,8 @@ def load_model(path: str | Path) -> Any:
         raise ValueError("Checkpoint must be a dictionary")
 
     version = checkpoint.get("version")
-    model_type = checkpoint.get("model_type")
-    state = checkpoint.get("state")
+    model_type_obj = checkpoint.get("model_type")
+    state_obj = checkpoint.get("state")
 
     # Check all required keys exist
     required_keys = {"version", "model_type", "state"}
@@ -152,8 +174,14 @@ def load_model(path: str | Path) -> Any:
             f"Checkpoint is corrupted/truncated: missing keys {missing_keys}"
         )
 
-    if not all([version, model_type, state]):
+    if not version or not model_type_obj or not state_obj:
         raise ValueError("Invalid checkpoint format: version, model_type, or state is empty.")
+    if not isinstance(model_type_obj, str):
+        raise ValueError(f"Invalid model_type in checkpoint: expected str, got {type(model_type_obj).__name__}")
+    if not isinstance(state_obj, dict):
+        raise ValueError(f"Invalid state in checkpoint: expected dict, got {type(state_obj).__name__}")
+    model_type = model_type_obj
+    state = cast(Dict[str, Any], state_obj)
 
     # Validate model_type is known
     supported_types = {"OrchidRecommender", "TwoTowerRecommender"}
@@ -327,10 +355,14 @@ def _restore_orchid_model(state: Dict[str, Any]) -> OrchidRecommender:
         model._item_features = state["item_features"]
 
     # Restore baseline model
-    baseline_type = state.get("baseline_type")
-    baseline_data = state.get("baseline_data")
+    baseline_type_obj = state.get("baseline_type")
+    baseline_data_obj = state.get("baseline_data")
+    baseline_type = baseline_type_obj if isinstance(baseline_type_obj, str) else None
+    baseline_data = baseline_data_obj if isinstance(baseline_data_obj, dict) else None
 
     if baseline_data is not None:
+        if baseline_type is None:
+            raise RuntimeError("Invalid baseline type in checkpoint")
         model._baseline = _restore_baseline_from_data(
             baseline_type,
             baseline_data,
@@ -342,9 +374,14 @@ def _restore_orchid_model(state: Dict[str, Any]) -> OrchidRecommender:
         )
     elif "baseline_state_dict" in state:
         # Legacy: neural model with state_dict (pre-0.3.0 checkpoints)
+        if baseline_type is None:
+            raise RuntimeError("Invalid baseline type in legacy checkpoint")
+        legacy_state_dict = state["baseline_state_dict"]
+        if not isinstance(legacy_state_dict, dict):
+            raise RuntimeError("Invalid legacy neural baseline state in checkpoint")
         model._baseline = _restore_neural_baseline(
             baseline_type,
-            state["baseline_state_dict"],
+            cast(Dict[str, Any], legacy_state_dict),
             strategy,
             len(model._user2idx),
             len(model._item2idx),
@@ -368,7 +405,7 @@ def _restore_orchid_model(state: Dict[str, Any]) -> OrchidRecommender:
 
 def _restore_neural_baseline(
     baseline_type: str,
-    state_dict: Dict[str, torch.Tensor],
+    state_dict: Dict[str, Any],
     strategy: str,
     num_users: int,
     num_items: int,
@@ -413,10 +450,17 @@ def _restore_neural_baseline(
         baseline = NeuralMatrixFactorizationBaseline(
             num_users=num_users,
             num_items=num_items,
-            device=device,
+            device=torch.device(device),
             **strategy_kwargs,
         )
-        baseline.load_state_dict(state_dict)
+        mlp_state = state_dict.get("mlp_state_dict")
+        user_emb_state = state_dict.get("user_emb_state_dict")
+        item_emb_state = state_dict.get("item_emb_state_dict")
+        if not all(isinstance(blob, dict) for blob in (mlp_state, user_emb_state, item_emb_state)):
+            raise RuntimeError("Legacy neural baseline checkpoint is missing component state dicts")
+        baseline.mlp.load_state_dict(cast(Dict[str, Any], mlp_state))
+        baseline.user_emb.load_state_dict(cast(Dict[str, Any], user_emb_state))
+        baseline.item_emb.load_state_dict(cast(Dict[str, Any], item_emb_state))
         _logger.debug(f"Restored {baseline_type} with {len(state_dict)} parameters")
         return baseline
     else:
@@ -477,17 +521,17 @@ def _restore_baseline_from_data(
         return RandomBaseline(dev)
 
     if baseline_type == "ALSBaseline":
-        baseline = ALSBaseline(num_users, num_items, device=dev, **strategy_kwargs)
-        baseline.model.load_state_dict(data["model_state_dict"])
-        return baseline
+        als_baseline = ALSBaseline(num_users, num_items, device=dev, **strategy_kwargs)
+        als_baseline.model.load_state_dict(cast(Dict[str, Any], data["model_state_dict"]))
+        return als_baseline
 
     if baseline_type == "ExplicitMFBaseline":
-        baseline = ExplicitMFBaseline(num_users, num_items, device=dev, **strategy_kwargs)
-        baseline.model.load_state_dict(data["model_state_dict"])
-        baseline._global_mean = data["global_mean"]
-        baseline._min_rating = data["min_rating"]
-        baseline._max_rating = data["max_rating"]
-        return baseline
+        explicit_mf_baseline = ExplicitMFBaseline(num_users, num_items, device=dev, **strategy_kwargs)
+        explicit_mf_baseline.model.load_state_dict(cast(Dict[str, Any], data["model_state_dict"]))
+        explicit_mf_baseline._global_mean = data["global_mean"]
+        explicit_mf_baseline._min_rating = data["min_rating"]
+        explicit_mf_baseline._max_rating = data["max_rating"]
+        return explicit_mf_baseline
 
     if baseline_type == "UserKNNBaseline":
         return UserKNNBaseline(
@@ -499,37 +543,38 @@ def _restore_baseline_from_data(
     if baseline_type == "LinUCBBaseline":
         if item_features is None:
             raise RuntimeError("item_features required to restore LinUCBBaseline")
-        baseline = LinUCBBaseline(
+        linucb_baseline = LinUCBBaseline(
             alpha=data["alpha"],
             item_features=item_features,
             device=dev,
         )
-        baseline.A = data["A"].to(dev)
-        baseline.b = data["b"].to(dev)
-        return baseline
+        linucb_baseline.A = data["A"].to(dev)
+        linucb_baseline.b = data["b"].to(dev)
+        return linucb_baseline
 
     if baseline_type == "NeuralMatrixFactorizationBaseline":
-        baseline = NeuralMatrixFactorizationBaseline(
+        hidden_dims = tuple(int(v) for v in data.get("hidden", (64, 32)))
+        neural_mf_baseline = NeuralMatrixFactorizationBaseline(
             num_users=data.get("num_users", num_users),
             num_items=data.get("num_items", num_items),
             device=dev,
             emb_dim=data.get("emb_dim", 32),
-            hidden=tuple(data.get("hidden", (64, 32))),
+            hidden=hidden_dims,
             loss=data.get("loss_type", "bce"),
             neg_k=data.get("neg_k", 10),
             batch_size=data.get("batch_size", 256),
         )
-        baseline.mlp.load_state_dict(data["mlp_state_dict"])
-        baseline.user_emb.load_state_dict(data["user_emb_state_dict"])
-        baseline.item_emb.load_state_dict(data["item_emb_state_dict"])
-        return baseline
+        neural_mf_baseline.mlp.load_state_dict(cast(Dict[str, Any], data["mlp_state_dict"]))
+        neural_mf_baseline.user_emb.load_state_dict(cast(Dict[str, Any], data["user_emb_state_dict"]))
+        neural_mf_baseline.item_emb.load_state_dict(cast(Dict[str, Any], data["item_emb_state_dict"]))
+        return neural_mf_baseline
 
     if baseline_type in ("ImplicitALSBaseline", "ImplicitBPRBaseline"):
         cls = ImplicitALSBaseline if baseline_type == "ImplicitALSBaseline" else ImplicitBPRBaseline
-        baseline = cls(**strategy_kwargs)
-        baseline.user_factors = data["user_factors"]
-        baseline.item_factors = data["item_factors"]
-        return baseline
+        implicit_baseline = cls(**strategy_kwargs)
+        implicit_baseline.user_factors = data["user_factors"]
+        implicit_baseline.item_factors = data["item_factors"]
+        return implicit_baseline
 
     raise RuntimeError(f"Unknown baseline type: {baseline_type}")
 

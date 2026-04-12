@@ -49,6 +49,7 @@ class DualRecommender:
 
         # push initial knobs into both models
         self._sync_knobs()
+        self._sync_student_teacher_anchor()
 
         _d(f"DualRec init: blend_inc={self._blend_increment} teacher_ema={self._teacher_ema}")
 
@@ -57,12 +58,24 @@ class DualRecommender:
         self._replay_steps = int(replay_steps)
 
     # ---------- small utils ----------
+    def reset_novelty_state(self) -> None:
+        """Clear per-user novelty/recent-item memory for all components.
+
+        Call this between experiments or when reusing the recommender
+        with a fresh user cohort to avoid stale novelty signals.
+        """
+        self.recent_by_user = {}
+        for m in (self.teacher, self.student):
+            if hasattr(m, "recent_by_user"):
+                m.recent_by_user = {}
+
     def _ensure_recent_map(self):
         if not hasattr(self, "recent_by_user"):
             self.recent_by_user = {}
         for m in (self.teacher, self.student):
             if not hasattr(m, "recent_by_user"):
-                m.recent_by_user = self.recent_by_user
+                # Each model gets its own dict to avoid shared-state bugs
+                m.recent_by_user = {}
 
     def _sync_knobs(self):
         for m in (self.teacher, self.student):
@@ -70,6 +83,21 @@ class DualRecommender:
                 m.novelty_bonus = self._novelty_bonus
             if hasattr(m, "mmr_lambda"):
                 m.mmr_lambda = self._mmr_lambda
+
+    def _sync_student_teacher_anchor(self):
+        """Keep a wrapped student's internal KL anchor aligned with the wrapper teacher."""
+        anchor = getattr(self.student, "teacher", None)
+        if anchor is None or not hasattr(anchor, "parameters"):
+            return
+        try:
+            with torch.no_grad():
+                for a_param, t_param in zip(anchor.parameters(), self.teacher.parameters()):
+                    a_param.data.copy_(t_param.data)
+            anchor.eval()
+            for param in anchor.parameters():
+                param.requires_grad_(False)
+        except Exception:
+            pass
 
     @staticmethod
     def _call_with_supported_args(fn, **kwargs):
@@ -100,6 +128,7 @@ class DualRecommender:
         with torch.no_grad():
             for t_param, s_param in zip(self.teacher.parameters(), self.student.parameters()):
                 t_param.data.mul_(tau).add_(s_param.data, alpha=1.0 - tau)
+        self._sync_student_teacher_anchor()
         if os.getenv("ORCHID_DEBUG_REC", "").lower() in {"1", "true", "yes", "on"}:
             _d(f"DualRec: student_weight={self._student_weight:.3f} (after update)")
 
@@ -229,6 +258,7 @@ class DualRecommender:
         We forward only to the student. Extra args are filtered.
         """
         if hasattr(self.student, "update") and callable(self.student.update):
+            self._sync_student_teacher_anchor()
             out = self._call_with_supported_args(self.student.update, **kwargs)
             self._after_student_update()
             return out
@@ -249,6 +279,7 @@ class DualRecommender:
         Always trains the student.
         """
         if hasattr(self.student, "train_step") and callable(self.student.train_step):
+            self._sync_student_teacher_anchor()
             out = self.student.train_step(batch)
             # push to replay and perform extra small updates
             if self._replay_buf is not None:
@@ -258,7 +289,8 @@ class DualRecommender:
                     pass
                 for _ in range(max(0, self._replay_steps)):
                     try:
-                        b = self._replay_buf[0]
+                        replay_idx = int(np.random.randint(len(self._replay_buf)))
+                        b = self._replay_buf[replay_idx]
                         self.student.train_step(b)
                     except Exception:
                         break

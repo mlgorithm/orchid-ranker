@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import logging
 import os
+import random as _random
 import time
 from dataclasses import dataclass
 from typing import Any, Dict, Optional
@@ -370,10 +371,18 @@ class SnowflakeConnector:
                 return func(*args, **kwargs)
             except Exception as e:
                 last_error = e
+                # Don't retry non-transient errors (auth, syntax, programming)
+                _non_transient = (
+                    TypeError, ValueError, SyntaxError, KeyError,
+                    PermissionError, ImportError,
+                )
+                err_msg = str(e).lower()
+                if isinstance(e, _non_transient) or "auth" in err_msg or "syntax" in err_msg:
+                    raise
                 if attempt < self.max_retries - 1:
-                    delay = delays[attempt]
+                    delay = delays[attempt] + _random.uniform(0, 0.5)
                     logger.warning(
-                        f"Attempt {attempt + 1} failed, retrying in {delay}s: {e}"
+                        f"Attempt {attempt + 1} failed, retrying in {delay:.2f}s: {e}"
                     )
                     time.sleep(delay)
                 else:
@@ -382,6 +391,25 @@ class SnowflakeConnector:
         raise RetryExhaustedError(
             f"Failed after {self.max_retries} attempts: {last_error}"
         ) from last_error
+
+    @staticmethod
+    def _check_sql_injection(query: str) -> None:
+        """Heuristic SQL injection warning for dynamic queries.
+
+        Logs a warning if the query contains suspicious patterns that may
+        indicate SQL injection vulnerabilities. This is a defence-in-depth
+        measure — always prefer parameterised queries.
+        """
+        _suspicious = ("--", ";--", "/*", "*/", "' OR ", "' AND ", "1=1", "UNION SELECT")
+        q_upper = query.upper()
+        for pat in _suspicious:
+            if pat.upper() in q_upper:
+                logger.warning(
+                    "Potential SQL injection pattern detected in query: %r. "
+                    "Prefer parameterised queries to avoid injection attacks.",
+                    pat,
+                )
+                break
 
     def fetch_dataframe(self, query: str):
         """Execute a query and return results as a DataFrame with retry support.
@@ -406,9 +434,12 @@ class SnowflakeConnector:
         import pandas as pd  # type: ignore
 
         self._require_lib()
+        self._check_sql_injection(query)
 
-        def _fetch():
-            with self._connect() as conn:
+        # Create connection once outside retry to avoid connection leak per attempt
+        conn = self._connect()
+        try:
+            def _fetch():
                 cur = conn.cursor()
                 try:
                     cur.execute(query)
@@ -418,7 +449,12 @@ class SnowflakeConnector:
                 finally:
                     cur.close()
 
-        return self._retry_with_backoff(_fetch)
+            return self._retry_with_backoff(_fetch)
+        finally:
+            try:
+                conn.close()
+            except Exception:
+                pass
 
     def execute(self, query: str, params: Optional[Dict[str, Any]] = None) -> None:
         """Execute a query without returning results with retry support.
@@ -440,16 +476,24 @@ class SnowflakeConnector:
             If query fails after all retry attempts.
         """
         self._require_lib()
+        self._check_sql_injection(query)
 
-        def _execute():
-            with self._connect() as conn:
+        # Create connection once outside retry to avoid connection leak per attempt
+        conn = self._connect()
+        try:
+            def _execute():
                 cur = conn.cursor()
                 try:
                     cur.execute(query, params or {})
                 finally:
                     cur.close()
 
-        self._retry_with_backoff(_execute)
+            self._retry_with_backoff(_execute)
+        finally:
+            try:
+                conn.close()
+            except Exception:
+                pass
 
 
 __all__ = ["SnowflakeConnector"]

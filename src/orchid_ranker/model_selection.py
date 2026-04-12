@@ -84,16 +84,31 @@ def train_test_split(
     if interactions.empty:
         raise ValueError("interactions DataFrame is empty")
 
+    # Validate required columns exist
+    missing_cols = []
+    if user_col not in interactions.columns:
+        missing_cols.append(user_col)
+    if item_col not in interactions.columns:
+        missing_cols.append(item_col)
+    if missing_cols:
+        raise ValueError(
+            f"Column(s) {missing_cols} not found in interactions DataFrame. "
+            f"Available columns: {list(interactions.columns)}"
+        )
+
     interactions = interactions.copy()
     rng = np.random.RandomState(random_state)
 
     if by_user:
         # Hold out test_size fraction per user
-        train_idx = []
-        test_idx = []
+        train_idx: List[int] = []
+        test_idx: List[int] = []
         for user_id, group in interactions.groupby(user_col):
             user_indices = group.index.tolist()
-            n_test = max(1, int(len(user_indices) * test_size))
+            if len(user_indices) <= 1:
+                train_idx.extend(user_indices)
+                continue
+            n_test = min(len(user_indices) - 1, max(1, int(len(user_indices) * test_size)))
             test_indices = rng.choice(
                 user_indices, size=n_test, replace=False
             ).tolist()
@@ -105,16 +120,72 @@ def train_test_split(
     else:
         # Global random split
         n_test = int(len(interactions) * test_size)
-        test_idx = rng.choice(
+        test_idx_arr = rng.choice(
             len(interactions), size=n_test, replace=False
         )
-        train_idx = np.setdiff1d(
-            np.arange(len(interactions)), test_idx
+        train_idx_arr = np.setdiff1d(
+            np.arange(len(interactions)), test_idx_arr
         )
-        train_df = interactions.iloc[train_idx].reset_index(drop=True)
-        test_df = interactions.iloc[test_idx].reset_index(drop=True)
+        train_df = interactions.iloc[train_idx_arr].reset_index(drop=True)
+        test_df = interactions.iloc[test_idx_arr].reset_index(drop=True)
 
     return train_df, test_df
+
+
+def _resolve_rating_col(
+    interactions: pd.DataFrame,
+    rating_col: Optional[str],
+) -> Optional[str]:
+    """Resolve the rating column for training/evaluation helpers."""
+    if rating_col is not None:
+        if rating_col not in interactions.columns:
+            raise ValueError(
+                f"rating_col '{rating_col}' not found in interactions DataFrame. "
+                f"Available columns: {list(interactions.columns)}"
+            )
+        return rating_col
+    return "rating" if "rating" in interactions.columns else None
+
+
+def _build_user_stratified_folds(
+    interactions: pd.DataFrame,
+    *,
+    k: int,
+    random_state: Optional[int],
+    user_col: str,
+) -> List[Tuple[pd.DataFrame, pd.DataFrame]]:
+    """Build CV folds by holding out interactions within each user.
+
+    This keeps evaluated users present in the training set and avoids
+    impossible cold-start folds for recommenders that cannot score unseen users.
+    Users with fewer than two interactions are retained in train for every fold.
+    """
+    rng = np.random.RandomState(random_state)
+    fold_test_idx: List[List[int]] = [[] for _ in range(k)]
+
+    for _, group in interactions.groupby(user_col):
+        user_indices = group.index.to_numpy(dtype=np.int64, copy=True)
+        if user_indices.size <= 1:
+            continue
+        rng.shuffle(user_indices)
+        n_user_folds = min(k, user_indices.size)
+        for pos, idx in enumerate(user_indices):
+            fold_test_idx[pos % n_user_folds].append(int(idx))
+
+    all_indices = set(int(i) for i in interactions.index.tolist())
+    fold_data: List[Tuple[pd.DataFrame, pd.DataFrame]] = []
+    for test_idx in fold_test_idx:
+        if not test_idx:
+            continue
+        test_idx_set = set(test_idx)
+        train_idx = sorted(all_indices - test_idx_set)
+        test_idx_sorted = sorted(test_idx_set)
+        train_df = interactions.loc[train_idx].reset_index(drop=True)
+        test_df = interactions.loc[test_idx_sorted].reset_index(drop=True)
+        if not train_df.empty and not test_df.empty:
+            fold_data.append((train_df, test_df))
+
+    return fold_data
 
 
 # ---------------------------------------------------------------------------
@@ -131,11 +202,12 @@ def cross_validate(
     random_state: Optional[int] = 42,
     user_col: str = "user_id",
     item_col: str = "item_id",
+    rating_col: Optional[str] = None,
 ) -> Dict[str, Dict[str, float]]:
     """Perform k-fold cross-validation for a recommender strategy.
 
-    Splits data by user (each fold holds out a fraction of each user's
-    interactions) and returns mean and std of metrics across folds.
+    Splits each user's interactions across folds so evaluated users remain
+    present in training, then returns mean and std of metrics across folds.
 
     Parameters
     ----------
@@ -156,6 +228,9 @@ def cross_validate(
         Column name for user IDs (default: "user_id").
     item_col : str, optional
         Column name for item IDs (default: "item_id").
+    rating_col : str, optional
+        Column name for explicit ratings/feedback. If None and a ``rating``
+        column exists, it is used automatically.
 
     Returns
     -------
@@ -190,34 +265,31 @@ def cross_validate(
             )
 
     strategy_kwargs = strategy_kwargs or {}
-    np.random.RandomState(random_state)
-    n_unique_users = interactions[user_col].nunique()
-
-    if k > n_unique_users:
-        logger.warning(
-            f"k={k} exceeds number of unique users ({n_unique_users}). "
-            f"Clamping k to {n_unique_users}."
+    resolved_rating_col = _resolve_rating_col(interactions, rating_col)
+    eligible_users = int((interactions.groupby(user_col).size() >= 2).sum())
+    if eligible_users == 0:
+        raise ValueError(
+            "cross_validate requires at least one user with two or more interactions"
         )
-        k = n_unique_users
 
-    # Create fold splits (stratified by user)
-    fold_data = []
-    users = interactions[user_col].unique()
-    fold_size = max(1, len(users) // k)
+    if k > len(interactions):
+        logger.warning(
+            "k=%d exceeds number of interactions (%d). Clamping k to %d.",
+            k, len(interactions), len(interactions),
+        )
+        k = len(interactions)
 
-    for fold_idx in range(k):
-        start_idx = fold_idx * fold_size
-        end_idx = start_idx + fold_size if fold_idx < k - 1 else len(users)
-        test_users = set(users[start_idx:end_idx])
-
-        test_mask = interactions[user_col].isin(test_users)
-        train_df = interactions[~test_mask].reset_index(drop=True)
-        test_df = interactions[test_mask].reset_index(drop=True)
-
-        fold_data.append((train_df, test_df))
+    fold_data = _build_user_stratified_folds(
+        interactions,
+        k=k,
+        random_state=random_state,
+        user_col=user_col,
+    )
+    if not fold_data:
+        raise ValueError("Unable to build non-empty cross-validation folds from the provided interactions")
 
     # Run cross-validation
-    fold_results = {metric: [] for metric in metrics}
+    fold_results: Dict[str, List[float]] = {metric: [] for metric in metrics}
 
     for fold_idx, (train_df, test_df) in enumerate(fold_data):
         if train_df.empty or test_df.empty:
@@ -226,7 +298,12 @@ def cross_validate(
         # Fit model on training fold
         from .recommender import OrchidRecommender
         model = OrchidRecommender(strategy=strategy, **strategy_kwargs)
-        model.fit(train_df, user_col=user_col, item_col=item_col)
+        model.fit(
+            train_df,
+            user_col=user_col,
+            item_col=item_col,
+            rating_col=resolved_rating_col,
+        )
 
         # Evaluate on test fold
         fold_scores = evaluate_on_holdout(
@@ -333,7 +410,7 @@ def evaluate_on_holdout(
     recommendations = {}
     for user_id in relevant_items.keys():
         try:
-            recs = model.recommend(user_id, top_k=k, filter_seen=False)
+            recs = model.recommend(user_id, top_k=k, filter_seen=True)
             recommendations[user_id] = [rec.item_id for rec in recs]
         except (KeyError, RuntimeError):
             # User or model not available
@@ -341,32 +418,22 @@ def evaluate_on_holdout(
 
     # Compute metrics
     scores = {}
-    metric_funcs = {
-        "precision@5": (precision_at_k, 5),
-        "recall@5": (recall_at_k, 5),
-        "ndcg@10": (ndcg_at_k, 10),
-        "map@10": (average_precision, 10),
-    }
-
     for metric_name in metrics:
-        if metric_name not in metric_funcs:
-            continue
-
-        func, default_k = metric_funcs[metric_name]
         metric_scores = []
 
         for user_id, relevant in relevant_items.items():
             recommended = recommendations.get(user_id, [])
-
-            if metric_name in ("ndcg@10", "map@10"):
-                # These need full relevance dicts or sets
-                if metric_name == "ndcg@10":
-                    rel_dict = {item: 1.0 for item in relevant}
-                    score = func(recommended, rel_dict, default_k)
-                else:
-                    score = func(recommended, relevant, default_k)
+            if metric_name == "precision@5":
+                score = precision_at_k(recommended, relevant, 5)
+            elif metric_name == "recall@5":
+                score = recall_at_k(recommended, relevant, 5)
+            elif metric_name == "ndcg@10":
+                rel_dict = {item: 1.0 for item in relevant}
+                score = ndcg_at_k(recommended, rel_dict, 10)
+            elif metric_name == "map@10":
+                score = average_precision(recommended, relevant, 10)
             else:
-                score = func(recommended, relevant, default_k)
+                continue
 
             metric_scores.append(score)
 
@@ -391,6 +458,7 @@ def compare_models(
     random_state: Optional[int] = 42,
     user_col: str = "user_id",
     item_col: str = "item_id",
+    rating_col: Optional[str] = None,
 ) -> pd.DataFrame:
     """Compare multiple recommender strategies via cross-validation.
 
@@ -418,6 +486,9 @@ def compare_models(
         Column name for user IDs (default: "user_id").
     item_col : str, optional
         Column name for item IDs (default: "item_id").
+    rating_col : str, optional
+        Column name for explicit ratings/feedback. If None and a ``rating``
+        column exists, it is used automatically.
 
     Returns
     -------
@@ -464,6 +535,7 @@ def compare_models(
             random_state=random_state,
             user_col=user_col,
             item_col=item_col,
+            rating_col=rating_col,
         )
         results_by_strategy[strategy] = cv_results
 

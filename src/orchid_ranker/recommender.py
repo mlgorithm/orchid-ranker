@@ -10,8 +10,9 @@ __all__ = [
 
 import difflib
 import logging
+import threading
 from dataclasses import dataclass
-from typing import Dict, List, Optional, Sequence, Tuple
+from typing import Any, Dict, List, Optional, Sequence, Tuple
 
 import numpy as np
 import pandas as pd
@@ -149,7 +150,7 @@ class OrchidRecommender:
         self.device = torch.device(device or ("cuda" if torch.cuda.is_available() else "cpu"))
         self.strategy_kwargs = strategy_kwargs
         self._validate_inputs = bool(validate_inputs)
-        self._baseline = None
+        self._baseline: Any = None
         self._user2idx: Dict[int, int] = {}
         self._idx2user: Dict[int, int] = {}
         self._item2idx: Dict[int, int] = {}
@@ -158,19 +159,22 @@ class OrchidRecommender:
         self._item_features: Optional[np.ndarray] = None
         self._resolved_strategy: Optional[str] = None
         self._logger = logging.getLogger(__name__)
+        self._state_lock = threading.RLock()
 
     def __repr__(self) -> str:
-        strategy = self._resolved_strategy or self.strategy
-        n_users = len(self._user2idx)
-        n_items = len(self._item2idx)
-        fitted = "fitted" if self._baseline is not None else "not fitted"
-        return (f"OrchidRecommender(strategy='{strategy}', {fitted}, "
-                f"users={n_users}, items={n_items}, device='{self.device}')")
+        with self._state_lock:
+            strategy = self._resolved_strategy or self.strategy
+            n_users = len(self._user2idx)
+            n_items = len(self._item2idx)
+            fitted = "fitted" if self._baseline is not None else "not fitted"
+            return (f"OrchidRecommender(strategy='{strategy}', {fitted}, "
+                    f"users={n_users}, items={n_items}, device='{self.device}')")
 
     @property
     def is_fitted(self) -> bool:
         """Whether the recommender has been fit on data."""
-        return self._baseline is not None
+        with self._state_lock:
+            return self._baseline is not None
 
     @classmethod
     def quick_fit(
@@ -302,41 +306,88 @@ class OrchidRecommender:
         >>> rec.fit(interactions_df)
         >>> rec.fit(interactions_df, rating_col="rating")
         """
-        if interactions.empty:
-            raise ValueError("interactions DataFrame is empty")
+        with self._state_lock:
+            if interactions.empty:
+                raise ValueError("interactions DataFrame is empty")
 
-        if self._validate_inputs:
-            required_cols = {user_col, item_col}
-            if rating_col is not None:
-                required_cols.add(rating_col)
+            if self._validate_inputs:
+                required_cols = {user_col, item_col}
+                if rating_col is not None:
+                    required_cols.add(rating_col)
+                try:
+                    validate_interactions_frame(interactions, required_columns=required_cols)
+                except ValidationError as exc:
+                    raise ValueError(str(exc)) from exc
+
+            interactions = interactions.copy()
+            interactions[user_col] = interactions[user_col].astype(int)
+            interactions[item_col] = interactions[item_col].astype(int)
+
+            if rating_col is None:
+                interactions["__label__"] = 1.0
+                rating_col = "__label__"
+            else:
+                interactions[rating_col] = interactions[rating_col].astype(float)
+                # Reject non-finite ratings (inf, nan)
+                ratings_arr = interactions[rating_col].values
+                if not np.all(np.isfinite(ratings_arr)):
+                    raise ValueError("ratings contain non-finite values (inf or NaN)")
+
+            # Save prior state so we can roll back if baseline creation fails
+            _prev_user2idx = self._user2idx.copy()
+            _prev_idx2user = self._idx2user.copy()
+            _prev_item2idx = self._item2idx.copy()
+            _prev_idx2item = self._idx2item.copy()
+            _prev_seen = self._seen_items.copy()
+            _prev_baseline = self._baseline
+
             try:
-                validate_interactions_frame(interactions, required_columns=required_cols)
-            except ValidationError as exc:
-                raise ValueError(str(exc)) from exc
+                self._build_mappings(interactions, user_col, item_col)
+                self._init_seen_items(interactions, user_col, item_col)
+            except Exception:
+                # Restore prior state on mapping failure
+                self._user2idx, self._idx2user = _prev_user2idx, _prev_idx2user
+                self._item2idx, self._idx2item = _prev_item2idx, _prev_idx2item
+                self._seen_items = _prev_seen
+                self._baseline = _prev_baseline
+                raise
 
-        interactions = interactions.copy()
-        interactions[user_col] = interactions[user_col].astype(int)
-        interactions[item_col] = interactions[item_col].astype(int)
+            num_users = len(self._user2idx)
+            num_items = len(self._item2idx)
+            labels = interactions[rating_col].astype(float).values
+            user_idx = interactions[user_col].map(self._user2idx).astype(int).values
+            item_idx = interactions[item_col].map(self._item2idx).astype(int).values
 
-        if rating_col is None:
-            interactions["__label__"] = 1.0
-            rating_col = "__label__"
-        else:
-            interactions[rating_col] = interactions[rating_col].astype(float)
-            # Reject non-finite ratings (inf, nan)
-            ratings_arr = interactions[rating_col].values
-            if not np.all(np.isfinite(ratings_arr)):
-                raise ValueError("ratings contain non-finite values (inf or NaN)")
+            try:
+                self._fit_baseline(
+                    interactions, labels, user_idx, item_idx,
+                    num_users, num_items, item_features, item_col, rating_col,
+                )
+            except Exception:
+                # Roll back mappings so the recommender stays in a clean "not fitted" state
+                self._user2idx, self._idx2user = _prev_user2idx, _prev_idx2user
+                self._item2idx, self._idx2item = _prev_item2idx, _prev_idx2item
+                self._seen_items = _prev_seen
+                self._baseline = _prev_baseline
+                raise
 
-        self._build_mappings(interactions, user_col, item_col)
-        self._init_seen_items(interactions, user_col, item_col)
+            self._logger.info("fitted strategy=%s users=%d items=%d", self.strategy, num_users, num_items)
 
-        num_users = len(self._user2idx)
-        num_items = len(self._item2idx)
-        labels = interactions[rating_col].astype(float).values
-        user_idx = interactions[user_col].map(self._user2idx).astype(int).values
-        item_idx = interactions[item_col].map(self._item2idx).astype(int).values
+            return self
 
+    def _fit_baseline(
+        self,
+        interactions: Any,
+        labels: np.ndarray,
+        user_idx: np.ndarray,
+        item_idx: np.ndarray,
+        num_users: int,
+        num_items: int,
+        item_features: Optional[np.ndarray],
+        item_col: str,
+        rating_col: str,
+    ) -> str:
+        """Create and fit the baseline model. Separated for atomic fit()."""
         strategy = self.strategy
         if strategy == "auto":
             # Detect whether data is explicit ratings or binary/implicit
@@ -433,10 +484,7 @@ class OrchidRecommender:
                 f"Unknown strategy '{self.strategy}'. Expected one of 'als', 'linucb', 'popularity', "
                 "'random', 'implicit_als', 'implicit_bpr', 'neural_mf', 'user_knn'."
             )
-
-        self._logger.info("fitted strategy=%s users=%d items=%d", self.strategy, num_users, num_items)
-
-        return self
+        return strategy
 
     # ------------------------------------------------------------------
     def _scores_for_user(self, user_idx: int, candidate_idx: Sequence[int]) -> torch.Tensor:
@@ -449,6 +497,8 @@ class OrchidRecommender:
             user_tensor = torch.tensor([user_idx], dtype=torch.long, device=self.device)
             kwargs["user_ids"] = user_tensor
         logits = self._baseline.infer(**kwargs)
+        if not isinstance(logits, torch.Tensor):
+            logits = torch.as_tensor(logits, device=self.device)
         return logits.squeeze(0)
 
     # ------------------------------------------------------------------
@@ -474,16 +524,17 @@ class OrchidRecommender:
         KeyError
             If user_id or item_id is unknown.
         """
-        if self._baseline is None:
-            raise RuntimeError("Recommender has not been fit yet. Call fit() first.")
-        if user_id not in self._user2idx:
-            raise KeyError(f"Unknown user_id={user_id}. Known users: call all_users() to see valid IDs.")
-        if item_id not in self._item2idx:
-            raise KeyError(f"Unknown item_id={item_id}. Known items: call all_items() to see valid IDs.")
-        user_idx = self._user2idx[user_id]
-        item_idx = self._item2idx[item_id]
-        score = self._scores_for_user(user_idx, [item_idx])[0].item()
-        return float(score)
+        with self._state_lock:
+            if self._baseline is None:
+                raise RuntimeError("Recommender has not been fit yet. Call fit() first.")
+            if user_id not in self._user2idx:
+                raise KeyError(f"Unknown user_id={user_id}. Known users: call all_users() to see valid IDs.")
+            if item_id not in self._item2idx:
+                raise KeyError(f"Unknown item_id={item_id}. Known items: call all_items() to see valid IDs.")
+            user_idx = self._user2idx[user_id]
+            item_idx = self._item2idx[item_id]
+            score = self._scores_for_user(user_idx, [item_idx])[0].item()
+            return float(score)
 
     def predict_many(self, user_ids: Sequence[int], item_ids: Sequence[int]) -> np.ndarray:
         """Vectorized prediction for matching sequences of user_ids and item_ids.
@@ -519,28 +570,29 @@ class OrchidRecommender:
         >>> scores.shape
         (3,)
         """
-        if len(user_ids) != len(item_ids):
-            raise ValueError("user_ids and item_ids must have the same length")
-        if len(user_ids) == 0:
-            return np.zeros(0, dtype=np.float32)
+        with self._state_lock:
+            if len(user_ids) != len(item_ids):
+                raise ValueError("user_ids and item_ids must have the same length")
+            if len(user_ids) == 0:
+                return np.zeros(0, dtype=np.float32)
 
-        try:
-            user_idx = np.asarray([self._user2idx[int(u)] for u in user_ids], dtype=np.int64)
-            item_idx = np.asarray([self._item2idx[int(i)] for i in item_ids], dtype=np.int64)
-        except KeyError as exc:
-            raise KeyError(
-                f"Unknown user_id or item_id in predict_many: {exc}. "
-                f"Call all_users()/all_items() to see valid IDs."
-            ) from exc
+            try:
+                user_idx = np.asarray([self._user2idx[int(u)] for u in user_ids], dtype=np.int64)
+                item_idx = np.asarray([self._item2idx[int(i)] for i in item_ids], dtype=np.int64)
+            except KeyError as exc:
+                raise KeyError(
+                    f"Unknown user_id or item_id in predict_many: {exc}. "
+                    f"Call all_users()/all_items() to see valid IDs."
+                ) from exc
 
-        outputs = np.empty(len(user_idx), dtype=np.float32)
-        for u in np.unique(user_idx):
-            mask = np.where(user_idx == u)[0]
-            candidates = item_idx[mask].tolist()
-            scores_t = self._scores_for_user(int(u), candidates)
-            scores = scores_t.cpu().numpy().astype(np.float32) if scores_t.device.type != 'cpu' else scores_t.detach().numpy().astype(np.float32)
-            outputs[mask] = scores
-        return outputs
+            outputs = np.empty(len(user_idx), dtype=np.float32)
+            for u in np.unique(user_idx):
+                mask = np.where(user_idx == u)[0]
+                candidates = item_idx[mask].tolist()
+                scores_t = self._scores_for_user(int(u), candidates)
+                scores = scores_t.cpu().numpy().astype(np.float32) if scores_t.device.type != 'cpu' else scores_t.detach().numpy().astype(np.float32)
+                outputs[mask] = scores
+            return outputs
 
     # ------------------------------------------------------------------
     def recommend(
@@ -568,33 +620,38 @@ class OrchidRecommender:
 
         Raises
         ------
+        ValueError
+            If top_k < 1.
         RuntimeError
             If recommender has not been fit.
         KeyError
             If user_id is unknown.
         """
-        if self._baseline is None:
-            raise RuntimeError("Recommender has not been fit yet. Call fit() first.")
-        if user_id not in self._user2idx:
-            raise KeyError(f"Unknown user_id {user_id}. Have you called fit?")
-        user_idx = self._user2idx[user_id]
-        all_items_arr = np.fromiter(self._item2idx.values(), dtype=np.int64, count=len(self._item2idx))
-        if filter_seen and user_idx in self._seen_items:
-            seen = self._seen_items[user_idx]
-            seen_arr = np.fromiter(seen, dtype=np.int64, count=len(seen))
-            candidate_idx = np.setdiff1d(all_items_arr, seen_arr).tolist()
-        else:
-            candidate_idx = all_items_arr.tolist()
+        with self._state_lock:
+            if top_k < 1:
+                raise ValueError(f"top_k must be >= 1, got {top_k}")
+            if self._baseline is None:
+                raise RuntimeError("Recommender has not been fit yet. Call fit() first.")
+            if user_id not in self._user2idx:
+                raise KeyError(f"Unknown user_id {user_id}. Have you called fit?")
+            user_idx = self._user2idx[user_id]
+            all_items_arr = np.fromiter(self._item2idx.values(), dtype=np.int64, count=len(self._item2idx))
+            if filter_seen and user_idx in self._seen_items:
+                seen = self._seen_items[user_idx]
+                seen_arr = np.fromiter(seen, dtype=np.int64, count=len(seen))
+                candidate_idx = np.setdiff1d(all_items_arr, seen_arr).tolist()
+            else:
+                candidate_idx = all_items_arr.tolist()
 
-        if not candidate_idx:
-            return []
+            if not candidate_idx:
+                return []
 
-        scores = self._scores_for_user(user_idx, candidate_idx).detach().cpu().numpy()
-        order = np.argsort(scores)[::-1][:top_k]
-        return [
-            Recommendation(item_id=int(self._idx2item[candidate_idx[i]]), score=float(scores[i]))
-            for i in order
-        ]
+            scores = self._scores_for_user(user_idx, candidate_idx).detach().cpu().numpy()
+            order = np.argsort(scores)[::-1][:top_k]
+            return [
+                Recommendation(item_id=int(self._idx2item[candidate_idx[i]]), score=float(scores[i]))
+                for i in order
+            ]
 
     # ------------------------------------------------------------------
     def all_items(self) -> List[int]:
@@ -614,7 +671,8 @@ class OrchidRecommender:
         >>> len(items) > 0
         True
         """
-        return sorted(self._item2idx.keys())
+        with self._state_lock:
+            return sorted(self._item2idx.keys())
 
     def all_users(self) -> List[int]:
         """Get all known user IDs.
@@ -633,7 +691,8 @@ class OrchidRecommender:
         >>> len(users) > 0
         True
         """
-        return sorted(self._user2idx.keys())
+        with self._state_lock:
+            return sorted(self._user2idx.keys())
 
     # ------------------------------------------------------------------
     def save(self, path: str) -> None:
@@ -661,7 +720,8 @@ class OrchidRecommender:
         >>> rec.save("model.pt")
         """
         from .serialization import save_model
-        save_model(self, path)
+        with self._state_lock:
+            save_model(self, path)
 
     @classmethod
     def load(cls, path: str) -> "OrchidRecommender":

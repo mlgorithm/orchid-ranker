@@ -6,7 +6,7 @@
 - Public interfaces include the `OrchidRecommender` class, experiment runner, benchmarking scripts, and documented extras.
 
 ## Supported Runtime Matrix
-- Python: 3.9 – 3.13 (verified in CI across CPython builds).
+- Python: 3.11 – 3.13 (verified in CI across CPython builds).
 - PyTorch: 1.13 – 2.9 (primary development targets 2.x; earlier versions may miss optional GPU optimisations).
 - Operating systems: Ubuntu 22.04 LTS, macOS 14+, Windows Server 2022 (CPU paths).
 
@@ -23,4 +23,4 @@
 - GitHub issues for bug reports and feature requests.
 - Enterprise subscribers gain access to dedicated support SLAs, onboarding sessions, and private roadmap briefings.
 
-Updated: 2025-02-15
+Updated: 2026-04-12

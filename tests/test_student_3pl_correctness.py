@@ -445,22 +445,22 @@ class TestEngagementUpdateFormula:
         )
 
     def test_engagement_clamped_to_bounds(self):
-        """Test engagement is clamped to [0.2, 1.2]."""
+        """Test engagement is clamped to [0.0, 1.0]."""
         agent = StudentAgent(user_id=52, trust_influence=False, seed=42)
 
-        # Try to go below 0.2
-        agent.engagement = 0.3
+        # Try to go below 0.0
+        agent.engagement = 0.05
         agent.fatigue = 0.9
         feedback = {0: 0}  # all incorrect
         agent._update_latents_after_round(feedback, None)
-        assert agent.engagement >= 0.2
+        assert agent.engagement >= 0.0
 
-        # Try to go above 1.2
-        agent.engagement = 1.1
+        # Try to go above 1.0
+        agent.engagement = 0.95
         agent.fatigue = 0.0
         feedback = {0: 1}  # all correct
         agent._update_latents_after_round(feedback, None)
-        assert agent.engagement <= 1.2
+        assert agent.engagement <= 1.0
 
 
 class TestRewardFormula:
@@ -504,12 +504,12 @@ class TestRewardFormula:
         """Test reward with perfect accuracy, zero fatigue, high engagement."""
         agent = StudentAgent(user_id=62, seed=42)
         agent.fatigue = 0.0
-        agent.engagement = 1.2
+        agent.engagement = 1.0
 
         feedback = {0: 1, 1: 1}  # acc = 1.0
         reward = agent.reward(feedback)
 
-        expected = 0.60 * 1.0 + 0.25 * 1.0 + 0.15 * 1.2
+        expected = 0.60 * 1.0 + 0.25 * 1.0 + 0.15 * 1.0
         assert reward == pytest.approx(expected, abs=1e-10)
 
     def test_reward_poor_conditions(self):
@@ -524,7 +524,7 @@ class TestRewardFormula:
         expected = np.clip(
             0.60 * 0.0 + 0.25 * 0.0 + 0.15 * 0.2,
             0.0,
-            1.2
+            1.0
         )
         assert reward == pytest.approx(expected, abs=1e-10)
 

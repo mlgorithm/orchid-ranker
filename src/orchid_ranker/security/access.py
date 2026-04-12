@@ -28,7 +28,13 @@ class AccessControl:
 
     def can(self, role: Role, action: Action) -> bool:
         """Return ``True`` if ``role`` may perform ``action``."""
-        return action in self._to_set(role) or "*" in self._to_set(role)
+        actions = self._to_set(role)
+        if "*" in actions:
+            import logging as _logging
+            _logging.getLogger(__name__).warning(
+                "Role '%s' has wildcard ('*') permission — grants access to ALL actions", role
+            )
+        return action in actions or "*" in actions
 
     def require(self, role: Role, action: Action) -> None:
         """Raise ``PermissionError`` when ``role`` lacks ``action``."""

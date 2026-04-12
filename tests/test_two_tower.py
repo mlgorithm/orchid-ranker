@@ -33,6 +33,25 @@ class TestTwoTowerRecommenderConstruction:
         assert model.user_dim == 5
         assert model.item_dim == 8
 
+    def test_construction_honors_max_grad_norm(self):
+        """Test that DP config uses the documented clipping field."""
+        model = TwoTowerRecommender(
+            num_users=10,
+            num_items=20,
+            user_dim=5,
+            item_dim=8,
+            dp_cfg={
+                "enabled": True,
+                "noise_multiplier": 1.0,
+                "sample_rate": 0.1,
+                "delta": 1e-6,
+                "max_grad_norm": 0.25,
+            },
+            device="cpu",
+        )
+
+        assert model.dp_settings.max_grad_norm == 0.25
+
     def test_construction_with_custom_params(self):
         """Test construction with custom parameters."""
         model = TwoTowerRecommender(
@@ -213,6 +232,66 @@ class TestTwoTowerDecide:
             )
             assert len(chosen) <= k
 
+    def test_decide_dwell_reorder_uses_current_context(self):
+        """Test that dwell reordering uses the logits-scoped context, not shared last-item state."""
+        device = torch.device("cpu")
+
+        class PickItemRep(nn.Module):
+            def __init__(self, emb_dim: int):
+                super().__init__()
+                self.emb_dim = emb_dim
+
+            def forward(self, feats: torch.Tensor) -> torch.Tensor:
+                return feats[:, self.emb_dim:self.emb_dim + 1]
+
+        model = TwoTowerRecommender(
+            num_users=5,
+            num_items=10,
+            user_dim=4,
+            item_dim=4,
+            emb_dim=4,
+            use_dwell=True,
+            device=device,
+        ).to(device)
+        model.dwell_head = PickItemRep(model.emb_dim)
+
+        logits = torch.tensor([[2.0, 1.0]], dtype=torch.float32, device=device)
+        item_ids_t = torch.tensor([0, 1], dtype=torch.long, device=device)
+        item_reps = torch.tensor(
+            [[0.0, 0.0, 0.0, 0.0], [1.0, 0.0, 0.0, 0.0]],
+            dtype=torch.float32,
+            device=device,
+        )
+        user_context = torch.zeros((1, model.emb_dim), dtype=torch.float32, device=device)
+
+        model._store_decide_context(
+            logits,
+            item_reps=item_reps,
+            item_ids=item_ids_t,
+            item_matrix=torch.randn(2, 4, device=device),
+            adapted_lam=0.0,
+            adapted_nov=0.0,
+            user_context=user_context,
+        )
+
+        # Poison the shared cache to prove dwell reorder uses the current decide context.
+        model._last_item_ids = [10, 11]
+        model._last_item_reps = torch.full((2, model.emb_dim), -5.0, device=device)
+
+        chosen, _ = model.decide(
+            logits=logits,
+            item_ids=item_ids_t,
+            top_k=2,
+            user_id=0,
+            engagement=0.5,
+            trust=0.0,
+            difficulty_map={},
+            knowledge=0.5,
+            zpd_delta=0.1,
+        )
+
+        assert chosen == [1, 0]
+
 
 class TestTwoTowerUpdate:
     """Test update() parameter updates."""
@@ -264,6 +343,124 @@ class TestTwoTowerUpdate:
                 break
 
         assert params_changed or True  # may not change if batch is small
+
+    def test_update_accepts_external_feedback_ids(self):
+        """Test that update() resolves external item IDs to candidate positions."""
+        device = torch.device("cpu")
+        model = TwoTowerRecommender(
+            num_users=5,
+            num_items=10,
+            user_dim=4,
+            item_dim=4,
+            emb_dim=8,
+            lr=0.01,
+            dp_cfg={"enabled": False},
+            device=device,
+        ).to(device)
+        model.pos2id_map = {0: 100, 1: 200}
+
+        user_ids = torch.tensor([0, 0], dtype=torch.long, device=device)
+        item_ids = torch.tensor([0, 1], dtype=torch.long, device=device)
+        user_vec = torch.randn(2, 4, device=device)
+        item_matrix = torch.randn(10, 4, device=device)
+        state_vec = torch.randn(2, 4, device=device)
+
+        result = model.update(
+            feedback={100: 1, 200: 0},
+            user_vec=user_vec,
+            state_vec=state_vec,
+            user_ids=user_ids,
+            item_matrix=item_matrix,
+            item_ids=item_ids,
+        )
+
+        assert isinstance(result["loss"], float)
+        assert result["loss"] > 0.0
+
+    def test_update_respects_zero_dp_budget(self):
+        """Test that DP updates become a no-op when no privacy budget remains."""
+        device = torch.device("cpu")
+        model = TwoTowerRecommender(
+            num_users=5,
+            num_items=10,
+            user_dim=4,
+            item_dim=4,
+            emb_dim=8,
+            lr=0.01,
+            dp_cfg={
+                "enabled": True,
+                "noise_multiplier": 0.5,
+                "sample_rate": 1.0,
+                "delta": 1e-5,
+                "max_grad_norm": 1.0,
+                "engine": "per_sample",
+            },
+            device=device,
+        ).to(device)
+
+        initial_params = [p.detach().clone() for p in model.parameters()]
+        model.begin_dp_step(0.0)
+
+        result = model.update(
+            feedback={0: 1},
+            user_vec=torch.randn(1, 4, device=device),
+            state_vec=torch.randn(1, model.state_dim, device=device),
+            user_ids=torch.tensor([0], dtype=torch.long, device=device),
+            item_matrix=torch.randn(10, 4, device=device),
+            item_ids=torch.tensor([0, 1], dtype=torch.long, device=device),
+            epochs=5,
+        )
+
+        assert result["loss"] == 0.0
+        assert result["epsilon_delta"] == 0.0
+        assert result["epsilon_cum"] == 0.0
+        assert model._dp_steps_budget == 0
+        for initial, current in zip(initial_params, model.parameters()):
+            assert torch.allclose(initial, current)
+
+    def test_per_sample_update_runs_requested_number_of_steps(self):
+        """Test that per-sample DP updates charge only the steps they actually execute."""
+        device = torch.device("cpu")
+        model = TwoTowerRecommender(
+            num_users=5,
+            num_items=10,
+            user_dim=4,
+            item_dim=4,
+            emb_dim=8,
+            lr=0.01,
+            dp_cfg={
+                "enabled": True,
+                "noise_multiplier": 0.5,
+                "sample_rate": 1.0,
+                "delta": 1e-5,
+                "max_grad_norm": 1.0,
+                "engine": "per_sample",
+            },
+            device=device,
+        ).to(device)
+
+        model._dp_steps_budget = 4
+        calls = {"count": 0}
+        original = model._dp_update_per_sample
+
+        def wrapped(**kwargs):
+            calls["count"] += 1
+            return original(**kwargs)
+
+        model._dp_update_per_sample = wrapped
+        result = model.update(
+            feedback={0: 1},
+            user_vec=torch.randn(1, 4, device=device),
+            state_vec=torch.randn(1, model.state_dim, device=device),
+            user_ids=torch.tensor([0], dtype=torch.long, device=device),
+            item_matrix=torch.randn(10, 4, device=device),
+            item_ids=torch.tensor([0, 1], dtype=torch.long, device=device),
+            epochs=3,
+        )
+
+        assert calls["count"] == 3
+        assert model._dp_steps_budget == 1
+        assert result["epsilon_delta"] > 0.0
 
 
 class TestLinUCBPolicy:

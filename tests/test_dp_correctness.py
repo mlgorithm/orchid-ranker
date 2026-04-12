@@ -306,7 +306,7 @@ class TestAccountantFormula:
     def test_accountant_formula_abadi(self):
         """Test epsilon formula matches Abadi et al. (2016) bound.
 
-        ε(T) ≈ q * sqrt(2*T*log(1/δ)) / σ + T*q^2 / σ^2
+        ε(T) ≈ q * sqrt(2*T*log(1/δ)) / σ + T*q^2 / (2*σ^2)
         """
         q, sigma, delta = 0.1, 1.5, 1e-5
         T = 100
@@ -314,9 +314,9 @@ class TestAccountantFormula:
         accountant = SimpleDPAccountant(q=q, sigma=sigma, delta=delta)
         _, eps_actual = accountant.step(T)
 
-        # Compute expected value using formula
+        # Compute expected value using corrected formula (factor of 2 in term2)
         term1 = q * math.sqrt(2.0 * T * math.log(1.0 / delta)) / sigma
-        term2 = (T * (q ** 2)) / (sigma ** 2)
+        term2 = (T * (q ** 2)) / (2.0 * sigma ** 2)
         eps_expected = term1 + term2
 
         assert eps_actual == pytest.approx(eps_expected, abs=1e-10)

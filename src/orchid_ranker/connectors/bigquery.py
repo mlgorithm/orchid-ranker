@@ -3,6 +3,8 @@ from __future__ import annotations
 
 import logging
 import os
+import random as _random
+import threading
 import time
 from dataclasses import dataclass
 from typing import Optional
@@ -87,8 +89,13 @@ class BigQueryConnector:
             dataset=dataset,
         )
 
+    def __post_init__(self):
+        """Initialize cached client slot."""
+        self._cached_client = None
+        self._client_lock = threading.RLock()
+
     def _client(self):
-        """Get or create BigQuery client.
+        """Get or create BigQuery client (cached for connection pooling).
 
         Returns
         -------
@@ -100,15 +107,18 @@ class BigQueryConnector:
         ImportError
             If google-cloud-bigquery is not installed.
         """
-        if bigquery is None:  # pragma: no cover
-            raise ImportError(
-                "google-cloud-bigquery is required. Install via `pip install orchid-ranker[connectors]`"
-            )
-        return bigquery.Client(project=self.project)
+        with self._client_lock:
+            if bigquery is None:  # pragma: no cover
+                raise ImportError(
+                    "google-cloud-bigquery is required. Install via `pip install orchid-ranker[connectors]`"
+                )
+            if self._cached_client is None:
+                self._cached_client = bigquery.Client(project=self.project)
+            return self._cached_client
 
     def __enter__(self):
         """Context manager entry."""
-        self._client_instance = self._client()
+        self._client()  # ensure cached client is created
         return self
 
     def __exit__(self, exc_type, exc_val, exc_tb):
@@ -116,13 +126,16 @@ class BigQueryConnector:
         self.close()
 
     def close(self):
-        """Close the client connection."""
-        if hasattr(self, '_client_instance') and self._client_instance:
-            try:
-                self._client_instance.close()
-                logger.info("BigQuery client closed")
-            except Exception as e:
-                logger.warning(f"Error closing BigQuery client: {e}")
+        """Close the cached client connection."""
+        with self._client_lock:
+            if self._cached_client is not None:
+                try:
+                    self._cached_client.close()
+                    logger.info("BigQuery client closed")
+                except Exception as e:
+                    logger.warning(f"Error closing BigQuery client: {e}")
+                finally:
+                    self._cached_client = None
 
     def _retry_with_backoff(self, func, *args, **kwargs):
         """Execute function with exponential backoff retry logic.
@@ -154,10 +167,18 @@ class BigQueryConnector:
                 return func(*args, **kwargs)
             except Exception as e:
                 last_error = e
+                # Don't retry non-transient errors (auth, syntax, programming)
+                _non_transient = (
+                    TypeError, ValueError, SyntaxError, KeyError,
+                    PermissionError, ImportError,
+                )
+                err_msg = str(e).lower()
+                if isinstance(e, _non_transient) or "auth" in err_msg or "syntax" in err_msg:
+                    raise
                 if attempt < self.max_retries - 1:
-                    delay = delays[attempt]
+                    delay = delays[attempt] + _random.uniform(0, 0.5)
                     logger.warning(
-                        f"Attempt {attempt + 1} failed, retrying in {delay}s: {e}"
+                        f"Attempt {attempt + 1} failed, retrying in {delay:.2f}s: {e}"
                     )
                     time.sleep(delay)
                 else:
@@ -188,15 +209,14 @@ class BigQueryConnector:
             If query fails after all retry attempts.
         """
 
-        # Check dependencies before entering retry loop
-        self._client()
-
-        def _query():
+        with self._client_lock:
             client = self._client()
-            job = client.query(sql, timeout=self.timeout)
-            return job.result().to_dataframe(create_bqstorage_client=False)
 
-        return self._retry_with_backoff(_query)
+            def _query():
+                job = client.query(sql, timeout=self.timeout)
+                return job.result().to_dataframe(create_bqstorage_client=False)
+
+            return self._retry_with_backoff(_query)
 
     def load_dataframe(self, table: str, dataframe):
         """Load a DataFrame into a BigQuery table.
@@ -220,16 +240,15 @@ class BigQueryConnector:
         RetryExhaustedError
             If load fails after all retry attempts.
         """
-        # Check dependencies before entering retry loop
-        self._client()
-
-        def _load():
+        with self._client_lock:
             client = self._client()
-            destination = f"{self.dataset}.{table}" if self.dataset else table
-            job = client.load_table_from_dataframe(dataframe, destination)
-            return job.result(timeout=self.timeout)
 
-        return self._retry_with_backoff(_load)
+            def _load():
+                destination = f"{self.dataset}.{table}" if self.dataset else table
+                job = client.load_table_from_dataframe(dataframe, destination)
+                return job.result(timeout=self.timeout)
+
+            return self._retry_with_backoff(_load)
 
 
 __all__ = ["BigQueryConnector"]

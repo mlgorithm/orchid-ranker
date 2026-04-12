@@ -66,9 +66,11 @@ class OpacusAccountant:
                 "opacus is required for OpacusAccountant. Install via `pip install opacus` "
                 "or select a different DP engine."
             )
+        if not 0.0 < float(delta) < 1.0:
+            raise ValueError(f"delta must be in (0, 1), got {delta}")
         self.sample_rate = float(max(0.0, sample_rate))
         self.noise_multiplier = float(noise_multiplier)
-        self.delta = float(max(1e-12, delta))
+        self.delta = float(delta)
         self.orders: Tuple[float, ...] = tuple(orders or (1.25, 1.5, 2, 3, 5, 8, 10, 16, 32, 64, 128, 256))
         self.steps = 0
         self._rdp_cache = [0.0 for _ in self.orders]
@@ -133,8 +135,11 @@ def build_accountant(engine: str, cfg: SimpleDPConfig):
             noise_multiplier=cfg.noise_multiplier,
             delta=cfg.delta,
         )
-    # Fallback to no-op accountant for unknown engines
-    return _NullAccountant()
+    supported = {"per_sample", "opacus"}
+    raise ValueError(
+        f"Unknown DP engine '{engine}'. Supported engines: {supported}. "
+        "A typo here silently disables privacy tracking."
+    )
 
 
 __all__ = ["build_accountant", "OpacusAccountant", "SimpleAccountantAdapter"]

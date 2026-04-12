@@ -10,6 +10,12 @@ from orchid_ranker.serialization import save_model, load_model
 from orchid_ranker.recommender import OrchidRecommender
 
 
+class UnsafeCheckpointPayload:
+    """Deliberately unsafe pickle payload used to assert safe loading."""
+
+    pass
+
+
 # ============================================================================
 # Fixtures for test data
 # ============================================================================
@@ -117,6 +123,31 @@ class TestLoadModel:
         loaded = load_model(path)
 
         assert isinstance(loaded, OrchidRecommender)
+
+    def test_load_model_rejects_pickle_payload_even_if_env_allows(self, temp_dir, monkeypatch):
+        """Unsafe pickle checkpoints must stay blocked even when the env var is set."""
+        import torch
+
+        monkeypatch.setenv("ORCHID_ALLOW_PICKLE", "1")
+        path = Path(temp_dir) / "unsafe.pt"
+        torch.save(
+            {
+                "version": "1.0",
+                "model_type": "OrchidRecommender",
+                "state": {
+                    "strategy": "popularity",
+                    "user_map": {},
+                    "item_map": {},
+                    "seen_items": {},
+                    "baseline_type": "PopularityBaseline",
+                    "baseline_data": {"payload": UnsafeCheckpointPayload()},
+                },
+            },
+            path,
+        )
+
+        with pytest.raises(RuntimeError, match="Unsafe pickle-based checkpoints are not supported"):
+            load_model(path)
 
 
 # ============================================================================

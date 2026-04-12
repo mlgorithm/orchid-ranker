@@ -46,3 +46,13 @@ def test_evaluate_recommendations():
     assert isinstance(report, RankingReport)
     assert 0 <= report.precision_at_5 <= 1
     assert 0 <= report.ndcg_at_10 <= 1
+
+
+def test_evaluate_recommendations_counts_missing_users_as_zero():
+    recs = {1: [1]}
+    rel = {1: [1], 2: [2]}
+    report = evaluate_recommendations(recs, rel, k_prec=1, k_rec=1, k_map=1, k_ndcg=1)
+    assert report.precision == pytest.approx(0.5)
+    assert report.recall == pytest.approx(0.5)
+    assert report.map == pytest.approx(0.5)
+    assert report.ndcg == pytest.approx(0.5)

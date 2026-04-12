@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Dict, Sequence
+from typing import Any, Collection, Dict, Optional, Sequence
 
 import numpy as np
 
@@ -12,7 +12,7 @@ import numpy as np
 # ---------------------------------------------------------------------------
 
 
-def precision_at_k(recommended: Sequence[int], relevant: Sequence[int], k: int) -> float:
+def precision_at_k(recommended: Sequence[int], relevant: Collection[int], k: int) -> float:
     """Compute Precision@k metric.
 
     Measures the fraction of top-k recommended items that are relevant.
@@ -39,7 +39,7 @@ def precision_at_k(recommended: Sequence[int], relevant: Sequence[int], k: int) 
     return hits / float(k)
 
 
-def recall_at_k(recommended: Sequence[int], relevant: Sequence[int], k: int) -> float:
+def recall_at_k(recommended: Sequence[int], relevant: Collection[int], k: int) -> float:
     """Compute Recall@k metric.
 
     Measures the fraction of ground-truth relevant items that appear in top-k recommendations.
@@ -103,7 +103,7 @@ def ndcg_at_k(recommended: Sequence[int], relevant: Dict[int, float], k: int) ->
     return dcg / idcg if idcg > 0 else 0.0
 
 
-def average_precision(recommended: Sequence[int], relevant: Sequence[int], k: int) -> float:
+def average_precision(recommended: Sequence[int], relevant: Collection[int], k: int) -> float:
     """Compute Average Precision (AP@k) for a single ranking.
 
     Averages precision at each rank position where a relevant item appears.
@@ -268,9 +268,12 @@ def evaluate_recommendations(
     rec = []
     ap = []
     ndcg = []
-    relevant_dict = {uid: set(map(int, items)) for uid, items in relevant.items()}
-    for user_id, slate in recommendations.items():
-        rel_items = relevant_dict.get(user_id, set())
+    relevant_dict = {int(uid): set(map(int, items)) for uid, items in relevant.items()}
+
+    # Average over the full relevant-user set so omitted users contribute zero
+    # instead of disappearing from the denominator.
+    for user_id, rel_items in relevant_dict.items():
+        slate = recommendations.get(user_id, [])
         prec.append(precision_at_k(slate, rel_items, k_prec))
         rec.append(recall_at_k(slate, rel_items, k_rec))
         ap.append(average_precision(slate, rel_items, k_map))
@@ -317,7 +320,13 @@ def progression_gain(pre_score: float, post_score: float) -> float:
     return gain
 
 
-def proficiency_coverage(achieved: set = None, total: set = None, *, mastered_skills: set = None, total_skills: set = None) -> float:
+def proficiency_coverage(
+    achieved: Optional[set[Any]] = None,
+    total: Optional[set[Any]] = None,
+    *,
+    mastered_skills: Optional[set[Any]] = None,
+    total_skills: Optional[set[Any]] = None,
+) -> float:
     """Compute fraction of total competencies achieved.
 
     Measures the breadth of a user's proficiency across a competency domain.
@@ -431,7 +440,13 @@ def difficulty_appropriateness(
     return float(in_zpd) / float(len(recommended_difficulties))
 
 
-def engagement_score(interacted_items: Sequence = None, total_recommended: int = None, *, interactions: Sequence = None, total_available: int = None) -> float:
+def engagement_score(
+    interacted_items: Optional[Sequence[Any]] = None,
+    total_recommended: Optional[int] = None,
+    *,
+    interactions: Optional[Sequence[Any]] = None,
+    total_available: Optional[int] = None,
+) -> float:
     """Compute ratio of items interacted with to items recommended.
 
     Measures student engagement as a fraction of total recommendations.

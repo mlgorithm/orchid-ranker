@@ -151,7 +151,7 @@ class BayesianKnowledgeTracing:
             p_correct_if_unknown * (1 - self._p_known)
         )
 
-        if denominator > 0:
+        if denominator > 1e-12:
             self._p_known = numerator / denominator
 
         # Apply learning transition
@@ -308,8 +308,6 @@ class ProficiencyTracker:
         # Support old 'skills' kwarg
         if competencies is None and skills is not None:
             competencies = skills
-        if competencies is None:
-            raise ValueError("competencies list cannot be empty")
         if not competencies:
             raise ValueError("competencies list cannot be empty")
 
@@ -479,6 +477,13 @@ class ProficiencyTracker:
             return True
 
         required = prerequisites[competency]
+        # Validate that all prerequisites are tracked competencies
+        unknown = [r for r in required if r not in self._trackers]
+        if unknown:
+            raise KeyError(
+                f"Prerequisite(s) {unknown} not tracked. "
+                f"Known competencies: {sorted(self._trackers.keys())}"
+            )
         achieved = set(self.mastered())
         return all(req in achieved for req in required)
 

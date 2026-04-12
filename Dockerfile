@@ -12,7 +12,7 @@ COPY pyproject.toml README.md ./
 COPY src ./src
 
 RUN pip install --upgrade pip \
-    && pip install .[agentic,viz,preprocess,observability] \
+    && pip install .[agentic,viz,observability] \
     && useradd -ms /bin/bash orchid \
     && chown -R orchid:orchid /opt/orchid
 

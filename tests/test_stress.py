@@ -13,6 +13,8 @@ These tests push the library to its limits:
 
 import copy
 import math
+
+import pytest
 import os
 import sys
 import time
@@ -108,12 +110,12 @@ class TestRecommenderStress:
         except (KeyError, ValueError):
             pass
 
-    def test_recommend_top_k_zero(self):
+    def test_recommend_top_k_zero_raises(self):
         df = make_interactions()
         rec = OrchidRecommender(strategy="popularity")
         rec.fit(df)
-        recs = rec.recommend(user_id=0, top_k=0)
-        assert recs == [] or isinstance(recs, list)
+        with pytest.raises(ValueError, match="top_k must be >= 1"):
+            rec.recommend(user_id=0, top_k=0)
 
     def test_recommend_top_k_larger_than_catalog(self):
         df = pd.DataFrame({

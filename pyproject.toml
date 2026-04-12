@@ -12,7 +12,7 @@ authors = [
 ]
 license = "Apache-2.0"
 license-files = ["LICENSE"]
-requires-python = ">=3.9"
+requires-python = ">=3.11"
 dependencies = [
   "numpy>=1.22",
   "pandas>=1.5",
@@ -25,8 +25,6 @@ keywords = ["recommender-systems", "adaptive-learning", "knowledge-tracing", "ba
 classifiers = [
   "Development Status :: 4 - Beta",
   "Programming Language :: Python :: 3",
-  "Programming Language :: Python :: 3.9",
-  "Programming Language :: Python :: 3.10",
   "Programming Language :: Python :: 3.11",
   "Programming Language :: Python :: 3.12",
   "Programming Language :: Python :: 3.13",
@@ -41,44 +39,44 @@ classifiers = [
 
 [project.optional-dependencies]
 ml = [
-  "torch>=1.13",
+  "torch>=1.13,<3",
 ]
 torch = [
-  "torch>=1.13",
+  "torch>=1.13,<3",
 ]
 viz = [
-  "matplotlib>=3.6",
+  "matplotlib>=3.6,<4",
 ]
 agentic = [
-  "torch>=1.13",
-  "matplotlib>=3.6",
-  "tqdm>=4.60",
-  "opacus>=1.5",
+  "torch>=1.13,<3",
+  "matplotlib>=3.6,<4",
+  "tqdm>=4.60,<5",
+  "opacus>=1.5,<2",
 ]
 observability = [
-  "prometheus-client>=0.16",
+  "prometheus-client>=0.16,<1",
 ]
 connectors = [
-  "snowflake-connector-python>=3.0",
-  "google-cloud-bigquery>=3.11",
-  "boto3>=1.28",
-  "mlflow>=2.14",
+  "snowflake-connector-python>=3.0,<4",
+  "google-cloud-bigquery>=3.11,<4",
+  "boto3>=1.28,<2",
+  "mlflow>=2.14,<3",
 ]
 benchmarks = [
-  "implicit>=0.7",
-  "reclab>=0.2",
-  "scikit-surprise>=1.1",
-  "lightfm>=1.17",
+  "implicit>=0.7,<1",
+  "reclab>=0.2,<1",
+  "scikit-surprise>=1.1,<2",
+  "lightfm>=1.17,<2",
 ]
 dev = [
-  "torch>=1.13",
-  "pytest>=7.0",
-  "pytest-cov>=4.0",
-  "mypy>=1.4",
-  "ruff>=0.1.5",
-  "build>=1.0",
-  "twine>=4.0",
-  "prometheus-client>=0.16",
+  "torch>=1.13,<3",
+  "pytest>=7.0,<9",
+  "pytest-cov>=4.0,<6",
+  "mypy>=1.4,<2",
+  "ruff>=0.1.5,<1",
+  "build>=1.0,<2",
+  "twine>=4.0,<6",
+  "prometheus-client>=0.16,<1",
 ]
 all = [
   "orchid-ranker[ml,viz,agentic,observability,connectors]",
@@ -103,7 +101,7 @@ orchid-evaluate = "orchid_ranker.cli.evaluate:main"
 
 [tool.ruff]
 line-length = 120
-target-version = "py39"
+target-version = "py311"
 
 [tool.ruff.lint]
 select = ["E", "F", "W", "I"]
@@ -118,7 +116,7 @@ ignore = ["E501", "E402", "E701", "E702", "E741"]
 "src/orchid_ranker/knowledge_tracing.py" = ["F822"]
 
 [tool.mypy]
-python_version = "3.9"
+python_version = "3.11"
 warn_return_any = true
 warn_unused_configs = true
 ignore_missing_imports = true

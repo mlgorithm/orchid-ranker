@@ -3,7 +3,7 @@
 import numpy as np
 import pandas as pd
 
-from orchid_ranker.model_selection import train_test_split, evaluate_on_holdout
+from orchid_ranker.model_selection import cross_validate, evaluate_on_holdout, train_test_split
 from orchid_ranker.recommender import OrchidRecommender
 
 
@@ -116,8 +116,9 @@ class TestTrainTestSplit:
         })
         train, test = train_test_split(df, test_size=0.33, by_user=True, random_state=42)
 
-        # Each user has 1 item, so test should get at least 1
-        assert len(test) >= 1
+        # Single-interaction users stay in train to avoid impossible cold-start test users
+        assert len(train) == len(df)
+        assert test.empty
 
 
 class TestEvaluateOnHoldout:
@@ -344,3 +345,53 @@ class TestEvaluateOnHoldout:
 
         for metric, score in scores.items():
             assert 0 <= score <= 1, f"{metric} = {score} is out of bounds"
+
+
+class TestCrossValidate:
+    """Test cross-validation behavior for user-overlap and rating propagation."""
+
+    def test_cross_validate_holds_out_interactions_not_users(self):
+        """Each evaluated user should remain scoreable because only interactions are held out."""
+        df = pd.DataFrame({
+            "user_id": [1, 1, 1, 2, 2, 2, 3, 3, 3],
+            "item_id": [10, 11, 12, 10, 11, 12, 10, 11, 12],
+        })
+
+        scores = cross_validate(df, "random", k=3, metrics=["precision@5", "recall@5"])
+
+        assert scores["precision@5"]["mean"] > 0.0
+        assert scores["recall@5"]["mean"] > 0.0
+
+    def test_cross_validate_infers_rating_column(self, monkeypatch):
+        """Explicit feedback should be propagated to fit() when a rating column is present."""
+        df = pd.DataFrame({
+            "user_id": [1, 1, 1, 2, 2, 2, 3, 3, 3],
+            "item_id": [10, 11, 12, 10, 11, 12, 10, 11, 12],
+            "rating": [5.0, 4.0, 3.0, 4.0, 5.0, 2.0, 3.0, 4.0, 5.0],
+        })
+        seen_rating_cols = []
+        original_fit = OrchidRecommender.fit
+
+        def wrapped_fit(self, interactions, *, user_col="user_id", item_col="item_id", rating_col=None, item_features=None):
+            seen_rating_cols.append(rating_col)
+            return original_fit(
+                self,
+                interactions,
+                user_col=user_col,
+                item_col=item_col,
+                rating_col=rating_col,
+                item_features=item_features,
+            )
+
+        monkeypatch.setattr(OrchidRecommender, "fit", wrapped_fit)
+
+        cross_validate(
+            df,
+            "auto",
+            k=3,
+            metrics=["precision@5"],
+            strategy_kwargs={"epochs": 1, "emb_dim": 8},
+        )
+
+        assert seen_rating_cols
+        assert all(col == "rating" for col in seen_rating_cols)

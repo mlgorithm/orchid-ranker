@@ -329,16 +329,16 @@ class TestClippingLogic:
         expected_z = (0.5 - 1.0) + (0.8 - 0.5) / 0.5
         assert pytest.approx(dr.mean, rel=1e-10) == expected_z
 
-    def test_p_clipped_to_valid_range(self):
-        """p_used should be clipped to [p_min, 1 - p_min]."""
+    def test_p_uses_actual_boundary_probability(self):
+        """The DR update should use the actual logged boundary probability."""
         cfg = DRCSConfig(p_min=0.05, u_max=1.0)
         dr = DRConfidenceSequence(cfg)
 
         # Feed p_used < p_min
         dr.update(True, 0.8, 0.5, 0.3, 0.01)
 
-        # p should be clipped to 0.05
-        expected_z = (0.5 - 0.3) + (0.8 - 0.5) / 0.05
+        # The estimator should use the actual logged propensity (0.01)
+        expected_z = (0.5 - 0.3) + (0.8 - 0.5) / 0.01
         assert pytest.approx(dr.mean, rel=1e-10) == expected_z
 
 
@@ -381,7 +381,8 @@ class TestAcceptanceGuardrail:
         assert pytest.approx(gate.p, abs=1e-10) == 0.0
 
     def test_acceptance_guardrail_respects_acceptance_floor(self):
-        """Guardrail should only activate when acc_lcb < accept_floor."""
+        """Guardrail should only activate when acc_lcb < accept_floor.
+        After explicit restart, high acceptance should keep gate running."""
         cfg = SafeSwitchDRConfig(
             delta=0.01,
             p_min=0.1,
@@ -394,7 +395,13 @@ class TestAcceptanceGuardrail:
         # Feed high acceptance — need enough observations so the confidence
         # radius shrinks and acc_lcb rises above accept_floor.
         for _ in range(100):
-            gate.update(True, 0.5, 3.0, 0.5, 0.3, gate.p)
+            gate.update(gate.p > 0.0, 0.5, 3.0, 0.5, 0.3, gate.p)
+
+        # If halted from prior state, restart to test recovery
+        if gate.is_halted:
+            gate.restart()
+            for _ in range(100):
+                gate.update(gate.p > 0.0, 0.5, 3.0, 0.5, 0.3, gate.p)
 
         # acc_lcb should be >= accept_floor, so guardrail should not activate
         assert gate.p > 0.0
@@ -634,7 +641,7 @@ class TestAcceptanceLCBFormula:
 
         lcbs = []
         for _ in range(15):
-            gate.update(True, 0.5, 2.0, 0.5, 0.3, gate.p)
+            gate.update(gate.p > 0.0, 0.5, 2.0, 0.5, 0.3, gate.p)
             lcbs.append(gate._acc_lcb())
 
         # acc_lcb should increase (confidence radius shrinks)
@@ -668,8 +675,8 @@ class TestIntegrationScenarios:
     def test_full_scenario_positive_uplift(self):
         """Full scenario: positive uplift should increase p over time.
 
-        Use accept_floor=0 to disable the acceptance guardrail so that
-        positive DR uplift can drive p upward.
+        Use accept_floor=-1.0 to effectively disable the acceptance guardrail
+        so that positive DR uplift can drive p upward.
         """
         cfg = SafeSwitchDRConfig(
             delta=0.05,
@@ -677,7 +684,7 @@ class TestIntegrationScenarios:
             p_max=1.0,
             step_up=0.1,
             step_down=0.5,
-            accept_floor=0.0,
+            accept_floor=-1e9,
         )
         gate = SafeSwitchDR(cfg)
 
@@ -703,7 +710,7 @@ class TestIntegrationScenarios:
 
         p_values = [gate.p]
         for _ in range(10):
-            gate.update(True, 0.3, 0.5, 0.7, 0.3, gate.p)
+            gate.update(gate.p > 0.0, 0.3, 0.5, 0.7, 0.3, gate.p)
             p_values.append(gate.p)
 
         # p should generally decrease

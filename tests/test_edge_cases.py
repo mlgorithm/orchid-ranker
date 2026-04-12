@@ -171,8 +171,8 @@ def test_recommend_unknown_user_raises_key_error():
         rec.recommend(user_id=999, top_k=5)
 
 
-def test_recommend_top_k_zero_returns_empty_list():
-    """Verify recommend(top_k=0) returns empty list."""
+def test_recommend_top_k_zero_raises():
+    """Verify recommend(top_k=0) raises ValueError."""
     rec = OrchidRecommender(strategy="popularity")
     data = pd.DataFrame({
         "user_id": [1, 2, 3],
@@ -181,10 +181,8 @@ def test_recommend_top_k_zero_returns_empty_list():
     })
     rec.fit(data, rating_col="rating")
 
-    recs = rec.recommend(user_id=1, top_k=0)
-
-    assert isinstance(recs, list)
-    assert len(recs) == 0
+    with pytest.raises(ValueError, match="top_k must be >= 1"):
+        rec.recommend(user_id=1, top_k=0)
 
 
 def test_recommend_top_k_greater_than_available_items():

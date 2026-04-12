@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import math
 import random
+import threading
 from dataclasses import dataclass
 
 from .dr_cs import DRConfidenceSequence, DRCSConfig
@@ -22,7 +23,7 @@ class SafeSwitchDRConfig:
     step_up : float
         Increase in p per positive signal (default: 0.05).
     step_down : float
-        Multiplicative decrease in p per negative signal (default: 0.5).
+        Additive decrease in p per negative signal (default: 0.5).
     u_max : float
         Maximum reward value (default: 1.0).
     a_max : float
@@ -54,10 +55,16 @@ class SafeSwitchDR:
         Configuration object.
     """
 
+    # State machine: RUNNING -> HALTED (requires explicit restart)
+    _STATE_RUNNING = "running"
+    _STATE_HALTED = "halted"
+
     def __init__(self, cfg: SafeSwitchDRConfig):
         self.cfg = cfg
         self.p = cfg.p_min
         self.t = 0
+        self._state = self._STATE_RUNNING
+        self._lock = threading.Lock()
         self.dr = DRConfidenceSequence(
             DRCSConfig(delta=cfg.delta, u_max=cfg.u_max, p_min=cfg.p_min)
         )
@@ -91,13 +98,19 @@ class SafeSwitchDR:
         tuple
             (use_adaptive: bool, p_used: float)
         """
-        if self.t >= 5 and self._acc_lcb() < self.cfg.accept_floor:
-            self.p = 0.0
-            self._last_decision = (False, 0.0)
+        with self._lock:
+            # Once halted, stay halted until explicit restart
+            if self._state == self._STATE_HALTED:
+                self._last_decision = (False, 0.0)
+                return self._last_decision
+            if self.t >= 5 and self._acc_lcb() < self.cfg.accept_floor:
+                self.p = 0.0
+                self._state = self._STATE_HALTED
+                self._last_decision = (False, 0.0)
+                return self._last_decision
+            use_adaptive = random.random() < self.p
+            self._last_decision = (use_adaptive, self.p)
             return self._last_decision
-        use_adaptive = random.random() < self.p
-        self._last_decision = (use_adaptive, self.p)
-        return self._last_decision
 
     def update(
         self,
@@ -125,22 +138,51 @@ class SafeSwitchDR:
         p_used : float
             Logging probability used in this round.
         """
-        self.t += 1
-        acc = max(0.0, min(self.cfg.a_max, float(accepts_per_user)))
-        prev = self.acc_mean
-        self.acc_mean += (acc - self.acc_mean) / self.t
-        self.acc_M2 += (acc - self.acc_mean) * (acc - prev)
+        with self._lock:
+            self.t += 1
+            acc = max(0.0, min(self.cfg.a_max, float(accepts_per_user)))
+            prev = self.acc_mean
+            self.acc_mean += (acc - self.acc_mean) / self.t
+            self.acc_M2 += (acc - self.acc_mean) * (acc - prev)
 
-        self.dr.update(served_adaptive, reward, Qa_pred, Qf_pred, p_used)
+            self.dr.update(served_adaptive, reward, Qa_pred, Qf_pred, p_used)
 
-        if self.t >= 5 and self._acc_lcb() < self.cfg.accept_floor:
-            self.p = 0.0
-            return
+            if self._state == self._STATE_HALTED:
+                return
 
-        if self.dr.lcb() > 0.0:
-            self.p = min(self.cfg.p_max, self.p + self.cfg.step_up)
-        else:
-            self.p = max(self.cfg.p_min, self.p * self.cfg.step_down)
+            if self.t >= 5 and self._acc_lcb() < self.cfg.accept_floor:
+                self.p = 0.0
+                self._state = self._STATE_HALTED
+                return
+
+            if self.dr.lcb() > 0.0:
+                self.p = min(self.cfg.p_max, self.p + self.cfg.step_up)
+            else:
+                self.p = max(self.cfg.p_min, self.p - self.cfg.step_down)
+
+    @property
+    def is_halted(self) -> bool:
+        """Return True if the circuit breaker is in HALTED state."""
+        return self._state == self._STATE_HALTED
+
+    def restart(self, *, reset_stats: bool = False) -> None:
+        """Explicitly restart after a halt.
+
+        Parameters
+        ----------
+        reset_stats : bool
+            If True, reset all accumulated statistics (t, acc_mean, acc_M2, DR).
+            If False (default), perform a warm restart that resumes from prior stats.
+        """
+        self._state = self._STATE_RUNNING
+        self.p = self.cfg.p_min
+        if reset_stats:
+            self.t = 0
+            self.acc_mean = 0.0
+            self.acc_M2 = 0.0
+            self.dr = DRConfidenceSequence(
+                DRCSConfig(delta=self.cfg.delta, u_max=self.cfg.u_max, p_min=self.cfg.p_min)
+            )
 
     def telemetry(self) -> dict:
         """Get diagnostic telemetry.

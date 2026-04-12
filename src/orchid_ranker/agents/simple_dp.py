@@ -61,7 +61,7 @@ class SimpleDPAccountant:
         if self.sigma <= 0.0 or self.q <= 0.0 or T <= 0:
             return 0.0
         term1 = self.q * math.sqrt(2.0 * T * math.log(1.0 / self.delta)) / self.sigma
-        term2 = (T * (self.q ** 2)) / (self.sigma ** 2)
+        term2 = (T * (self.q ** 2)) / (2.0 * self.sigma ** 2)
         return float(term1 + term2)
 
     def step(self, steps: int) -> Tuple[float, float]:
@@ -84,6 +84,13 @@ class SimpleDPAccountant:
         self.T += steps
         eps_after = self._eps_for(self.T)
         self.eps = eps_after
+        if self.eps > 10.0:
+            import logging as _logging
+            _logging.getLogger(__name__).warning(
+                "Cumulative epsilon=%.2f exceeds 10.0 — privacy guarantee is very weak. "
+                "Consider increasing noise or reducing training steps.",
+                self.eps,
+            )
         return float(max(0.0, eps_after - eps_before)), float(self.eps)
 
 

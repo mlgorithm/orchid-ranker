@@ -4,7 +4,7 @@ from __future__ import annotations
 import logging
 import math
 import random
-from collections import defaultdict
+from collections import defaultdict, deque
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
@@ -38,6 +38,8 @@ class MultiUserOrchestrator:
         def __init__(self):
             self.mia_threshold: float = 0.55
 
+    _MAX_WARMUP_BATCHES: int = 500
+
     def __init__(
         self,
         rec: TwoTowerRecommender | DualRecommender,
@@ -47,14 +49,14 @@ class MultiUserOrchestrator:
         item_ids_pos: torch.Tensor,
         pos2id: List[int],
         id2pos: Dict[int, int],
-        item_meta_by_id: Dict[int, dict],
+        item_meta_by_id: Dict[int, dict],  # keys: difficulty, skills, etc.
         cfg: MultiConfig,
         device: torch.device,
         *,
         mode_label: str = "fixed",
-        sanitize_user_cols_idx: List[int] = None,
-        sanitize_item_cols_idx: List[int] = None,
-        safe_gate=None,
+        sanitize_user_cols_idx: Optional[List[int]] = None,
+        sanitize_item_cols_idx: Optional[List[int]] = None,
+        safe_gate: Optional[Any] = None,
     ):
         self.rec = rec
         self.users = list(users)
@@ -79,7 +81,7 @@ class MultiUserOrchestrator:
         for iid, meta in item_meta_by_id.items():
             try:
                 self._difficulty_map[int(iid)] = float(meta.get("difficulty", 0.5))
-            except Exception:
+            except (TypeError, ValueError, AttributeError):
                 self._difficulty_map[int(iid)] = 0.5
 
         # JSONL logger
@@ -133,8 +135,8 @@ class MultiUserOrchestrator:
         if self._is_adaptive:
             for ux in self.users:
                 self._policy_state[int(ux.user_id)] = self._init_policy_state()
-            # buffer to accumulate warmup batches
-            self._warmup_buffer: list[dict] = []
+            # buffer to accumulate warmup batches (bounded to prevent OOM)
+            self._warmup_buffer: deque = deque(maxlen=500)
 
         # ----- Paper-aligned State (EWMA + uncertainty scalar) -----
         # Per-user EWMA estimates: k_hat and e_hat
@@ -391,7 +393,8 @@ class MultiUserOrchestrator:
     def _user_state_vec(self, student) -> torch.Tensor:
         # [knowledge, fatigue, trust, engagement] — if knowledge is vector, average it
         if isinstance(student.knowledge, (list, np.ndarray)):
-            k = float(np.mean(student.knowledge))
+            arr = np.asarray(student.knowledge)
+            k = float(np.mean(arr)) if arr.size > 0 else 0.0
         else:
             k = float(student.knowledge)
         s = torch.tensor([[k, float(student.fatigue), float(student.trust), float(student.engagement)]],
@@ -626,6 +629,8 @@ class MultiUserOrchestrator:
                             "state_vec": state_vec.expand(len(items), -1),
                         }
                         pre_batches.append(batch)
+                        if len(pre_batches) >= self._MAX_WARMUP_BATCHES:
+                            break
                         # accumulate for MF fit
                         _uids.extend([uid] * len(items))
                         _iids.extend(items)
@@ -640,7 +645,7 @@ class MultiUserOrchestrator:
                 lam = float(getattr(self.cfg, "funk_lambda", 0.3))
                 for _ in range(steps):
                     for b in pre_batches:
-                        bb = dict(b)
+                        bb = {k: v.clone() if hasattr(v, 'clone') else v for k, v in b.items()}
                         if use_distill and self._funk_model is not None:
                             try:
                                 ds = self._funk_model.infer(user_ids=bb["user_ids"].to(torch.device("cpu")), item_ids=bb["item_ids"].to(torch.device("cpu")))
@@ -1093,7 +1098,7 @@ class MultiUserOrchestrator:
                             # extend history with current accepted reps (cap memory)
                             try:
                                 for t in acc_reps:
-                                    emb_hist_by_user[uid_ext].append(t.detach())
+                                    emb_hist_by_user[uid_ext].append(t.detach().cpu())
                                 if len(emb_hist_by_user[uid_ext]) > 256:
                                     emb_hist_by_user[uid_ext] = emb_hist_by_user[uid_ext][-256:]
                             except Exception:

@@ -91,6 +91,13 @@ class GridSearchCV:
         verbose: int = 0,
     ) -> None:
         self.strategy = strategy
+        # Validate param_grid: values must be list/tuple sequences, not bare scalars
+        for key, values in param_grid.items():
+            if not isinstance(values, (list, tuple)):
+                raise TypeError(
+                    f"param_grid[{key!r}] must be a list or tuple of values to search, "
+                    f"got {type(values).__name__}. Wrap scalar in a list: [{values!r}]"
+                )
         self.param_grid = param_grid
         self.cv = max(2, int(cv))
         self.scoring = scoring
@@ -157,7 +164,7 @@ class GridSearchCV:
                     continue
 
                 try:
-                    recs = model.recommend(int(user_id), top_k=k, filter_seen=False)
+                    recs = model.recommend(int(user_id), top_k=k, filter_seen=True)
                     recommended = [rec.item_id for rec in recs]
 
                     if metric == "precision":
@@ -382,6 +389,13 @@ class RandomSearchCV:
         verbose: int = 0,
     ) -> None:
         self.strategy = strategy
+        # Validate param_distributions: values must be list/tuple sequences
+        for key, values in param_distributions.items():
+            if not isinstance(values, (list, tuple)):
+                raise TypeError(
+                    f"param_distributions[{key!r}] must be a list or tuple of values to sample, "
+                    f"got {type(values).__name__}. Wrap scalar in a list: [{values!r}]"
+                )
         self.param_distributions = param_distributions
         self.n_iter = max(1, int(n_iter))
         self.cv = max(2, int(cv))
@@ -464,7 +478,7 @@ class RandomSearchCV:
                     continue
 
                 try:
-                    recs = model.recommend(int(user_id), top_k=k, filter_seen=False)
+                    recs = model.recommend(int(user_id), top_k=k, filter_seen=True)
                     recommended = [rec.item_id for rec in recs]
 
                     if metric == "precision":

@@ -168,19 +168,27 @@ class PopularityBaseline(BaseBaseline):
         Torch device for computation.
     """
 
+    # Maximum tensor size to prevent OOM from sparse item IDs.
+    # When max(item_id) exceeds this, fall back to dict-based scoring.
+    _MAX_TENSOR_SIZE = 2_000_000
+
     def __init__(self, popularity: Dict[int, float], device: torch.device):
         super().__init__(device)
         self.popularity = popularity
-        # Pre-build lookup tensor for vectorized scoring
+        # Pre-build lookup tensor for vectorized scoring, but only if
+        # item IDs are dense enough to avoid OOM on sparse ID spaces.
         if popularity:
             max_id = max(popularity.keys()) + 1
         else:
             max_id = 1
-        # Pre-allocate with buffer to avoid runtime expansion on OOV items
-        buffer_size = max(max_id, 1) + max(int(max_id * 0.2), 100)
-        self._pop_tensor = torch.zeros(buffer_size, dtype=torch.float32, device=device)
-        for item_id, score in popularity.items():
-            self._pop_tensor[item_id] = score
+        if max_id <= self._MAX_TENSOR_SIZE:
+            buffer_size = max_id + min(int(max_id * 0.2), 100)
+            self._pop_tensor = torch.zeros(buffer_size, dtype=torch.float32, device=device)
+            for item_id, score in popularity.items():
+                self._pop_tensor[item_id] = score
+        else:
+            # Sparse ID space — skip tensor allocation, use dict in infer()
+            self._pop_tensor = None
 
     def infer(self, *, item_ids: torch.Tensor, **_):
         """Score items by their popularity.
@@ -196,6 +204,13 @@ class PopularityBaseline(BaseBaseline):
             Popularity scores of shape (1, num_items).
         """
         ids = item_ids.long()
+        if self._pop_tensor is None:
+            # Sparse fallback — look up from dict
+            scores = torch.tensor(
+                [self.popularity.get(int(i), 0.0) for i in ids],
+                dtype=torch.float32, device=self.device,
+            )
+            return scores.unsqueeze(0)
         # Expand lookup tensor if needed for out-of-range item IDs
         max_id = int(ids.max().item()) + 1 if ids.numel() > 0 else 0
         if max_id > self._pop_tensor.size(0):

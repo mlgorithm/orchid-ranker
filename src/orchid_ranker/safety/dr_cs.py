@@ -88,12 +88,24 @@ class DRConfidenceSequence:
         u = max(0.0, min(self.cfg.u_max, float(reward)))
         Qa = max(0.0, min(self.cfg.u_max, float(Qa)))
         Qf = max(0.0, min(self.cfg.u_max, float(Qf)))
-        p = min(max(float(p_used), self.cfg.p_min), 1.0 - self.cfg.p_min)
+        p = float(p_used)
+        if not 0.0 <= p <= 1.0:
+            raise ValueError(f"p_used must be in [0, 1], got {p_used}")
+        if served_adaptive and p == 0.0:
+            raise ValueError("served_adaptive=True is impossible when p_used=0.0")
+        if (not served_adaptive) and p == 1.0:
+            raise ValueError("served_adaptive=False is impossible when p_used=1.0")
 
         if served_adaptive:
-            z = (Qa - Qf) + (u - Qa) / p
+            if p == 1.0:
+                z = u - Qf
+            else:
+                z = (Qa - Qf) + (u - Qa) / p
         else:
-            z = (Qa - Qf) - (u - Qf) / (1.0 - p)
+            if p == 0.0:
+                z = Qa - u
+            else:
+                z = (Qa - Qf) - (u - Qf) / (1.0 - p)
 
         prev_mean = self.mean
         self.mean += (z - self.mean) / self.t
@@ -129,4 +141,3 @@ __all__ = [
     "DRCSConfig",
     "DRConfidenceSequence",
 ]
-

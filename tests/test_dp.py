@@ -75,3 +75,17 @@ def test_opacus_accountant_available_when_installed():
     incr2, eps2 = accountant.step(5)
     assert incr1 >= 0.0 and incr2 >= 0.0
     assert eps2 >= eps1 >= 0.0
+
+
+def test_opacus_accountant_preserves_requested_delta():
+    pytest.importorskip("opacus")
+    cfg = SimpleDPConfig(enabled=True, sample_rate=0.05, noise_multiplier=1.0, delta=1e-20)
+    accountant = build_accountant("opacus", cfg)
+    assert accountant.delta == pytest.approx(1e-20)
+
+
+def test_opacus_accountant_rejects_invalid_delta():
+    pytest.importorskip("opacus")
+    cfg = SimpleDPConfig(enabled=True, sample_rate=0.05, noise_multiplier=1.0, delta=0.0)
+    with pytest.raises(ValueError, match="delta"):
+        build_accountant("opacus", cfg)

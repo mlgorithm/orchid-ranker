@@ -6,6 +6,7 @@ import hashlib
 import hmac
 import json
 import os
+import threading
 import uuid
 from dataclasses import asdict, dataclass, field
 from datetime import datetime, timezone
@@ -62,36 +63,76 @@ class AuditLogger:
         self.path = Path(path)
         if ensure_dir:
             self.path.parent.mkdir(parents=True, exist_ok=True)
+
+        # Enforce HTTPS for audit endpoints in production.
+        # Set ORCHID_AUDIT_ALLOW_HTTP=1 for local development/testing only.
+        if endpoint and not endpoint.startswith("https://"):
+            if os.environ.get("ORCHID_AUDIT_ALLOW_HTTP", ""):
+                import logging as _logging
+                _logging.getLogger(__name__).warning(
+                    "Audit endpoint %r does not use HTTPS. "
+                    "Audit logs (including bearer tokens) will be sent unencrypted. "
+                    "This is allowed only because ORCHID_AUDIT_ALLOW_HTTP is set.",
+                    endpoint,
+                )
+            else:
+                raise ValueError(
+                    f"Audit endpoint {endpoint!r} does not use HTTPS. "
+                    "Audit logs (including bearer tokens) would be sent unencrypted. "
+                    "Use an https:// endpoint, or set ORCHID_AUDIT_ALLOW_HTTP=1 "
+                    "for local development/testing."
+                )
         self.endpoint = endpoint
         self.api_key = api_key
         self.timeout = float(timeout)
         self.hmac_key = hmac_key
+
+        # Validate Fernet key format if provided
+        if encryption_key is not None:
+            if Fernet is None:
+                raise RuntimeError(
+                    "cryptography library required for encryption. "
+                    "Install with: pip install cryptography"
+                )
+            try:
+                Fernet(encryption_key)  # validate key format
+            except Exception as exc:
+                raise ValueError(
+                    "Invalid Fernet encryption key. Must be 32 url-safe "
+                    "base64-encoded bytes (44 characters). Generate one with: "
+                    "from cryptography.fernet import Fernet; Fernet.generate_key()"
+                ) from exc
         self.encryption_key = encryption_key
         self._prev_hash = "0" * 64  # Genesis hash for hash chaining
+        # Thread safety: hash-chain state + file append must be atomic
+        self._lock = threading.RLock()
 
     def log(self, event: AuditEvent) -> None:
         line = event.to_json()
 
-        # Add HMAC hash chaining if enabled
-        if self.hmac_key:
-            line_dict = json.loads(line)
-            line_dict["_prev_hash"] = self._prev_hash
-            # Compute HMAC of current line (excluding _hash field)
-            line_content = json.dumps(line_dict, separators=(",", ":"), default=str)
-            current_hash = hmac.new(self.hmac_key, line_content.encode("utf-8"), hashlib.sha256).hexdigest()
-            line_dict["_hash"] = current_hash
-            line = json.dumps(line_dict, separators=(",", ":"), default=str)
-            self._prev_hash = current_hash
+        with self._lock:
+            # Add HMAC hash chaining if enabled
+            if self.hmac_key:
+                line_dict = json.loads(line)
+                line_dict["_prev_hash"] = self._prev_hash
+                # Compute HMAC of current line (excluding _hash field)
+                line_content = json.dumps(line_dict, separators=(",", ":"), default=str)
+                current_hash = hmac.new(self.hmac_key, line_content.encode("utf-8"), hashlib.sha256).hexdigest()
+                line_dict["_hash"] = current_hash
+                line = json.dumps(line_dict, separators=(",", ":"), default=str)
+                self._prev_hash = current_hash
 
-        # Encrypt if enabled
-        if self.encryption_key:
-            if Fernet is None:
-                raise RuntimeError("cryptography library required for encryption. Install with: pip install cryptography")
-            cipher = Fernet(self.encryption_key)
-            line = base64.b64encode(cipher.encrypt(line.encode("utf-8"))).decode("utf-8")
+            # Encrypt if enabled
+            if self.encryption_key:
+                if Fernet is None:
+                    raise RuntimeError("cryptography library required for encryption. Install with: pip install cryptography")
+                cipher = Fernet(self.encryption_key)
+                line = base64.b64encode(cipher.encrypt(line.encode("utf-8"))).decode("utf-8")
 
-        with self.path.open("a", encoding="utf-8") as fh:
-            fh.write(f"{line}\n")
+            with self.path.open("a", encoding="utf-8") as fh:
+                fh.write(f"{line}\n")
+
+        # Remote send outside lock to avoid blocking
         self._send_remote(line)
 
     def log_event(self, event_type: str, actor: str, payload: Optional[Dict[str, Any]] = None) -> None:
@@ -119,7 +160,7 @@ class AuditLogger:
 
         encryption_key = None
         if enc_key_str := os.getenv("ORCHID_AUDIT_ENCRYPTION_KEY"):
-            encryption_key = enc_key_str.encode("utf-8") if isinstance(enc_key_str, str) else enc_key_str
+            encryption_key = enc_key_str.encode("ascii")
 
         return cls(
             path,
@@ -132,12 +173,42 @@ class AuditLogger:
         )
 
 
-def verify_log_integrity(path: Path, hmac_key: bytes) -> VerificationResult:
+def _decrypt_audit_line(line: str, encryption_key: bytes, *, line_num: int) -> str:
+    """Decrypt one base64-encoded Fernet audit log line."""
+    if Fernet is None:
+        raise RuntimeError(
+            "cryptography library required to verify encrypted audit logs. "
+            "Install with: pip install cryptography"
+        )
+
+    try:
+        encrypted_data = base64.b64decode(line, validate=True)
+    except Exception as exc:
+        raise ValueError(
+            f"Encrypted audit log line {line_num} is not valid base64: {exc}"
+        ) from exc
+
+    try:
+        return Fernet(encryption_key).decrypt(encrypted_data).decode("utf-8")
+    except InvalidToken as exc:
+        raise ValueError(
+            f"Failed to decrypt encrypted audit log at line {line_num}: {exc}"
+        ) from exc
+
+
+def verify_log_integrity(
+    path: Path,
+    hmac_key: bytes,
+    *,
+    encryption_key: Optional[bytes] = None,
+) -> VerificationResult:
     """Verify audit log integrity using HMAC hash chaining.
 
     Args:
         path: Path to the JSONL audit log file.
         hmac_key: The HMAC key used to sign the log entries.
+        encryption_key: Optional Fernet key for encrypted audit logs. If the
+            log was written with encryption enabled, this key is required.
 
     Returns:
         VerificationResult with verification status and details.
@@ -156,15 +227,42 @@ def verify_log_integrity(path: Path, hmac_key: bytes) -> VerificationResult:
                     continue
 
                 lines_checked += 1
+
                 try:
                     line_dict = json.loads(line)
                 except json.JSONDecodeError as e:
-                    return VerificationResult(
-                        valid=False,
-                        lines_checked=lines_checked,
-                        first_error_line=line_num,
-                        error_message=f"JSON parse error: {e}",
-                    )
+                    if encryption_key is None:
+                        try:
+                            base64.b64decode(line, validate=True)
+                        except Exception:
+                            return VerificationResult(
+                                valid=False,
+                                lines_checked=lines_checked,
+                                first_error_line=line_num,
+                                error_message=f"JSON parse error: {e}",
+                            )
+                        return VerificationResult(
+                            valid=False,
+                            lines_checked=lines_checked,
+                            first_error_line=line_num,
+                            error_message=(
+                                f"Encrypted audit log detected at line {line_num}; "
+                                "pass encryption_key to verify_log_integrity()"
+                            ),
+                        )
+
+                    try:
+                        decrypted = _decrypt_audit_line(
+                            line, encryption_key, line_num=line_num
+                        )
+                        line_dict = json.loads(decrypted)
+                    except Exception as exc:
+                        return VerificationResult(
+                            valid=False,
+                            lines_checked=lines_checked,
+                            first_error_line=line_num,
+                            error_message=str(exc),
+                        )
 
                 # Verify _prev_hash matches expected previous hash
                 actual_prev_hash = line_dict.get("_prev_hash")
