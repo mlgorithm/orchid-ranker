@@ -5,7 +5,7 @@ This runbook summarizes the operational knobs we currently support when deployin
 ## 1. Release & CI gates
 
 1. `pytest` — run `python -m pytest` (includes native scoring and SafeSwitch unit tests).
-2. Safe smoke scenario — `./scripts/ci_safe_smoke.sh runs/ci-safe-smoke`. This runs a 60×120 MovieLens slice with `--safe-eb --safe-eb-dr`, verifies the SafeSwitch telemetry, and completes in under 2 minutes on CPU/MPS hardware.
+2. Safe smoke scenario — `./scripts/ci_safe_smoke.sh runs/ci-safe-smoke`. This verifies SafeSwitch telemetry and completes quickly on CPU/MPS hardware.
 3. GitHub Actions — `.github/workflows/ci.yaml` runs both steps above automatically on every push/PR so regressions are caught before release.
 
 Embed both steps in CI to block regressions. The smoke run ensures the non-regression gate is wired each release.
@@ -18,7 +18,7 @@ Embed both steps in CI to block regressions. The smoke run ensures the non-regre
 
 ## 3. Monitoring & observability
 
-- Timing logs --- pass `--timing-log runs/foo/timing.jsonl --timing-rounds 5` to benchmark scripts to capture phase-level latency (candidate sampling, tower inference, decide, user interaction, train step). Ship these JSON lines to your telemetry backend to track regressions.
+- Timing logs --- capture phase-level latency (candidate sampling, tower inference, decide, user interaction, train step) during smoke runs or pre-production validations. Ship these JSON lines to your telemetry backend to track regressions.
 - JSONL metrics — each orchestrator round emits `round_summary` events with acceptance, accuracy, novelty, DP epsilon, and `safe_gate` telemetry.
 - Prometheus — enable the optional `observability` extra in `pyproject.toml` to expose built-in counters via `prometheus-client` if you integrate the library in a long-running service.
 
@@ -26,7 +26,7 @@ Embed both steps in CI to block regressions. The smoke run ensures the non-regre
 
 - Versioned builds — update `pyproject.toml` and tag releases; build with `python -m build` and publish via your internal package index.
 - Use `scripts/bump_version.sh [major|minor|patch]` to bump the semantic version string safely before tagging a release.
-- Docker — use the benchmark scripts as entrypoints (e.g., `python benchmarks/run_agentic_ml100k.py ...`) in your CI images to validate GPU/MPS compatibility.
+- Docker — run your smoke checks inside the target image before release to validate CPU, CUDA, or MPS compatibility.
 
 ## 5. Rollout strategy
 

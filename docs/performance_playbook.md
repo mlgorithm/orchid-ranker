@@ -1,16 +1,14 @@
 # Performance Tuning Playbook
 
-## 1. Microbenchmark inference
+## 1. Measure inference on a representative workload
 
-```bash
-PYTHONPATH=src python benchmarks/bench_infer.py --iters 50 --users 128 --items 1024 --candidates 128 --dim 32 --native-score
-```
-
-Compare eager vs `--torch-compile` and native scoring to quantify gains.
+Capture timing on the same request shapes you expect in production and compare
+eager execution, `--torch-compile`, and native scoring where available.
 
 ## 2. Timing clamp
 
-Use `--timing-log` + `--timing-rounds` on benchmarks to profile hot spots without full traces.
+Use timing logs on smoke checks or validation runs to profile hot spots without
+full traces.
 
 ## 3. Common optimizations
 
@@ -32,4 +30,5 @@ Focus on the largest phase and apply the optimizations above.
 
 ## 5. Regression guard
 
-Add `bench_infer` run plus `ci_safe_smoke.sh` to CI so latency regressions are flagged automatically.
+Add a lightweight serving smoke check to CI so latency regressions are flagged
+automatically.

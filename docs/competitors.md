@@ -15,7 +15,7 @@ fitness progression, expertise-driven shopping, or curated content discovery.
 |----------|-------------------|
 | You need a quick Python recommender with a simple fit/recommend API | Orchid `OrchidRecommender` or `implicit` |
 | You need progression metrics, live adaptation, and safe fallback | Orchid |
-| You need dozens of research algorithms and standard benchmark protocols | RecBole |
+| You need dozens of research algorithms and standard evaluation protocols | RecBole |
 | You need GPU-scale feature engineering, training, and Triton serving | NVIDIA Merlin |
 | You need hybrid matrix factorization with user/item metadata | LightFM |
 | You want to build custom Keras retrieval/ranking models | TensorFlow Recommenders |

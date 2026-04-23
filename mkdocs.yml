@@ -6,12 +6,6 @@ repo_name: mlgorithm/orchid-ranker
 edit_uri: edit/main/docs/
 exclude_docs: |
   README.md
-  application-scenarios.md
-  benchmarking.md
-  benchmarking_results.md
-  core-vs-specialty.md
-  benchmarks/
-  roadmap/
 
 theme:
   name: material
@@ -69,7 +63,6 @@ nav:
     - API overview: api_reference.md
     - Enterprise runbook: enterprise_runbook.md
     - Security threat model: security/threat_model.md
-    - External review packet: security/external_review_packet.md
     - FERPA / GDPR alignment: compliance/ferpa_gdpr_alignment.md
   - Tutorials:
     - Library walkthrough: tutorials/library_walkthrough.md

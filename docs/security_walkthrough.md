@@ -13,7 +13,7 @@
 
 ## 3. SafeSwitch configuration
 
-- Set `--safe-eb --safe-eb-dr --safe-eb-accept-floor <target>` on benchmarks or orchestration services.
+- Set `--safe-eb --safe-eb-dr --safe-eb-accept-floor <target>` on orchestration services or validation runs.
 - Monitor `safe_gate` telemetry (stored per round) for p-values and acceptance LCBs.
 
 ## 4. Differential Privacy

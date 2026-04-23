@@ -53,16 +53,9 @@ entry points quickly.
 - `orchid_ranker.observability`: Prometheus registry helpers (`start_metrics_server`, `record_training`, `export_metrics`).
 - Deployment artefacts: Dockerfile, Helm chart (`deploy/helm`), and Terraform reference (`deploy/terraform`).
 
-## Automation helpers
+## Development helpers
 - `tests/`: run `pytest` for quick regressions (see `requirements-dev.txt`).
-- `benchmarks/compare_surprise.py`: fit Orchid ALS and Surprise SVD side by side
-  on your dataset to compare RMSE.
-- `benchmarks/compare_implicit.py`: benchmark Orchid ALS against the
-  `implicit` library on identical train/test splits.
-- `benchmarks/compare_reclab.py`: evaluate Orchid versus ReCLaB's TopPop
-  baseline using dense ratings generated from ReCLaB environments.
-- `benchmarks/run_agentic_smoke.py`: execute a synthetic multi-round agentic
-  simulation to ensure orchestrator wiring works end-to-end.
+- `examples/`: runnable scripts for common integration flows.
 - `orchid_ranker.logging.configure_logging`: centralise logs for deployment.
 - `OrchidRecommender(validate_inputs=True)`: enforce schema validation on
   incoming interaction data.

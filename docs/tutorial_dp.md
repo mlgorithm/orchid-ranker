@@ -14,15 +14,16 @@ dp_cfg = {
 model = TwoTowerRecommender(..., dp_cfg=dp_cfg)
 ```
 
-## 2. Enabling via CLI
+## 2. Enabling in your training entrypoint
 
-```bash
-PYTHONPATH=src python benchmarks/run_agentic_ml100k.py \
-  --rounds 20 --dp-enabled --dp-noise 1.0 --dp-sample-rate 0.02 \
-  --safe-eb --safe-eb-dr --log-dir runs/dp-safe
-```
+If you expose DP flags through your own CLI or service wrapper, pass the same
+core parameters:
 
-See `benchmarks/run_agentic_ml100k.py --help` for all DP-related switches.
+- `dp_enabled`
+- `noise_multiplier`
+- `sample_rate`
+- `max_grad_norm`
+- `delta`
 
 ## 3. Monitoring epsilon
 
@@ -31,7 +32,9 @@ See `benchmarks/run_agentic_ml100k.py --help` for all DP-related switches.
 
 ## 4. Using SafeSwitch + DP
 
-Combine `--safe-eb` flags with DP configs to guarantee both privacy and non-regression.
+Combine SafeSwitch controls with DP configs to track both privacy budget and
+non-regression evidence. Production privacy and rollout claims still depend on
+the selected parameters, workload, and review process.
 
 ## 5. Tuning tips
 

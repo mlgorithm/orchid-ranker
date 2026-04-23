@@ -34,7 +34,7 @@ that every recommendation surface should be treated this way.
 | Lightweight / minimal deps | Yes | No | No | Yes |
 
 **Where Orchid is not the right choice:**
-- You need 50+ model architectures for academic benchmarking -- use RecBole
+- You need 50+ model architectures for academic model comparison -- use RecBole
 - You need GPU-accelerated retrieval at ad-platform scale -- use NVIDIA Merlin
 - You want the simplest possible implicit-feedback library -- use implicit
 
