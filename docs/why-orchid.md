@@ -2,9 +2,13 @@
 
 ## The thesis
 
-Most recommenders optimize for the next click. Orchid optimizes for **long-term user value**.
+Most recommenders optimize for the next click. Orchid is built for products
+where the user is progressing through something and the operator cares about
+that trajectory.
 
-Every recommendation surface has users who are *progressing* --- discovering taste, building competence, refining preference, advancing through a product. A recommender that models this trajectory produces better outcomes than one that treats each interaction as independent.
+That makes Orchid strongest in training, certification, onboarding,
+rehabilitation, and other outcome-sensitive products. It is not a general claim
+that every recommendation surface should be treated this way.
 
 ## Five pillars
 
@@ -14,7 +18,7 @@ Every recommendation surface has users who are *progressing* --- discovering tas
 | **Adaptive** | Update per user, per interaction | Online residual adapters + Bayesian outcome tracing |
 | **Streaming** | Real-time event ingestion | Kafka-native event bus with sub-10ms rank latency |
 | **Safety-native** | Gate rollouts on user outcomes | Doubly-robust confidence sequences + progression guardrails |
-| **Privacy-native** | Compliance built in | DP-SGD presets, RBAC, HMAC audit chains |
+| **Privacy-native** | Compliance evidence support | DP-SGD presets, RBAC, HMAC audit chains, operator runbooks |
 
 ## Honest comparison
 
@@ -36,31 +40,15 @@ Every recommendation surface has users who are *progressing* --- discovering tas
 
 **Where Orchid shines:**
 - Your users are *progressing* through something (content, competencies, products, preferences)
-- You need real-time adaptation with safety guarantees
+- You need real-time adaptation with measurable safety-gate evidence
 - You operate in a regulated domain (GDPR, FERPA, EU AI Act)
 
+## Where Orchid fits best
+
+Orchid is strongest in products where:
+
+- users are progressing through content, skills, or product capability over time
+- outcomes are richer than a click
+- operators care about safety, auditability, and long-term results
+
 For a broader stack-by-stack comparison, see [Competitor comparison](competitors.md).
-
-## Benchmark evidence
-
-Orchid's specialty modules have been benchmarked on public datasets:
-
-| Module | Dataset | Headline result |
-|--------|---------|----------------|
-| Cold-start bridge | MovieLens-1M (1M ratings) | **+67% Surv@5** vs popularity for brand-new users |
-| Taste progression | Amazon Cell Phones (1.1M reviews) | **+0.9% kept-rate** standalone; **92.9% warm-phase kept-rate** in full pipeline |
-| End-to-end pipeline | MovieLens-1M | Bridge -> Orchid -> Taste progression: **Surv@5 = 0.275** vs 0.150 popularity (**+80%**) |
-| Scaling | Synthetic 1M users | **99.8% memory savings** at typical active ratios; **840K ops/s** concurrent synthetic load |
-| Curated feed | Synthetic 500 users | +30.7% engagement x diversity; real-data benchmark pending |
-
-The cold-start bridge is the strongest standalone real-data result (+67%
-Surv@5). The +80% number belongs to the integrated end-to-end MovieLens
-pipeline, where cold-start handling is composed with the rest of Orchid. Taste
-progression's value is clearest as a re-ranker: modest standalone uplift
-(+0.9%), but a large warm-phase improvement (92.9% vs 60.0%) in the full
-pipeline. That warm-phase sample is small, so treat it as promising evidence,
-not a final production guarantee.
-
-Full methodology and reproducibility instructions start with the
-[end-to-end benchmark](benchmarks/end-to-end.md) and linked specialty benchmark
-pages.

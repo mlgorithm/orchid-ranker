@@ -6,6 +6,12 @@ repo_name: mlgorithm/orchid-ranker
 edit_uri: edit/main/docs/
 exclude_docs: |
   README.md
+  application-scenarios.md
+  benchmarking.md
+  benchmarking_results.md
+  core-vs-specialty.md
+  benchmarks/
+  roadmap/
 
 theme:
   name: material
@@ -51,9 +57,7 @@ nav:
   - Home: index.md
   - Why Orchid: why-orchid.md
   - Competitors: competitors.md
-  - Application scenarios: application-scenarios.md
   - Usage scenarios: scenarios.md
-  - Core vs. specialty: core-vs-specialty.md
   - Getting started:
     - Quickstart: quickstart.md
     - Overview: overview.md
@@ -61,20 +65,11 @@ nav:
     - "Guide 2: Serve streaming": guides/02-serve-streaming.md
     - "Guide 3: Operate safely": guides/03-operate-safely.md
     - Migration (0.4 to 0.5): guides/migration-0.4-to-0.5.md
-  - Benchmarks:
-    - MovieLens-1M: benchmarks/movielens-1m.md
-    - Music discovery: benchmarks/music.md
-    - "Case study: OULAD": benchmarks/oulad.md
-    - "Case study: EdNet": benchmarks/ednet.md
-    - "End-to-end pipeline": benchmarks/end-to-end.md
-    - "Scaling (specialty)": benchmarks/scaling.md
-    - "Cold-start (specialty)": benchmarks/cold-start.md
-    - "Taste progression (specialty)": benchmarks/taste-progression.md
-    - "Curated feed (specialty)": benchmarks/curated-feed.md
   - Reference:
     - API overview: api_reference.md
     - Enterprise runbook: enterprise_runbook.md
     - Security threat model: security/threat_model.md
+    - External review packet: security/external_review_packet.md
     - FERPA / GDPR alignment: compliance/ferpa_gdpr_alignment.md
   - Tutorials:
     - Library walkthrough: tutorials/library_walkthrough.md

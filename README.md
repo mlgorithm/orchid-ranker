@@ -1,18 +1,23 @@
 # Orchid Ranker
 
 [![PyPI version](https://img.shields.io/pypi/v/orchid-ranker.svg)](https://pypi.org/project/orchid-ranker/)
+[![CI](https://github.com/mlgorithm/orchid-ranker/actions/workflows/ci.yaml/badge.svg)](https://github.com/mlgorithm/orchid-ranker/actions/workflows/ci.yaml)
 [![Python](https://img.shields.io/pypi/pyversions/orchid-ranker.svg)](https://pypi.org/project/orchid-ranker/)
 [![License](https://img.shields.io/badge/license-Apache%202.0-blue.svg)](LICENSE)
 
-**The open-source recommender that optimizes for long-term user value, not short-term clicks.**
+**Progression-aware recommendation for products where user outcomes matter more than the next click.**
 
-Orchid Ranker reframes every recommendation problem as a *progression problem* --- the user is getting better at something over time, and a recommender that models that trajectory outperforms one that only maximizes the next click.
+Orchid Ranker works best when recommendation is a progression problem: training, onboarding, rehabilitation, certification, or other structured journeys where the user is getting better at something over time.
 
 ## Quickstart
 
 ```bash
-pip install orchid-ranker
+pip install "orchid-ranker[ml]"
 ```
+
+The base `orchid-ranker` package is torch-free for metrics, tracing, and
+progression utilities. Install `[ml]` for the high-level recommender API shown
+below.
 
 ```python
 import pandas as pd
@@ -38,6 +43,18 @@ streamer.observe(user_id=7, item_id=42, correct=True, category="onboarding")
 top5 = streamer.rank(user_id=7, candidate_item_ids=[1, 2, 3, 42, 99], top_k=5)
 ```
 
+## Best first use case
+
+If you're evaluating Orchid for adoption, start with **workforce learning, certification, or product onboarding**.
+
+That is the cleanest match for the current product surface:
+
+- explicit outcome events, not only clicks
+- ordered or prerequisite-aware content
+- operators who care about auditability, rollback, and measurable progression
+
+Those are the places where Orchid's progression-aware ranking, live adaptation, and safety controls are most useful. See [Usage scenarios](docs/scenarios.md) and [Why Orchid](docs/why-orchid.md).
+
 ## Try it
 
 Get up and running in under 5 minutes:
@@ -60,7 +77,6 @@ Understand what makes Orchid different:
 
 - [Why Orchid](docs/why-orchid.md) --- the long-term-value thesis, five pillars, honest comparison
 - [Competitor comparison](docs/competitors.md) --- when to use Orchid vs RecBole, Merlin, implicit, LightFM, TFRS, Gorse
-- [Benchmarks](docs/benchmarks/end-to-end.md) --- reproducible results on MovieLens-1M, music discovery, and learning platforms
 
 ---
 
@@ -70,7 +86,7 @@ Understand what makes Orchid different:
 2. **Adaptive.** Per-user, per-interaction online updates. Sub-10ms observe-to-rank on CPU.
 3. **Streaming.** First-class Kafka ingestion. No batch-only workflows required.
 4. **Safety-native.** Doubly-robust confidence sequences + progression-aware circuit breakers gate every rollout on user-outcome metrics.
-5. **Privacy-native.** DP-SGD presets, RBAC, HMAC audit chains. GDPR/FERPA/EU AI Act alignment built in.
+5. **Privacy-native.** DP-SGD presets, RBAC, HMAC audit chains, and documentation for GDPR/FERPA/EU AI Act alignment work.
 
 ## Supported strategies
 
@@ -92,7 +108,7 @@ it is not a `strategy=` value.
 
 ## Status
 
-![Tests](https://img.shields.io/badge/tests-1179%20passing-brightgreen)
+[![CI](https://github.com/mlgorithm/orchid-ranker/actions/workflows/ci.yaml/badge.svg)](https://github.com/mlgorithm/orchid-ranker/actions/workflows/ci.yaml)
 ![Python](https://img.shields.io/badge/python-3.11%2B-blue)
 ![License](https://img.shields.io/badge/license-Apache%202.0-blue)
 

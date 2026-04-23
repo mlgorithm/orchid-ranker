@@ -1,12 +1,13 @@
 # Orchid Ranker
 
-**Progression-aware recommender toolkit** for building systems that adapt as
-users improve, develop taste, or move through structured content.
+**Progression-aware recommendation toolkit** for products where users move
+through structured content, build competence, or deepen product adoption over
+time.
 
 ## Why Orchid Ranker?
 
-Orchid Ranker is purpose-built for long-term user value. Unlike generic
-recommender systems, it ships with:
+Orchid Ranker is purpose-built for long-term user value in progression-native
+domains. Unlike generic recommender systems, it ships with:
 
 - **A single high-level API** for batch recommenders: `OrchidRecommender`
 - **Progression-native metrics** for competence, category coverage, and stretch fit
@@ -14,13 +15,28 @@ recommender systems, it ships with:
 - **Safety guardrails** that can fall back to a frozen baseline
 - **Privacy and audit hooks** for regulated deployments
 
+## Best-fit use cases
+
+Orchid is strongest when users move through a meaningful progression and the
+system should adapt to that path safely. Common fits include:
+
+- workforce learning and certification
+- product onboarding and activation
+- rehabilitation and coaching
+- structured educational content
+
+These are better fits than generic discovery or pure CTR ranking.
+
 ## Quick Start
 
-Install from PyPI:
+Install the ML extra from PyPI for the recommender API:
 
 ```bash
-pip install orchid-ranker
+pip install "orchid-ranker[ml]"
 ```
+
+The base `orchid-ranker` package remains available for torch-free progression
+utilities such as metrics, tracing, and dependency graphs.
 
 Create your first recommender:
 
