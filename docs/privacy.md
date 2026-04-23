@@ -53,7 +53,7 @@ backwards compatibility.
   protects the model training loop. The threat model assumes a trusted
   orchestration pipeline, authenticated access to logs, and secure handling of
   epsilon/delta telemetry.
-- For compliance programmes (e.g., FERPA/GDPR), export the accountant outputs
+- For compliance programmes (e.g., GDPR/FERPA), export the accountant outputs
   alongside experiment metadata. Audit logs should capture dp_cfg parameters,
   epsilon deltas per update, and operator identity.
 

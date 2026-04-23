@@ -197,6 +197,7 @@ def load_model(path: str | Path) -> Any:
             "Loading may succeed but behavior is not guaranteed."
         )
 
+    model: Any
     if model_type == "OrchidRecommender":
         model = _restore_orchid_model(state)
     elif model_type == "TwoTowerRecommender":

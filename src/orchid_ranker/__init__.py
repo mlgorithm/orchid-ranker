@@ -24,14 +24,14 @@ Public API is organized into three stability tiers:
 
 Installation extras
 -------------------
-``pip install orchid-ranker``          -- educational toolkit (BKT, curriculum, evaluation)
+``pip install orchid-ranker``          -- core progression toolkit (BKT, dependency graph, evaluation)
 ``pip install orchid-ranker[ml]``      -- adds PyTorch for ML recommender strategies
 ``pip install orchid-ranker[all]``     -- everything (ML, viz, agentic, observability, connectors)
 """
 
-__version__ = "0.3.2"
+__version__ = "0.5.0"
 
-# ── Tier 1: Torch-free educational toolkit (always available) ─────────────
+# ── Tier 1: Torch-free core toolkit (always available) ────────────────────
 
 from .curriculum import (
     DependencyGraph,

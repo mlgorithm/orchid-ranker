@@ -10,18 +10,34 @@ entry points quickly.
   `implicit_als`, `implicit_bpr`, `linucb`, `user_knn`, `popularity`, and `random`.
 - `orchid_ranker.recommender.Recommendation`: lightweight dataclass returned by
   `recommend()`.
+- `recommend(..., candidate_item_ids=[...])`: rank a caller-provided candidate
+  pool using the original item IDs from the fitted interaction data.
+- `OrchidRecommender.from_interactions(...)`: one-call fit path. The default
+  `strategy="auto"` chooses `als` for binary feedback and `explicit_mf` for
+  explicit rating ranges.
+
+## Streaming and Safety
+- `OrchidRecommender.as_streaming()`: promote a fitted `neural_mf` recommender
+  into a live adaptive ranker. The bridge accepts the same external user and
+  item IDs used in training data.
+- `orchid_ranker.streaming.StreamingAdaptiveRanker`: lower-level streaming
+  runtime for custom towers.
+- `orchid_ranker.live_metrics.RollingProgressionMonitor`: rolling progression
+  metrics for production monitoring.
+- `orchid_ranker.live_metrics.ProgressionGuardrail` and
+  `orchid_ranker.safety.SafeSwitchDR`: fallback controls for adaptive rollouts.
 
 ## Agentic Simulation
 - `orchid_ranker.agents.MultiUserOrchestrator`: primary orchestrator coordinating
-  simulated learners and recommenders.
+  simulated users and recommenders.
 - `orchid_ranker.agents.MultiConfig`: configuration dataclass controlling
   adaptive policy bounds and privacy toggles. New knobs include warmup controls
   (`warmup_preloop`, `warmup_rounds`, `warmup_steps`, `warmup_top_k_boost`,
   `warmup_diversity_scale`), training augmentation (`train_on_all_shown`,
   `train_steps_per_round`), and optional Funk integration (`funk_distill`,
   `funk_lambda`, `use_funk_candidates`, `funk_pool_size`).
-- `orchid_ranker.agents.StudentAgent`: behavioural simulator used for agentic
-  evaluation loops.
+- `orchid_ranker.agents.AdaptiveAgent`: behavioural user simulator used for
+  agentic evaluation loops.
 
 ## Privacy and Differential Privacy Helpers
 - `orchid_ranker.dp.get_dp_config`: fetch ready-made DP presets.
@@ -52,4 +68,5 @@ entry points quickly.
   incoming interaction data.
 
 Refer to the README quickstart for runnable examples and the `examples/`
-folder for scripts that can be copied into notebooks.
+folder for scripts that can be copied into notebooks. For product-specific
+recipes, start with [Usage scenarios](scenarios.md).

@@ -1,8 +1,9 @@
-"""Proficiency tracing models for adaptive systems.
+"""Outcome tracing models for adaptive systems.
 
-This module implements Bayesian Knowledge Tracing (BKT), Ebbinghaus forgetting
-curves, and proficiency tracking for adaptive progression systems (education,
-training, rehabilitation, gaming, and more).
+This module implements Bayesian Knowledge Tracing (BKT, a standard ML model
+also known as outcome tracing), Ebbinghaus forgetting curves, and competence
+tracking for adaptive progression systems (education, training, rehabilitation,
+gaming, and more).
 """
 
 import math
@@ -11,39 +12,40 @@ from typing import Dict, List, Optional
 
 
 class BayesianKnowledgeTracing:
-    """Bayesian Knowledge Tracing for estimating learner mastery.
+    """Bayesian Knowledge Tracing (BKT) for estimating user competence.
 
-    Models the probability a student has learned a skill using four parameters
-    per skill. Implements the standard BKT model where the learner's knowledge
-    state is represented as a hidden binary variable (known/unknown) that evolves
-    over time with observations.
+    Models the probability a user has succeeded in a category using four
+    parameters per category. Implements the standard BKT model (a well-known
+    outcome tracing technique) where the user's competence state is represented
+    as a hidden binary variable (known/unknown) that evolves over time with
+    observations.
 
     Parameters
     ----------
     p_init : float, default=0.1
-        Prior probability of knowing the skill initially. Range: [0, 1].
+        Prior probability of knowing the category initially. Range: [0, 1].
     p_transit : float, default=0.1
-        Probability of learning the skill on each learning opportunity.
+        Probability of learning the category on each opportunity.
         Range: [0, 1].
     p_slip : float, default=0.1
         Probability of making an error (incorrect response) despite knowing
-        the skill. Represents careless mistakes. Range: [0, 1].
+        the category. Represents careless mistakes. Range: [0, 1].
     p_guess : float, default=0.2
-        Probability of guessing correctly despite not knowing the skill.
+        Probability of guessing correctly despite not knowing the category.
         Range: [0, 1].
     mastery_threshold : float, default=0.95
-        Threshold probability above which a skill is considered mastered.
+        Threshold probability above which a category is considered succeeded.
         Range: [0, 1].
 
     Attributes
     ----------
     p_known : float
-        Current belief about probability that student knows the skill.
+        Current belief about probability that user knows the category.
 
     Notes
     -----
     The BKT model maintains a posterior belief P(L_t = 1 | observations) where
-    L_t is the latent learning state. Updates follow:
+    L_t is the latent competence state. Updates follow:
 
     - If correct: P(L_{t+1}) = P(correct | L_t=1) * P(L_t=1) / P(correct)
     - If incorrect: P(L_{t+1}) = P(incorrect | L_t=1) * P(L_t=1) / P(incorrect)
@@ -68,7 +70,7 @@ class BayesianKnowledgeTracing:
         Parameters
         ----------
         p_init : float, default=0.1
-            Initial probability of knowing the skill.
+            Initial probability of knowing the category.
         p_transit : float, default=0.1
             Probability of learning on each opportunity.
         p_slip : float, default=0.1
@@ -76,7 +78,7 @@ class BayesianKnowledgeTracing:
         p_guess : float, default=0.2
             Probability of correct response despite not knowing.
         mastery_threshold : float, default=0.95
-            Mastery threshold probability.
+            Competence threshold probability.
 
         Raises
         ------
@@ -102,20 +104,20 @@ class BayesianKnowledgeTracing:
         self._num_observations = 0
 
     def update(self, correct: bool) -> float:
-        """Update knowledge estimate after an observation.
+        """Update competence estimate after an observation.
 
         Uses Bayesian update rule to incorporate new evidence about whether
-        the student answered correctly or incorrectly.
+        the user answered correctly or incorrectly.
 
         Parameters
         ----------
         correct : bool
-            Whether the student's response was correct.
+            Whether the user's response was correct.
 
         Returns
         -------
         float
-            Updated probability that student knows the skill, range [0, 1].
+            Updated probability that user knows the category, range [0, 1].
 
         Notes
         -----
@@ -162,10 +164,10 @@ class BayesianKnowledgeTracing:
 
     @property
     def p_known(self) -> float:
-        """Current probability the student knows the skill.
+        """Current probability the user knows the category.
 
         Returns the current posterior probability estimate P(L=1) that the
-        student has learned/mastered this skill, based on observed outcomes.
+        user has succeeded in this category, based on observed outcomes.
 
         Returns
         -------
@@ -181,10 +183,10 @@ class BayesianKnowledgeTracing:
         return self._p_known
 
     def is_mastered(self) -> bool:
-        """Check if skill is considered mastered.
+        """Check if category is considered succeeded.
 
-        Returns True if the current probability of knowing the skill meets or
-        exceeds the mastery threshold set during initialization.
+        Returns True if the current probability of knowing the category meets or
+        exceeds the competence threshold set during initialization.
 
         Returns
         -------
@@ -205,8 +207,8 @@ class BayesianKnowledgeTracing:
     def reset(self) -> None:
         """Reset to prior distribution.
 
-        Resets the knowledge estimate back to p_init and clears observation
-        counter. Useful for starting fresh with a student or clearing historical data.
+        Resets the competence estimate back to p_init and clears observation
+        counter. Useful for starting fresh with a user or clearing historical data.
 
         Examples
         --------
@@ -226,19 +228,21 @@ class BayesianKnowledgeTracing:
         return (
             f"BayesianKnowledgeTracing("
             f"p_known={self._p_known:.3f}, "
-            f"mastered={self.is_mastered()}, "
+            f"succeeded={self.is_mastered()}, "
             f"obs={self._num_observations})"
         )
 
 
 class ProficiencyTracker:
-    """Track proficiency state across multiple competencies for a single user.
+    """Track competence state across multiple categories for a single user.
+
+    Also available as :class:`CompetencyTracker` (preferred domain-neutral name).
 
     Maintains a portfolio of BayesianKnowledgeTracing models for different
-    competencies, enabling proficiency tracking, dependency validation,
+    categories, enabling competence tracking, dependency validation,
     and adaptive recommendations.
 
-    Works for any domain with measurable competencies: education (skills),
+    Works for any domain with measurable competencies: education (categories),
     corporate training (certifications), rehabilitation (motor functions),
     fitness (exercises), gaming (abilities), etc.
 
@@ -254,8 +258,10 @@ class ProficiencyTracker:
     default_params : dict, optional
         Default BKT parameters for competencies not in bkt_params.
         If None, uses BayesianKnowledgeTracing defaults.
-    mastery_threshold : float, default=0.95
-        Proficiency threshold. Overridden by per-competency settings.
+    success_threshold : float, default=0.95
+        Competence threshold. Overridden by per-competency settings.
+    mastery_threshold : float, optional
+        Deprecated alias for ``success_threshold``.
 
     Attributes
     ----------
@@ -266,7 +272,7 @@ class ProficiencyTracker:
 
     Examples
     --------
-    >>> tracker = ProficiencyTracker(
+    >>> tracker = CompetencyTracker(
     ...     competencies=['algebra', 'geometry', 'calculus'],
     ...     bkt_params={'algebra': {'p_init': 0.2}}
     ... )
@@ -281,9 +287,10 @@ class ProficiencyTracker:
         competencies: Optional[List[str]] = None,
         bkt_params: Optional[Dict[str, Dict[str, float]]] = None,
         default_params: Optional[Dict[str, float]] = None,
-        mastery_threshold: float = 0.95,
+        success_threshold: Optional[float] = None,
         *,
         skills: Optional[List[str]] = None,
+        mastery_threshold: Optional[float] = None,
     ):
         """Initialize ProficiencyTracker.
 
@@ -295,21 +302,38 @@ class ProficiencyTracker:
             Per-competency BKT parameters.
         default_params : dict, optional
             Default parameters for all competencies.
-        mastery_threshold : float, default=0.95
-            Default proficiency threshold.
+        success_threshold : float, default=0.95
+            Default competence threshold.
         skills : list of str, optional
             Deprecated alias for ``competencies``.
+        mastery_threshold : float, optional
+            Deprecated alias for ``success_threshold``.
 
         Raises
         ------
         ValueError
             If competencies list is empty.
         """
+        import warnings as _w
+
         # Support old 'skills' kwarg
         if competencies is None and skills is not None:
             competencies = skills
         if not competencies:
             raise ValueError("competencies list cannot be empty")
+
+        # Resolve deprecated mastery_threshold
+        if mastery_threshold is not None:
+            _w.warn(
+                "Parameter 'mastery_threshold' is deprecated, use 'success_threshold' instead. "
+                "Will be removed in v1.0.",
+                DeprecationWarning,
+                stacklevel=2,
+            )
+            if success_threshold is None:
+                success_threshold = mastery_threshold
+        if success_threshold is None:
+            success_threshold = 0.95
 
         self.competencies = list(competencies)
         self._trackers: Dict[str, BayesianKnowledgeTracing] = {}
@@ -320,7 +344,7 @@ class ProficiencyTracker:
         p_transit = default.get('p_transit', 0.1)
         p_slip = default.get('p_slip', 0.1)
         p_guess = default.get('p_guess', 0.2)
-        threshold = default.get('mastery_threshold', mastery_threshold)
+        threshold = default.get('mastery_threshold', success_threshold)
 
         # Initialize trackers for each competency
         bkt_params = bkt_params or {}
@@ -349,7 +373,7 @@ class ProficiencyTracker:
         return self.competencies
 
     def update(self, competency: str, correct: bool) -> float:
-        """Update a competency's proficiency estimate.
+        """Update a competency's competence estimate.
 
         Parameters
         ----------
@@ -374,7 +398,7 @@ class ProficiencyTracker:
         return self._trackers[competency].update(correct)
 
     def get_mastery(self) -> Dict[str, float]:
-        """Return proficiency estimates for all competencies.
+        """Return competence estimates for all competencies.
 
         Returns
         -------
@@ -387,7 +411,7 @@ class ProficiencyTracker:
         }
 
     def proficiency(self, competency: str) -> float:
-        """Return proficiency estimate for a single competency.
+        """Return competence estimate for a single competency.
 
         Parameters
         ----------
@@ -411,10 +435,10 @@ class ProficiencyTracker:
     # Backward-compatible alias
     skill_mastery = proficiency
 
-    def mastered(self) -> List[str]:
-        """Return list of mastered competency names.
+    def succeeded(self) -> List[str]:
+        """Return list of competency names that have been completed.
 
-        Returns all competency names for which the current proficiency
+        Returns all competency names for which the current competence
         meets or exceeds the threshold.
 
         Returns
@@ -427,11 +451,22 @@ class ProficiencyTracker:
             if self._trackers[comp].is_mastered()
         ]
 
+    def mastered(self) -> List[str]:
+        """Deprecated alias for :meth:`succeeded`."""
+        import warnings
+        warnings.warn(
+            "mastered() is deprecated, use succeeded() instead. "
+            "Will be removed in v1.0.",
+            DeprecationWarning,
+            stacklevel=2,
+        )
+        return self.succeeded()
+
     # Backward-compatible alias
     mastered_skills = mastered
 
-    def unmastered(self) -> List[str]:
-        """Return list of not-yet-mastered competency names.
+    def remaining(self) -> List[str]:
+        """Return list of competency names not yet meeting the success threshold.
 
         Returns
         -------
@@ -443,6 +478,17 @@ class ProficiencyTracker:
             if not self._trackers[comp].is_mastered()
         ]
 
+    def unmastered(self) -> List[str]:
+        """Deprecated alias for :meth:`remaining`."""
+        import warnings
+        warnings.warn(
+            "unmastered() is deprecated, use remaining() instead. "
+            "Will be removed in v1.0.",
+            DeprecationWarning,
+            stacklevel=2,
+        )
+        return self.remaining()
+
     # Backward-compatible alias
     unmastered_skills = unmastered
 
@@ -451,7 +497,7 @@ class ProficiencyTracker:
         competency: str,
         prerequisites: Optional[Dict[str, List[str]]] = None,
     ) -> bool:
-        """Check if user is ready for a competency given prerequisites.
+        """Check if the user is ready for a competency given prerequisites.
 
         Parameters
         ----------
@@ -484,7 +530,7 @@ class ProficiencyTracker:
                 f"Prerequisite(s) {unknown} not tracked. "
                 f"Known competencies: {sorted(self._trackers.keys())}"
             )
-        achieved = set(self.mastered())
+        achieved = set(self.succeeded())
         return all(req in achieved for req in required)
 
     def recommend_next(
@@ -492,10 +538,10 @@ class ProficiencyTracker:
         prerequisites: Optional[Dict[str, List[str]]] = None,
         n: int = 3,
     ) -> List[str]:
-        """Recommend next competencies based on proficiency and prerequisites.
+        """Recommend next competencies based on competence and prerequisites.
 
-        Recommends unmastered competencies with met prerequisites,
-        ordered by lowest proficiency (highest priority).
+        Recommends remaining competencies with met prerequisites,
+        ordered by lowest competence (highest priority).
 
         Parameters
         ----------
@@ -507,13 +553,13 @@ class ProficiencyTracker:
         Returns
         -------
         list of str
-            Up to n competency names, sorted by proficiency (lowest first).
+            Up to n competency names, sorted by competence (lowest first).
         """
         candidates = []
         levels = self.get_mastery()
-        achieved = set(self.mastered())
+        achieved = set(self.succeeded())
 
-        for comp in self.unmastered():
+        for comp in self.remaining():
             if prerequisites is None or comp not in prerequisites:
                 candidates.append((levels[comp], comp))
             elif all(req in achieved for req in prerequisites[comp]):
@@ -524,13 +570,13 @@ class ProficiencyTracker:
 
     def __repr__(self) -> str:
         """Return string representation."""
-        mastered_count = len(self.mastered())
+        succeeded_count = len(self.succeeded())
         total_count = len(self.competencies)
         return (
             f"ProficiencyTracker("
             f"competencies={total_count}, "
-            f"mastered={mastered_count}, "
-            f"progress={mastered_count}/{total_count})"
+            f"succeeded={succeeded_count}, "
+            f"progress={succeeded_count}/{total_count})"
         )
 
 
@@ -660,7 +706,7 @@ class ForgettingCurve:
 
         Increases memory strength by strength_gain_on_review and updates
         the last_review_time to the current time. Call this each time
-        the learner reviews an item.
+        the user reviews an item.
 
         Examples
         --------
@@ -731,12 +777,16 @@ class ForgettingCurve:
 
 __all__ = [
     "BayesianKnowledgeTracing",
+    "CompetencyTracker",
     "ProficiencyTracker",
     "ForgettingCurve",
-    # Backward-compatible alias (deprecated)
+    # Backward-compatible aliases (deprecated)
     "MasteryTracker",
 ]
 
+# ``CompetencyTracker`` is the new primary name; ``ProficiencyTracker``
+# remains as a non-deprecated alias (both resolve to the same class).
+CompetencyTracker = ProficiencyTracker
 
 # --- Deprecation handling for renamed symbols (PEP 562) ---
 _DEPRECATED_NAMES = {

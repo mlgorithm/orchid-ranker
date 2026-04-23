@@ -2,7 +2,7 @@
 
 ## 1. Overview
 
-This document outlines the security architecture and threat model for Orchid Ranker, an educational recommender system library. It is intended for security reviewers, enterprise procurement teams, and system operators evaluating Orchid Ranker for production deployment.
+This document outlines the security architecture and threat model for Orchid Ranker, a progression-aware recommender system library. It is intended for security reviewers, enterprise procurement teams, and system operators evaluating Orchid Ranker for production deployment.
 
 Orchid Ranker is **not a service**—it is a Python library embedded within the customer's application. This document clarifies security boundaries, responsibilities, and residual risks.
 
@@ -40,7 +40,7 @@ Orchid Ranker operates as a library within the customer's application runtime. T
 - **Optional JWT/OIDC**: Provider-agnostic JWT authentication with role extraction and signature validation
 - **Policy enforcement**: `AccessControl.require()` raises `PermissionError` on unauthorized access
 
-### 3.2 Learner Privacy
+### 3.2 User Privacy
 - **Differential Privacy (DP-SGD)**: Adds calibrated noise to gradient updates during training
 - **RDP Accounting**: Opacus-based Rényi differential privacy accounting tracks cumulative privacy budget
 - **Configurable epsilon budgets**: Operators set epsilon/delta trade-off per training regime

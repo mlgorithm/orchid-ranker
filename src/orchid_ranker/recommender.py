@@ -12,7 +12,7 @@ import difflib
 import logging
 import threading
 from dataclasses import dataclass
-from typing import Any, Dict, List, Optional, Sequence, Tuple
+from typing import Any, Dict, List, Optional, Sequence, Tuple, cast
 
 import numpy as np
 import pandas as pd
@@ -81,13 +81,61 @@ STRATEGY_GUIDE: Dict[str, str] = {
 }
 
 
+class _ZeroItemFeatureProjector(torch.nn.Module):
+    """Project item side features into the NeuralMF embedding space."""
+
+    def __init__(self, embedding_dim: int) -> None:
+        super().__init__()
+        self.embedding_dim = int(embedding_dim)
+
+    def forward(self, item_features: torch.Tensor) -> torch.Tensor:
+        return item_features.new_zeros((item_features.shape[0], self.embedding_dim))
+
+
+class _NeuralMFStreamingTower(torch.nn.Module):
+    """Adapter that exposes NeuralMF through the streaming tower protocol."""
+
+    def __init__(self, baseline: NeuralMatrixFactorizationBaseline) -> None:
+        super().__init__()
+        self.baseline = baseline
+        self.user_emb = baseline.user_emb
+        self.item_emb = baseline.item_emb
+        self.mlp = baseline.mlp
+        self.item_net = _ZeroItemFeatureProjector(baseline.emb_dim).to(baseline.device)
+        self.item_proj = torch.nn.Identity()
+        self.emb_dim = int(baseline.emb_dim)
+        self.state_dim = 4
+        self.device = str(baseline.device)
+
+    def _user_context_vec(
+        self,
+        user_vec: torch.Tensor,
+        user_ids: torch.Tensor,
+        state_vec: torch.Tensor,
+    ) -> torch.Tensor:
+        del user_vec, state_vec
+        return cast(torch.Tensor, self.user_emb(user_ids.to(self.user_emb.weight.device)))
+
+    def infer(
+        self,
+        *,
+        user_ids: torch.Tensor,
+        item_ids: torch.Tensor,
+        **kwargs: object,
+    ) -> torch.Tensor:
+        del kwargs
+        return cast(torch.Tensor, self.baseline.infer(user_ids=user_ids, item_ids=item_ids))
+
+
 class OrchidRecommender:
     """Convenience wrapper offering a Surprise-like API.
 
     Parameters
     ----------
     strategy:
-        One of ``{"als", "linucb", "popularity", "random", "implicit_als", "implicit_bpr", "neural_mf", "user_knn"}``.
+        One of ``SUPPORTED_STRATEGIES``. Use ``"auto"`` when you want Orchid
+        to choose ``"als"`` for binary feedback or ``"explicit_mf"`` for
+        explicit rating ranges.
     device:
         Torch device string. Defaults to CPU.
     strategy_kwargs:
@@ -107,9 +155,9 @@ class OrchidRecommender:
         Parameters
         ----------
         strategy : str, optional
-            Recommendation strategy. One of "als", "explicit_mf", "linucb",
-            "popularity", "random", "implicit_als", "implicit_bpr", "neural_mf",
-            or "user_knn" (default: "als").
+            Recommendation strategy. One of "auto", "als", "explicit_mf",
+            "linucb", "popularity", "random", "implicit_als",
+            "implicit_bpr", "neural_mf", or "user_knn" (default: "als").
         device : str, optional
             Torch device string (e.g., "cpu", "cuda", "cuda:0").
             If None, automatically selects CUDA if available, else CPU.
@@ -157,6 +205,8 @@ class OrchidRecommender:
         self._idx2item: Dict[int, int] = {}
         self._seen_items: Dict[int, set[int]] = {}
         self._item_features: Optional[np.ndarray] = None
+        self._item_difficulties: Optional[Dict[int, float]] = None
+        self._prerequisite_graph: Optional[Dict[int, set]] = None
         self._resolved_strategy: Optional[str] = None
         self._logger = logging.getLogger(__name__)
         self._state_lock = threading.RLock()
@@ -175,6 +225,160 @@ class OrchidRecommender:
         """Whether the recommender has been fit on data."""
         with self._state_lock:
             return self._baseline is not None
+
+    @property
+    def tower(self) -> Optional[torch.nn.Module]:
+        """The neural tower module, if available.
+
+        Returns None for non-neural strategies (popularity, random, user_knn).
+        """
+        if self._baseline is None:
+            return None
+        # Lower-level two-tower style baselines expose a torch module with infer().
+        if (
+            hasattr(self._baseline, 'model')
+            and isinstance(self._baseline.model, torch.nn.Module)
+            and hasattr(self._baseline.model, "infer")
+        ):
+            return cast(torch.nn.Module, self._baseline.model)
+        if isinstance(self._baseline, NeuralMatrixFactorizationBaseline):
+            return _NeuralMFStreamingTower(self._baseline)
+        return None
+
+    @property
+    def user_features(self) -> Optional[torch.Tensor]:
+        """User feature tensor (one-hot user IDs), shape [num_users, num_users].
+
+        Auto-materialized for streaming bridge. Returns None if not fitted.
+        """
+        if not self.is_fitted:
+            return None
+        n = len(self._user2idx)
+        return torch.eye(n, dtype=torch.float32, device=self.device)
+
+    @property
+    def item_features(self) -> Optional[torch.Tensor]:
+        """Item feature tensor, shape [num_items, feature_dim].
+
+        If explicit item_features were provided during fit, returns those.
+        Otherwise returns one-hot item IDs.
+        """
+        if not self.is_fitted:
+            return None
+        if self._item_features is not None:
+            return torch.as_tensor(self._item_features, dtype=torch.float32, device=self.device)
+        n = len(self._item2idx)
+        return torch.eye(n, dtype=torch.float32, device=self.device)
+
+    # ------------------------------------------------------------------
+    def as_streaming(
+        self,
+        *,
+        monitor: Optional[object] = None,
+        guardrail: Optional[object] = None,
+        lr: float = 0.05,
+        l2: float = 1e-3,
+        scaling_config: Optional[object] = None,
+    ) -> object:
+        """Wrap this fitted recommender for real-time streaming adaptation.
+
+        Bridges OrchidRecommender to StreamingAdaptiveRanker, hiding
+        tensor materialization. The user never needs to touch torch tensors.
+
+        Parameters
+        ----------
+        monitor : RollingProgressionMonitor, optional
+            Live metrics monitor.
+        guardrail : ProgressionGuardrail, optional
+            Safety guardrail (stored for reference but not wired automatically).
+        lr : float, default=0.05
+            Learning rate for per-user online adapter.
+        l2 : float, default=1e-3
+            L2 regularization for adapter.
+        scaling_config : ScalingConfig, optional
+            When provided, the streaming ranker uses sparse embeddings with
+            LRU eviction and sharded BKT state instead of dense in-memory
+            backends. Required for deployments with >1M users. See
+            :class:`orchid_ranker.scaling.ScalingConfig`.
+
+        Returns
+        -------
+        StreamingAdaptiveRanker
+
+        Raises
+        ------
+        RuntimeError
+            If the recommender is not fitted or strategy doesn't support streaming.
+        """
+        if not self.is_fitted:
+            raise RuntimeError("Recommender must be fitted before calling as_streaming(). Call fit() first.")
+
+        from .streaming import StreamingAdaptiveRanker
+
+        # Get tower, user_features, item_features from the baseline
+        tower = self.tower
+        if tower is None:
+            raise RuntimeError(
+                f"Strategy '{self.strategy}' does not expose a neural tower. "
+                "as_streaming() requires the high-level 'neural_mf' strategy "
+                "or a lower-level tower model used directly with StreamingAdaptiveRanker."
+            )
+        user_features = self.user_features
+        item_features = self.item_features
+        if user_features is None or item_features is None:
+            raise RuntimeError("Fitted recommender did not expose user/item feature tensors.")
+
+        streamer = StreamingAdaptiveRanker(
+            tower=tower,
+            user_features=user_features,
+            item_features=item_features,
+            lr=lr,
+            l2=l2,
+            monitor=monitor,
+            scaling_config=scaling_config,
+            user_id_map=self._user2idx,
+            item_id_map=self._item2idx,
+            index_item_map=self._idx2item,
+            item_difficulties=list(
+                (self._item_difficulties or {}).get(self._idx2item.get(i, i), 0.5)
+                for i in range(len(self._item2idx))
+            ) if getattr(self, '_item_difficulties', None) else None,
+        )
+        setattr(streamer, "_guardrail", guardrail)  # store reference
+        return streamer
+
+    # ------------------------------------------------------------------
+    def baseline_rank(
+        self,
+        user_id: int,
+        top_k: int = 10,
+        *,
+        candidate_item_ids: Optional[Sequence[int]] = None,
+    ) -> List["Recommendation"]:
+        """Produce a frozen baseline ranking (no online adaptation).
+
+        This is the fallback used when a guardrail halts the adaptive policy.
+        Equivalent to ``recommend()`` but named explicitly for the safety pattern.
+
+        Parameters
+        ----------
+        user_id : int
+            User ID to rank for.
+        top_k : int, default=10
+            Number of items to return.
+        candidate_item_ids : sequence of int, optional
+            Restrict ranking to these items. If None, rank all unseen items.
+
+        Returns
+        -------
+        list of Recommendation
+        """
+        return self.recommend(
+            user_id,
+            top_k=top_k,
+            filter_seen=True,
+            candidate_item_ids=candidate_item_ids,
+        )
 
     @classmethod
     def quick_fit(
@@ -216,6 +420,64 @@ class OrchidRecommender:
         """
         rec = cls(strategy=strategy, **kwargs)
         rec.fit(interactions, user_col=user_col, item_col=item_col, rating_col=rating_col)
+        return rec
+
+    @classmethod
+    def from_interactions(
+        cls,
+        interactions: pd.DataFrame,
+        strategy: str = "auto",
+        *,
+        user_col: str = "user_id",
+        item_col: str = "item_id",
+        rating_col: Optional[str] = None,
+        item_features: Optional[np.ndarray] = None,
+        item_difficulties: Optional[Dict[int, float]] = None,
+        prerequisite_graph: Optional[Dict[int, set]] = None,
+        device: Optional[str] = None,
+        **strategy_kwargs,
+    ) -> "OrchidRecommender":
+        """Create and fit an OrchidRecommender from an interactions DataFrame in one call.
+
+        This is the recommended entry point for new users. It handles fitting
+        and stores optional metadata (item difficulties, prerequisite graph)
+        for use with streaming adaptation.
+
+        Parameters
+        ----------
+        interactions : pd.DataFrame
+            DataFrame with user_col, item_col, and optionally rating_col.
+        strategy : str, default="auto"
+            Recommender strategy. ``"auto"`` selects ``"als"`` for binary
+            feedback and ``"explicit_mf"`` for explicit rating ranges.
+        user_col : str, default="user_id"
+            Column name for user IDs.
+        item_col : str, default="item_id"
+            Column name for item IDs.
+        rating_col : str, optional
+            Column name for ratings. If None, uses implicit feedback.
+        item_features : np.ndarray, optional
+            Feature matrix for item side-info.
+        item_difficulties : dict, optional
+            Mapping from item ID to difficulty float. Stored for streaming bridge.
+        prerequisite_graph : dict, optional
+            Mapping from item ID to set of prerequisite item IDs.
+        device : str, optional
+            Torch device string.
+        **strategy_kwargs
+            Additional keyword arguments passed to the strategy.
+
+        Returns
+        -------
+        OrchidRecommender
+            Fitted recommender ready for inference or streaming.
+        """
+        rec = cls(strategy=strategy, device=device, **strategy_kwargs)
+        rec.fit(interactions, user_col=user_col, item_col=item_col,
+                rating_col=rating_col, item_features=item_features)
+        # Store metadata for streaming bridge
+        rec._item_difficulties = item_difficulties
+        rec._prerequisite_graph = prerequisite_graph
         return rec
 
     @classmethod
@@ -481,8 +743,8 @@ class OrchidRecommender:
             )
         else:
             raise ValueError(
-                f"Unknown strategy '{self.strategy}'. Expected one of 'als', 'linucb', 'popularity', "
-                "'random', 'implicit_als', 'implicit_bpr', 'neural_mf', 'user_knn'."
+                f"Unknown strategy '{self.strategy}'. Expected one of: "
+                f"{', '.join(sorted(SUPPORTED_STRATEGIES))}."
             )
         return strategy
 
@@ -601,6 +863,7 @@ class OrchidRecommender:
         top_k: int = 10,
         *,
         filter_seen: bool = True,
+        candidate_item_ids: Optional[Sequence[int]] = None,
     ) -> List[Recommendation]:
         """Generate top-k item recommendations for a user.
 
@@ -612,6 +875,10 @@ class OrchidRecommender:
             Number of recommendations to return (default: 10).
         filter_seen : bool, optional
             Whether to exclude items already seen by the user (default: True).
+        candidate_item_ids : sequence of int, optional
+            Restrict ranking to this candidate pool. Unknown item IDs are
+            ignored, which lets callers reuse a shared catalog pool across
+            model versions.
 
         Returns
         -------
@@ -635,13 +902,24 @@ class OrchidRecommender:
             if user_id not in self._user2idx:
                 raise KeyError(f"Unknown user_id {user_id}. Have you called fit?")
             user_idx = self._user2idx[user_id]
-            all_items_arr = np.fromiter(self._item2idx.values(), dtype=np.int64, count=len(self._item2idx))
+            if candidate_item_ids is None:
+                candidate_idx = np.fromiter(
+                    self._item2idx.values(),
+                    dtype=np.int64,
+                    count=len(self._item2idx),
+                ).tolist()
+            else:
+                candidate_idx = []
+                seen_candidates: set[int] = set()
+                for item_id in candidate_item_ids:
+                    idx = self._item2idx.get(int(item_id))
+                    if idx is None or idx in seen_candidates:
+                        continue
+                    candidate_idx.append(idx)
+                    seen_candidates.add(idx)
             if filter_seen and user_idx in self._seen_items:
                 seen = self._seen_items[user_idx]
-                seen_arr = np.fromiter(seen, dtype=np.int64, count=len(seen))
-                candidate_idx = np.setdiff1d(all_items_arr, seen_arr).tolist()
-            else:
-                candidate_idx = all_items_arr.tolist()
+                candidate_idx = [idx for idx in candidate_idx if idx not in seen]
 
             if not candidate_idx:
                 return []

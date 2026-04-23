@@ -1,45 +1,39 @@
-"""Minimal end-to-end example for Orchid Ranker."""
-from __future__ import annotations
+#!/usr/bin/env python3
+"""Orchid Ranker quickstart — fit once, serve forever, operate safely.
 
-from pathlib import Path
-
+Run with: python examples/quickstart.py
+"""
+import numpy as np
 import pandas as pd
 
 from orchid_ranker import OrchidRecommender
 
+# --- Generate sample interactions (replace with your own data) ---
+rng = np.random.RandomState(42)
+n_users, n_items, n_interactions = 12, 50, 300
+interactions = pd.DataFrame({
+    "user_id": rng.randint(0, n_users, n_interactions),
+    "item_id": rng.randint(0, n_items, n_interactions),
+})
 
-def build_sample_data(data_dir: Path) -> tuple[Path, Path]:
-    data_dir.mkdir(parents=True, exist_ok=True)
+# 1. FIT — one-shot training on historical data.
+rec = OrchidRecommender.from_interactions(
+    interactions,
+    strategy="als",
+    epochs=1,
+    embedding_dim=8,
+)
 
-    train = pd.DataFrame({
-        "user_id": [1, 1, 2, 2, 3, 3],
-        "item_id": [10, 11, 10, 13, 12, 14],
-        "label":   [1, 0, 1, 1, 0, 1],
-    })
-    test = pd.DataFrame({
-        "user_id": [1, 2, 3],
-        "item_id": [12, 13, 14],
-        "label":   [1, 1, 0],
-    })
+# 2. RECOMMEND — batch recommendations.
+top5 = rec.recommend(user_id=0, top_k=5)
+print(f"Top-5 for user 0: {[r.item_id for r in top5]}")
 
-    train_path = data_dir / "quickstart_train.csv"
-    test_path = data_dir / "quickstart_test.csv"
-    train.to_csv(train_path, index=False)
-    test.to_csv(test_path, index=False)
-    return train_path, test_path
+# 3. BASELINE RANK — the frozen fallback for when a guardrail halts.
+fallback = rec.baseline_rank(user_id=0, top_k=5)
+print(f"Baseline fallback: {[r.item_id for r in fallback]}")
 
+# 4. EVALUATE — check model quality.
+score = rec.predict(user_id=0, item_id=top5[0].item_id)
+print(f"Predicted score for top recommendation: {score:.4f}")
 
-def main() -> None:
-    train_path, test_path = build_sample_data(Path(__file__).parent / "data")
-
-    interactions = pd.read_csv(train_path)
-    rec = OrchidRecommender(strategy="als", epochs=3)
-    rec.fit(interactions, rating_col="label")
-
-    print("Top-3 for user 1:", rec.recommend(user_id=1, top_k=3))
-    print("Use orchid-evaluate with the generated CSVs:")
-    print(f"  orchid-evaluate --train {train_path} --test {test_path} --strategy 'als,epochs=3'")
-
-
-if __name__ == "__main__":
-    main()
+print("\nQuickstart complete! See docs/guides/ for streaming and safety setup.")

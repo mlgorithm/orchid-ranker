@@ -25,12 +25,18 @@ interactions = pd.DataFrame({
     "label":   [1, 0, 1, 1, 0, 1],
 })
 
-rec = OrchidRecommender(strategy="als", epochs=3)
-rec.fit(interactions, rating_col="label")
+rec = OrchidRecommender.from_interactions(interactions, strategy="als",
+                                          rating_col="label", epochs=3)
 print(rec.recommend(user_id=1, top_k=3))
 ```
 
 See `examples/quickstart.py` for a runnable script.
+
+To rank a specific candidate pool, pass original item IDs:
+
+```python
+rec.recommend(user_id=1, top_k=3, candidate_item_ids=[10, 12, 14])
+```
 
 ## 3. CLI Evaluation
 
@@ -53,4 +59,6 @@ Sample CSVs are auto-generated when you run `examples/quickstart.py`. The CLI ou
 ## Next Steps
 
 - Browse `docs/overview.md` for module map.
-- Deployment recipes live in `docs/deployment.md`.
+- Browse `docs/scenarios.md` for practical deployment recipes.
+- Use `docs/guides/01-fit-offline.md` for batch usage.
+- Use `docs/guides/02-serve-streaming.md` when you need live adaptation.

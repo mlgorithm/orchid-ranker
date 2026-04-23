@@ -99,6 +99,62 @@ DP_BUDGET_REMAINING = Gauge(
     registry=_REGISTRY,
 )
 
+# ----------------------------------------------------------------------------
+# Progression metrics (domain-specific, live)
+#
+# These gauges mirror the offline evaluation helpers in evaluation.py but are
+# computed on a rolling window of served recommendations so operators can
+# watch user competence gain in real time and SafeSwitchDR can gate on them.
+# ----------------------------------------------------------------------------
+PROGRESSION_GAIN = Gauge(
+    "orchid_progression_gain",
+    "Rolling-window normalized progression gain (pre -> post competence). "
+    "Labeled by policy so adaptive vs. baseline gauges can be compared.",
+    ["policy"],
+    registry=_REGISTRY,
+)
+
+PROFICIENCY_COVERAGE = Gauge(
+    "orchid_proficiency_coverage",
+    "Fraction of tracked categories currently completed, rolling window.",
+    ["policy"],
+    registry=_REGISTRY,
+)
+
+SEQUENCE_ADHERENCE = Gauge(
+    "orchid_sequence_adherence",
+    "Fraction of recent recommendations whose prerequisite categories were completed.",
+    ["policy"],
+    registry=_REGISTRY,
+)
+
+DIFFICULTY_APPROPRIATENESS = Gauge(
+    "orchid_difficulty_appropriateness",
+    "Fraction of recent recommendations inside the user's stretch zone (stretch fit).",
+    ["policy"],
+    registry=_REGISTRY,
+)
+
+ROLLING_ACCEPT_RATE = Gauge(
+    "orchid_rolling_accept_rate",
+    "Rolling-window acceptance rate used by the progression guardrail.",
+    ["policy"],
+    registry=_REGISTRY,
+)
+
+PROGRESSION_GUARDRAIL_HALTED = Gauge(
+    "orchid_progression_guardrail_halted",
+    "1 if the progression guardrail has halted the adaptive policy, else 0.",
+    registry=_REGISTRY,
+)
+
+PROGRESSION_GUARDRAIL_TRIGGERS = Counter(
+    "orchid_progression_guardrail_triggers_total",
+    "Count of times the progression guardrail halted the adaptive policy.",
+    ["reason"],
+    registry=_REGISTRY,
+)
+
 
 # ============================================================================
 # Registry & Server Functions

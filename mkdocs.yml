@@ -1,73 +1,97 @@
 site_name: Orchid Ranker
-site_description: Adaptive educational recommender toolkit
-site_url: https://uib-slate.github.io/orchid-ranker/
-repo_url: https://github.com/uib-slate/orchid-ranker
-repo_name: uib-slate/orchid-ranker
+site_description: Progression-aware recommender that optimises long-term user value.
+site_url: https://mlgorithm.github.io/orchid-ranker/
+repo_url: https://github.com/mlgorithm/orchid-ranker
+repo_name: mlgorithm/orchid-ranker
+edit_uri: edit/main/docs/
+exclude_docs: |
+  README.md
 
 theme:
   name: material
   palette:
-    - scheme: default
+    - media: "(prefers-color-scheme: light)"
+      scheme: default
       primary: deep purple
-      accent: amber
+      accent: teal
       toggle:
         icon: material/brightness-7
         name: Switch to dark mode
-    - scheme: slate
+    - media: "(prefers-color-scheme: dark)"
+      scheme: slate
       primary: deep purple
-      accent: amber
+      accent: teal
       toggle:
         icon: material/brightness-4
         name: Switch to light mode
   features:
+    - navigation.instant
+    - navigation.tracking
     - navigation.tabs
     - navigation.sections
     - navigation.expand
-    - search.suggest
     - content.code.copy
+    - content.code.annotate
+    - search.suggest
+    - search.highlight
 
 plugins:
   - search
   - mkdocstrings:
       handlers:
         python:
+          paths: [src]
           options:
             docstring_style: numpy
-            show_source: true
+            show_source: false
             show_root_heading: true
+            members_order: source
 
 nav:
   - Home: index.md
-  - Getting Started:
-    - Installation: getting-started/installation.md
-    - Quick Start: getting-started/quickstart.md
+  - Why Orchid: why-orchid.md
+  - Competitors: competitors.md
+  - Application scenarios: application-scenarios.md
+  - Usage scenarios: scenarios.md
+  - Core vs. specialty: core-vs-specialty.md
+  - Getting started:
+    - Quickstart: quickstart.md
+    - Overview: overview.md
+    - "Guide 1: Fit offline": guides/01-fit-offline.md
+    - "Guide 2: Serve streaming": guides/02-serve-streaming.md
+    - "Guide 3: Operate safely": guides/03-operate-safely.md
+    - Migration (0.4 to 0.5): guides/migration-0.4-to-0.5.md
+  - Benchmarks:
+    - MovieLens-1M: benchmarks/movielens-1m.md
+    - Music discovery: benchmarks/music.md
+    - "Case study: OULAD": benchmarks/oulad.md
+    - "Case study: EdNet": benchmarks/ednet.md
+    - "End-to-end pipeline": benchmarks/end-to-end.md
+    - "Scaling (specialty)": benchmarks/scaling.md
+    - "Cold-start (specialty)": benchmarks/cold-start.md
+    - "Taste progression (specialty)": benchmarks/taste-progression.md
+    - "Curated feed (specialty)": benchmarks/curated-feed.md
+  - Reference:
+    - API overview: api_reference.md
+    - Enterprise runbook: enterprise_runbook.md
+    - Security threat model: security/threat_model.md
+    - FERPA / GDPR alignment: compliance/ferpa_gdpr_alignment.md
   - Tutorials:
-    - Knowledge Tracing: tutorials/knowledge_tracing.md
-    - Curriculum Design: tutorials/curriculum.md
-    - Agentic Simulation: tutorials/agentic.md
-    - Differential Privacy: tutorials/privacy.md
-    - Enterprise Deployment: tutorials/deployment.md
-  - API Reference:
-    - OrchidRecommender: api/recommender.md
-    - Knowledge Tracing: api/knowledge_tracing.md
-    - Curriculum: api/curriculum.md
-    - Evaluation: api/evaluation.md
-    - Agents: api/agents.md
-    - Security: api/security.md
-  - Deployment:
-    - Capacity Planning: capacity_planning.md
-    - Security: security/threat_model.md
-  - Migration:
-    - Legacy Orchestrator: migration/legacy_orchestrator.md
-  - Changelog: CHANGELOG.md
+    - Library walkthrough: tutorials/library_walkthrough.md
+    - Safe mode: tutorial_safe_mode.md
+  - Contributing: contributing.md
 
 markdown_extensions:
-  - pymdownx.highlight
-  - pymdownx.superfences
-  - pymdownx.tabbed:
-      alternate_style: true
   - admonition
   - pymdownx.details
+  - pymdownx.superfences
+  - pymdownx.highlight:
+      anchor_linenums: true
+  - pymdownx.inlinehilite
+  - pymdownx.tabbed:
+      alternate_style: true
+  - pymdownx.snippets
+  - tables
   - toc:
       permalink: true
 

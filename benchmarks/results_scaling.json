@@ -1,0 +1,227 @@
+{
+  "memory": [
+    {
+      "registered_users": 1000000,
+      "active_users": 1000,
+      "dense_mb": 122.1,
+      "sparse_mb": 0.2,
+      "savings_pct": 99.8
+    },
+    {
+      "registered_users": 1000000,
+      "active_users": 10000,
+      "dense_mb": 122.1,
+      "sparse_mb": 2.4,
+      "savings_pct": 98.1
+    },
+    {
+      "registered_users": 1000000,
+      "active_users": 100000,
+      "dense_mb": 122.1,
+      "sparse_mb": 23.7,
+      "savings_pct": 80.6
+    },
+    {
+      "registered_users": 1000000,
+      "active_users": 500000,
+      "dense_mb": 122.1,
+      "sparse_mb": 118.3,
+      "savings_pct": 3.1
+    }
+  ],
+  "bkt_latency": [
+    {
+      "backend": "dense (1 lock)",
+      "shards": 1,
+      "mean_ms": 0.005,
+      "p50_ms": 0.005,
+      "p95_ms": 0.006,
+      "p99_ms": 0.007
+    },
+    {
+      "backend": "sharded (4 shards)",
+      "shards": 4,
+      "mean_ms": 0.006,
+      "p50_ms": 0.006,
+      "p95_ms": 0.008,
+      "p99_ms": 0.013
+    },
+    {
+      "backend": "sharded (16 shards)",
+      "shards": 16,
+      "mean_ms": 0.006,
+      "p50_ms": 0.006,
+      "p95_ms": 0.007,
+      "p99_ms": 0.007
+    },
+    {
+      "backend": "sharded (32 shards)",
+      "shards": 32,
+      "mean_ms": 0.006,
+      "p50_ms": 0.006,
+      "p95_ms": 0.006,
+      "p99_ms": 0.017
+    },
+    {
+      "backend": "sharded (64 shards)",
+      "shards": 64,
+      "mean_ms": 0.006,
+      "p50_ms": 0.006,
+      "p95_ms": 0.006,
+      "p99_ms": 0.006
+    }
+  ],
+  "adapter_latency": [
+    {
+      "backend": "dense adapter",
+      "mean_ms": 0.013,
+      "p50_ms": 0.013,
+      "p95_ms": 0.014,
+      "p99_ms": 0.014
+    },
+    {
+      "backend": "sparse adapter",
+      "mean_ms": 0.012,
+      "p50_ms": 0.011,
+      "p95_ms": 0.014,
+      "p99_ms": 0.038
+    }
+  ],
+  "eviction": {
+    "max_entries": 1000,
+    "total_users_seen": 10000,
+    "unique_users": 5000,
+    "final_occupancy": 1000,
+    "at_capacity": true
+  },
+  "concurrency": [
+    {
+      "shards": 4,
+      "threads": 1,
+      "total_ops": 2000,
+      "wall_time_s": 0.004,
+      "throughput_ops_per_sec": 509792.0,
+      "mean_thread_time_s": 0.004
+    },
+    {
+      "shards": 4,
+      "threads": 2,
+      "total_ops": 4000,
+      "wall_time_s": 0.006,
+      "throughput_ops_per_sec": 724271.0,
+      "mean_thread_time_s": 0.003
+    },
+    {
+      "shards": 4,
+      "threads": 4,
+      "total_ops": 8000,
+      "wall_time_s": 0.03,
+      "throughput_ops_per_sec": 266561.0,
+      "mean_thread_time_s": 0.007
+    },
+    {
+      "shards": 4,
+      "threads": 8,
+      "total_ops": 16000,
+      "wall_time_s": 0.019,
+      "throughput_ops_per_sec": 837848.0,
+      "mean_thread_time_s": 0.002
+    },
+    {
+      "shards": 16,
+      "threads": 1,
+      "total_ops": 2000,
+      "wall_time_s": 0.003,
+      "throughput_ops_per_sec": 723186.0,
+      "mean_thread_time_s": 0.003
+    },
+    {
+      "shards": 16,
+      "threads": 2,
+      "total_ops": 4000,
+      "wall_time_s": 0.005,
+      "throughput_ops_per_sec": 792445.0,
+      "mean_thread_time_s": 0.002
+    },
+    {
+      "shards": 16,
+      "threads": 4,
+      "total_ops": 8000,
+      "wall_time_s": 0.01,
+      "throughput_ops_per_sec": 770738.0,
+      "mean_thread_time_s": 0.003
+    },
+    {
+      "shards": 16,
+      "threads": 8,
+      "total_ops": 16000,
+      "wall_time_s": 0.019,
+      "throughput_ops_per_sec": 842939.0,
+      "mean_thread_time_s": 0.002
+    },
+    {
+      "shards": 32,
+      "threads": 1,
+      "total_ops": 2000,
+      "wall_time_s": 0.003,
+      "throughput_ops_per_sec": 647066.0,
+      "mean_thread_time_s": 0.003
+    },
+    {
+      "shards": 32,
+      "threads": 2,
+      "total_ops": 4000,
+      "wall_time_s": 0.005,
+      "throughput_ops_per_sec": 766002.0,
+      "mean_thread_time_s": 0.003
+    },
+    {
+      "shards": 32,
+      "threads": 4,
+      "total_ops": 8000,
+      "wall_time_s": 0.01,
+      "throughput_ops_per_sec": 764846.0,
+      "mean_thread_time_s": 0.003
+    },
+    {
+      "shards": 32,
+      "threads": 8,
+      "total_ops": 16000,
+      "wall_time_s": 0.019,
+      "throughput_ops_per_sec": 841432.0,
+      "mean_thread_time_s": 0.002
+    },
+    {
+      "shards": 64,
+      "threads": 1,
+      "total_ops": 2000,
+      "wall_time_s": 0.003,
+      "throughput_ops_per_sec": 741932.0,
+      "mean_thread_time_s": 0.003
+    },
+    {
+      "shards": 64,
+      "threads": 2,
+      "total_ops": 4000,
+      "wall_time_s": 0.025,
+      "throughput_ops_per_sec": 160790.0,
+      "mean_thread_time_s": 0.012
+    },
+    {
+      "shards": 64,
+      "threads": 4,
+      "total_ops": 8000,
+      "wall_time_s": 0.01,
+      "throughput_ops_per_sec": 785302.0,
+      "mean_thread_time_s": 0.003
+    },
+    {
+      "shards": 64,
+      "threads": 8,
+      "total_ops": 16000,
+      "wall_time_s": 0.02,
+      "throughput_ops_per_sec": 807931.0,
+      "mean_thread_time_s": 0.002
+    }
+  ]
+}

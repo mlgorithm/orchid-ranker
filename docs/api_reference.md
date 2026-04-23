@@ -1,6 +1,6 @@
 # API Reference
 
-Complete reference for all public classes and functions in Orchid Ranker v0.2.1.
+Complete reference for public classes and functions in Orchid Ranker v0.5.0.
 
 ---
 
@@ -23,7 +23,7 @@ class OrchidRecommender:
 
 **Parameters:**
 
-- `strategy` — One of: `"als"`, `"explicit_mf"`, `"neural_mf"`, `"linucb"`, `"user_knn"`, `"popularity"`, `"random"`, `"implicit_als"`, `"implicit_bpr"`. Typos produce a helpful "did you mean?" suggestion.
+- `strategy` — One of: `"auto"`, `"als"`, `"explicit_mf"`, `"neural_mf"`, `"linucb"`, `"user_knn"`, `"popularity"`, `"random"`, `"implicit_als"`, `"implicit_bpr"`. Typos produce a helpful "did you mean?" suggestion.
 - `device` — `"cpu"` or `"cuda"`. Defaults to auto-detect.
 - `validate_inputs` — When `True`, validates DataFrame schema before fitting. Set `False` for legacy pipeline integration.
 - `**strategy_kwargs` — Forwarded to the underlying strategy (e.g., `epochs=10`, `emb_dim=64`, `alpha=1.5`).
@@ -35,10 +35,16 @@ class OrchidRecommender:
 | `fit` | `(interactions, user_col="user_id", item_col="item_id", rating_col=None, item_features=None)` | `self` | Fit the model on interaction data. |
 | `predict` | `(user_id, item_id)` | `float` | Predict a single score. |
 | `predict_many` | `(user_ids, item_ids)` | `np.ndarray` | Batch prediction for user-item pairs. |
-| `recommend` | `(user_id, top_k=10, filter_seen=True)` | `List[Recommendation]` | Top-K recommendations for a user. |
+| `recommend` | `(user_id, top_k=10, filter_seen=True, candidate_item_ids=None)` | `List[Recommendation]` | Top-K recommendations for a user, optionally restricted to a candidate pool. |
+| `baseline_rank` | `(user_id, top_k=10, candidate_item_ids=None)` | `List[Recommendation]` | Frozen fallback ranking for guardrail and safe-mode flows. |
+| `as_streaming` | `(monitor=None, guardrail=None, lr=0.05, l2=1e-3, scaling_config=None)` | `StreamingAdaptiveRanker` | Promote a fitted `neural_mf` model into the streaming adapter. |
 | `save` | `(path)` | `None` | Save fitted model to disk. |
 | `load` | `(path)` | `OrchidRecommender` | Class method. Load a saved model. |
-| `available_strategies` | `()` | `None` | Class method. Print all strategies with descriptions. |
+| `available_strategies` | `()` | `str` | Class method. Return all strategies with descriptions. |
+
+`candidate_item_ids` accepts original item IDs from your DataFrame. Unknown
+candidate IDs are ignored, which makes it safe to pass a shared catalog pool
+while rolling models forward.
 
 ### Recommendation
 
@@ -62,7 +68,7 @@ STRATEGY_GUIDE: Dict[str, str]
 
 ### BayesianKnowledgeTracing
 
-Hidden Markov Model for estimating skill mastery from response sequences.
+Hidden Markov Model for estimating category competence from response sequences.
 
 ```python
 class BayesianKnowledgeTracing:
@@ -78,46 +84,49 @@ class BayesianKnowledgeTracing:
 
 **Parameters:**
 
-- `p_init` — Prior probability of knowing the skill before any observations.
+- `p_init` — Prior probability of knowing the category before any observations.
 - `p_transit` — Probability of transitioning from unlearned to learned after each attempt.
-- `p_slip` — Probability of an incorrect response despite knowing the skill.
-- `p_guess` — Probability of a correct response despite not knowing the skill.
-- `mastery_threshold` — `p_known()` value above which the skill is considered mastered.
+- `p_slip` — Probability of an incorrect response despite knowing the category.
+- `p_guess` — Probability of a correct response despite not knowing the category.
+- `mastery_threshold` — BKT compatibility name for the `p_known()` value above which the category is considered completed.
 
 **Methods:**
 
 | Method | Signature | Returns | Description |
 |--------|-----------|---------|-------------|
 | `update` | `(correct: bool)` | `float` | Process one observation, return updated p_known. |
-| `p_known` | `()` | `float` | Current probability of mastery. |
-| `is_mastered` | `()` | `bool` | Whether p_known exceeds the mastery threshold. |
+| `p_known` | `()` | `float` | Current probability of competence. |
+| `is_mastered` | `()` | `bool` | BKT compatibility method; whether p_known exceeds the competence threshold. |
 | `reset` | `()` | `None` | Reset to initial prior. |
 
-### MasteryTracker
+### CompetencyTracker
 
-Tracks mastery across multiple skills simultaneously, each with its own BKT instance.
+Tracks competence across multiple categories simultaneously, each with its own BKT instance.
 
 ```python
-class MasteryTracker:
+class CompetencyTracker:
     def __init__(
         self,
-        skills: List[str],
+        competencies: List[str],
         bkt_params: Optional[Dict[str, Dict[str, float]]] = None,
         default_params: Optional[Dict[str, float]] = None,
-        mastery_threshold: float = 0.95,
+        success_threshold: float = 0.95,
     )
 ```
+
+`ProficiencyTracker` is a non-deprecated alias for `CompetencyTracker`. The old `MasteryTracker` name and `skills` / `mastery_threshold` parameters remain as deprecated compatibility aliases.
 
 **Methods:**
 
 | Method | Signature | Returns | Description |
 |--------|-----------|---------|-------------|
-| `update` | `(skill, correct)` | `None` | Record an attempt on a skill. |
-| `get_mastery` | `(skill)` | `float` | Current mastery probability for a skill. |
-| `mastered_skills` | `()` | `Set[str]` | All skills above mastery threshold. |
-| `unmastered_skills` | `()` | `Set[str]` | All skills below mastery threshold. |
-| `recommend_next` | `()` | `Optional[str]` | Suggest the next skill to practice. |
-| `ready_for` | `(skill)` | `bool` | Whether prerequisites are met. |
+| `update` | `(competency, correct)` | `float` | Record an outcome and return updated competence. |
+| `proficiency` | `(competency)` | `float` | Current competence probability for one category. |
+| `get_mastery` | `()` | `Dict[str, float]` | Compatibility method returning all competence estimates. |
+| `succeeded` | `()` | `List[str]` | Categories above competence threshold. |
+| `remaining` | `()` | `List[str]` | Categories below competence threshold. |
+| `recommend_next` | `()` | `List[str]` | Suggest the next categories to engage with. |
+| `ready_for` | `(competency)` | `bool` | Whether prerequisites are met. |
 
 ### ForgettingCurve
 
@@ -144,14 +153,16 @@ class ForgettingCurve:
 
 ## orchid_ranker.curriculum
 
-### PrerequisiteGraph
+### DependencyGraph
 
-Directed acyclic graph for modeling skill dependencies with automatic cycle detection.
+Directed acyclic graph for modeling category dependencies with automatic cycle detection.
 
 ```python
-class PrerequisiteGraph:
+class DependencyGraph:
     def __init__(self, edges: Optional[List[Tuple[str, str]]] = None)
 ```
+
+The module name `curriculum` is retained for compatibility. `PrerequisiteGraph` and `SkillGraph` remain as deprecated aliases for `DependencyGraph`.
 
 **Methods:**
 
@@ -159,37 +170,39 @@ class PrerequisiteGraph:
 |--------|-----------|---------|-------------|
 | `add_edge` | `(prerequisite, dependent)` | `None` | Add a dependency. Raises `ValueError` on cycles or self-loops. |
 | `add_edges` | `(edges: List[Tuple[str, str]])` | `None` | Batch add with cumulative cycle detection. |
-| `prerequisites_for` | `(skill)` | `Set[str]` | Direct prerequisites of a skill. |
-| `all_prerequisites_for` | `(skill)` | `Set[str]` | All transitive prerequisites. |
-| `dependents_of` | `(skill)` | `Set[str]` | Skills that depend on this skill. |
-| `topological_order` | `()` | `List[str]` | Valid learning sequence (Kahn's algorithm). |
-| `learning_path` | `(target_skill, mastered=None)` | `List[str]` | Shortest path to target from current mastery. |
-| `available_skills` | `(mastered: Set[str])` | `List[str]` | Skills whose prerequisites are all mastered. |
-| `prerequisites_met` | `(skill, mastered: Set[str])` | `bool` | Whether all prerequisites are met. |
+| `prerequisites_for` | `(node)` | `Set[str]` | Direct prerequisites of a category/item. |
+| `all_prerequisites_for` | `(node)` | `Set[str]` | All transitive prerequisites. |
+| `dependents_of` | `(node)` | `Set[str]` | Categories/items that depend on this node. |
+| `topological_order` | `()` | `List[str]` | Valid progression sequence (Kahn's algorithm). |
+| `path_to` | `(target, completed=None)` | `List[str]` | Shortest path to target from completed nodes. |
+| `available` | `(completed: Set[str])` | `List[str]` | Categories/items whose prerequisites are all met. |
+| `prerequisites_met` | `(node, completed: Set[str])` | `bool` | Whether all prerequisites are met. |
 | `validate` | `()` | `None` | Validate graph integrity. |
 | `to_dict` | `()` | `Dict` | Serialize to dictionary. |
-| `from_dict` | `(data: Dict)` | `PrerequisiteGraph` | Class method. Deserialize from dictionary. |
+| `from_dict` | `(data: Dict)` | `DependencyGraph` | Class method. Deserialize from dictionary. |
 | `summary` | `()` | `str` | Human-readable graph summary. |
 
-### CurriculumRecommender
+### ProgressionRecommender
 
-ZPD-aware recommendations that respect prerequisite ordering.
+Stretch-zone-aware recommendations that respect prerequisite ordering.
 
 ```python
-class CurriculumRecommender:
+class ProgressionRecommender:
     def __init__(
         self,
-        graph: PrerequisiteGraph,
+        graph: DependencyGraph,
         difficulty_map: Optional[Dict[str, float]] = None,
     )
 ```
+
+`CurriculumRecommender` remains as a deprecated compatibility alias.
 
 **Methods:**
 
 | Method | Signature | Returns | Description |
 |--------|-----------|---------|-------------|
-| `recommend` | `(student_mastery: Set[str], n: int = 5)` | `List[str]` | Recommend next items respecting prerequisites and ZPD. |
-| `filter_candidates` | `(candidates, mastered)` | `List[str]` | Filter items to those with satisfied prerequisites. |
+| `recommend` | `(completed: Set[str], n: int = 5)` | `List[str]` | Recommend next items respecting prerequisites and stretch zone. |
+| `filter_candidates` | `(candidates, completed)` | `List[str]` | Filter items to those with satisfied prerequisites. |
 
 ---
 
@@ -303,30 +316,30 @@ def ndcg_at_k(recommended: List, relevant_scores: Dict, k: int) -> float
 def average_precision(recommended: List, relevant: Set, k: int) -> float
 ```
 
-### Educational Metrics
+### Progression Metrics
 
 ```python
-def learning_gain(pre_score: float, post_score: float) -> float
+def progression_gain(pre_score: float, post_score: float) -> float
     # Normalized gain: (post - pre) / (1 - pre)
 
-def knowledge_coverage(mastered_skills: set, total_skills: set) -> float
-    # Fraction of total skills mastered
+def category_coverage(successful_categories: set, total_categories: set) -> float
+    # Fraction of total categories where competence is achieved
 
-def curriculum_adherence(recommended_items: List, prerequisite_graph: PrerequisiteGraph, mastered: Set) -> float
+def sequence_adherence(recommended_items: List, prerequisite_graph: DependencyGraph, completed: Set) -> float
     # Fraction of recommendations with satisfied prerequisites
 
-def difficulty_appropriateness(recommended_difficulties: Sequence[float], student_ability: float, zpd_width: float = 0.25) -> float
-    # Fraction of items within the student's ZPD
+def stretch_fit(recommended_difficulties: Sequence[float], user_competence: float, stretch_width: float = 0.25) -> float
+    # Fraction of items within the user's stretch zone
 
 def engagement_score(interactions: Sequence, total_available: int) -> float
     # Ratio of interactions to available items
 ```
 
-### EducationalReport
+### ProgressionReport
 
 ```python
 @dataclass
-class EducationalReport:
+class ProgressionReport:
     metric_name: str
     value: float
     ci_lower: float
@@ -376,29 +389,30 @@ Returns a differential privacy configuration dictionary.
 
 ## orchid_ranker.agents
 
-### StudentAgent
+### AdaptiveAgent
 
-Simulates a learner with knowledge, fatigue, trust, and engagement dynamics.
+Simulates a user with knowledge, fatigue, trust, and engagement dynamics.
 
 ```python
-class StudentAgent:
+class AdaptiveAgent:
     def __init__(
         self,
         user_id: int,
         knowledge_dim: int = 10,
-        knowledge_mode: str = "scalar",  # "scalar", "IRT", "MIRT", "ZPD", "ContextualZPD"
+        knowledge_mode: str = "scalar",
         lr: float = 0.2,
         decay: float = 0.1,
         trust_influence: bool = True,
         fatigue_growth: float = 0.05,
         fatigue_recovery: float = 0.02,
-        act_mode: str = "ZPD",
         seed: int = 42,
-        zpd_delta: float = 0.10,
-        zpd_width: float = 0.25,
+        zpd_delta: float = 0.10,  # legacy internal name for stretch-zone offset
+        zpd_width: float = 0.25,  # legacy internal name for stretch-zone width
         pos_eta: float = 0.85,
     )
 ```
+
+`StudentAgent` remains as a deprecated compatibility alias while the simulation internals are migrated.
 
 **Key methods:** `accept(item_id, difficulty, correct, dwell_time, feedback)`, `get_knowledge()`, `get_fatigue()`, `get_engagement()`, `get_trust()`.
 
@@ -427,7 +441,7 @@ Runs multi-user adaptive experiments with online policy optimization.
 
 ### DualRecommender
 
-Combines a fixed teacher recommender with an adaptive student recommender for knowledge distillation.
+Combines a fixed teacher recommender with an adaptive recommender for knowledge distillation.
 
 ---
 

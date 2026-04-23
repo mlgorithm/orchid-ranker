@@ -7,6 +7,7 @@ import logging
 import math
 import os
 import threading
+import warnings
 from collections import defaultdict, deque
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -225,9 +226,9 @@ class TwoTowerRecommender(nn.Module):
             core_params += list(self.item_bias.parameters())
         self.optimizer = torch.optim.Adam([p for p in core_params if p.requires_grad], lr=lr)
 
-        # --- Teacher + KL anchor (teacher overridden by DualRecommender) ---
-        self.teacher = copy.deepcopy(self).to(device).eval()
-        for p in self.teacher.parameters():
+        # --- Anchor (frozen copy for KL regularization) ---
+        self.anchor = copy.deepcopy(self).to(device).eval()
+        for p in self.anchor.parameters():
             p.requires_grad_(False)
         self.kl_beta = float(self._extra_kwargs.get("kl_beta", 0.05))
 
@@ -280,15 +281,15 @@ class TwoTowerRecommender(nn.Module):
         self._decision_contexts: Dict[int, Dict[str, Any]] = {}
         self._decision_context_cap = 64
         self._decision_context_lock = threading.Lock()
-        if hasattr(self, "teacher"):
-            self.teacher._rep_cache = {}
-            self.teacher._rep_cache_cap = self._rep_cache_cap
-            self.teacher._cached_item_matrix = None
-            self.teacher._last_item_reps = None
-            self.teacher._last_item_ids = None
-            self.teacher._decision_contexts = {}
-            self.teacher._decision_context_cap = self._decision_context_cap
-            self.teacher._decision_context_lock = threading.Lock()
+        if hasattr(self, "anchor"):
+            self.anchor._rep_cache = {}
+            self.anchor._rep_cache_cap = self._rep_cache_cap
+            self.anchor._cached_item_matrix = None
+            self.anchor._last_item_reps = None
+            self.anchor._last_item_ids = None
+            self.anchor._decision_contexts = {}
+            self.anchor._decision_context_cap = self._decision_context_cap
+            self.anchor._decision_context_lock = threading.Lock()
         self._adapted_lam: Optional[float] = None
         self._adapted_nov: Optional[float] = None
 
@@ -312,6 +313,31 @@ class TwoTowerRecommender(nn.Module):
 
         self.audit_logger: Optional[AuditLogger] = None
         self._audit_actor = "TwoTowerRecommender"
+
+    # ---------------- backward compat for renamed attrs ----------------
+    def __getattr__(self, name: str):
+        # Provide deprecated 'teacher' alias for the renamed 'anchor' attribute
+        if name == "teacher":
+            warnings.warn(
+                "TwoTowerRecommender.teacher is deprecated, use .anchor instead. "
+                "Will be removed in v1.0.",
+                DeprecationWarning,
+                stacklevel=2,
+            )
+            return self.anchor
+        return super().__getattr__(name)
+
+    def __setattr__(self, name: str, value):
+        # Allow setting via the deprecated 'teacher' name (used by DualRecommender)
+        if name == "teacher":
+            warnings.warn(
+                "TwoTowerRecommender.teacher is deprecated, use .anchor instead. "
+                "Will be removed in v1.0.",
+                DeprecationWarning,
+                stacklevel=2,
+            )
+            name = "anchor"
+        super().__setattr__(name, value)
 
     # ---------------- helpers ----------------
     def _slot_for(self, user_id: int) -> str:
@@ -988,7 +1014,7 @@ class TwoTowerRecommender(nn.Module):
            scope: str = "global",
            **kwargs) -> Dict[str, float]:
         """
-        DP-aware update + KL anchor to a frozen teacher.
+        DP-aware update + KL regularization against a frozen anchor copy.
         """
         device = next(self.parameters()).device
         self.train()
@@ -1115,7 +1141,7 @@ class TwoTowerRecommender(nn.Module):
                 logits = logits_all[0, idx_t]
 
                 with torch.no_grad():
-                    t_logits_all = self.teacher.think(
+                    t_logits_all = self.anchor.think(
                         user_vec=user_vec.to(device),
                         item_matrix=item_matrix.to(device),
                         user_ids=user_ids.to(device),
@@ -1241,9 +1267,9 @@ class TwoTowerRecommender(nn.Module):
             state_vec=state_vec.to(device),
             cohort_ids=None,
         )
-        teacher = self.teacher
+        teacher = self.anchor
         if teacher is not None:
-            # ensure frozen teacher has runtime attributes expected by think()
+            # ensure frozen anchor has runtime attributes expected by think()
             defaults = {
                 "use_linucb": getattr(self, "use_linucb", False),
                 "linucb": copy.deepcopy(getattr(self, "linucb", None)) if getattr(self, "use_linucb", False) else None,

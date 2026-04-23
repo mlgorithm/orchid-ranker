@@ -1,0 +1,74 @@
+{
+  "ranking": {
+    "freshness_only": {
+      "mean_engagement_rate": 0.086,
+      "mean_diversity": 0.7,
+      "mean_session_length": 0.86,
+      "survival_5": 0.0,
+      "survival_10": 0.0
+    },
+    "popularity": {
+      "mean_engagement_rate": 0.092,
+      "mean_diversity": 0.6,
+      "mean_session_length": 0.92,
+      "survival_5": 0.0,
+      "survival_10": 0.0
+    },
+    "curated_feed_ranker": {
+      "mean_engagement_rate": 0.052,
+      "mean_diversity": 0.784,
+      "mean_session_length": 0.52,
+      "survival_5": 0.0,
+      "survival_10": 0.0
+    },
+    "uplift_vs_popularity": {
+      "engagement_uplift_pct": -43.5,
+      "diversity_uplift_pct": 30.7
+    }
+  },
+  "freshness_sensitivity": {
+    "halflife_6h": {
+      "mean_engagement_rate": 0.034,
+      "mean_diversity": 0.772,
+      "mean_session_length": 0.34,
+      "survival_5": 0.0,
+      "survival_10": 0.0
+    },
+    "halflife_12h": {
+      "mean_engagement_rate": 0.086,
+      "mean_diversity": 0.744,
+      "mean_session_length": 0.86,
+      "survival_5": 0.0,
+      "survival_10": 0.0
+    },
+    "halflife_24h": {
+      "mean_engagement_rate": 0.06,
+      "mean_diversity": 0.734,
+      "mean_session_length": 0.6,
+      "survival_5": 0.0,
+      "survival_10": 0.0
+    },
+    "halflife_48h": {
+      "mean_engagement_rate": 0.058,
+      "mean_diversity": 0.718,
+      "mean_session_length": 0.58,
+      "survival_5": 0.0,
+      "survival_10": 0.0
+    },
+    "halflife_168h": {
+      "mean_engagement_rate": 0.032,
+      "mean_diversity": 0.774,
+      "mean_session_length": 0.32,
+      "survival_5": 0.0,
+      "survival_10": 0.0
+    }
+  },
+  "config": {
+    "seed": 42,
+    "smoke": true,
+    "date": "2026-04-15T15:04:02.263335+00:00",
+    "data_source": "synthetic",
+    "num_users": 50,
+    "num_items": 200
+  }
+}

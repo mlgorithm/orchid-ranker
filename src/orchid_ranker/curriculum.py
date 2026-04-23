@@ -1,12 +1,13 @@
-"""Dependency graph and progression recommender for sequenced learning paths.
+"""Dependency graph and progression recommender for structured catalog paths.
 
 This module provides DAG-based dependency modeling for any domain with ordered
-progression: education (curricula), corporate training (certification paths),
-rehabilitation (therapy plans), gaming (skill trees), and more.
+progression: education (structured catalogs), corporate training (certification
+paths), rehabilitation (therapy plans), gaming (category trees), and more.
 """
 from __future__ import annotations
 
 import heapq
+import warnings
 from collections import defaultdict, deque
 from typing import Dict, List, Optional, Set, Tuple
 
@@ -14,10 +15,10 @@ from typing import Dict, List, Optional, Set, Tuple
 class DependencyGraph:
     """Directed acyclic graph of dependencies for progression ordering.
 
-    Models the dependency structure between competencies/items where mastering
+    Models the dependency structure between categories/items where completing
     prerequisites is required before advancing to dependent items. Works for
-    any domain: education (curricula), training (cert paths), gaming (skill
-    trees), rehab (therapy sequences), etc.
+    any domain: education (structured catalogs), training (cert paths), gaming
+    (category trees), rehab (therapy sequences), etc.
 
     Parameters
     ----------
@@ -228,7 +229,7 @@ class DependencyGraph:
 
         Notes
         -----
-        For deterministic output, skills at the same level are ordered
+        For deterministic output, categories at the same level are ordered
         lexicographically.
         """
         if not self._vertices:
@@ -258,7 +259,10 @@ class DependencyGraph:
 
         return result
 
-    def prerequisites_met(self, node: str, completed: Set[str] = None, *, mastered: Set[str] = None) -> bool:
+    def prerequisites_met(
+        self, node: str, completed: Set[str] = None,
+        *, mastered: Set[str] = None, succeeded: Set[str] = None,
+    ) -> bool:
         """Check if all prerequisites for a node have been completed.
 
         A node is ready to start when all its direct prerequisites are in
@@ -269,7 +273,8 @@ class DependencyGraph:
         node : str
             The node to check readiness for.
         completed : set of str
-            Set of nodes already completed/mastered.
+            Set of nodes already completed.
+            (Also accepts deprecated aliases ``mastered`` and ``succeeded``.)
 
         Returns
         -------
@@ -285,9 +290,23 @@ class DependencyGraph:
         >>> graph.prerequisites_met("c", {"a"})  # "b" not completed
         False
         """
-        # Support old 'mastered' kwarg
+        # Support deprecated keyword aliases
         if completed is None and mastered is not None:
+            warnings.warn(
+                "mastered is deprecated, use completed instead. "
+                "Will be removed in v1.0.",
+                DeprecationWarning,
+                stacklevel=2,
+            )
             completed = mastered
+        if completed is None and succeeded is not None:
+            warnings.warn(
+                "succeeded is deprecated, use completed instead. "
+                "Will be removed in v1.0.",
+                DeprecationWarning,
+                stacklevel=2,
+            )
+            completed = succeeded
         if completed is None:
             completed = set()
 
@@ -300,13 +319,17 @@ class DependencyGraph:
     # Backward-compatible aliases
     is_ready = prerequisites_met
 
-    def available(self, completed: Set[str] = None, *, mastered: Set[str] = None) -> List[str]:
+    def available(
+        self, completed: Set[str] = None,
+        *, mastered: Set[str] = None, succeeded: Set[str] = None,
+    ) -> List[str]:
         """Return nodes whose prerequisites are all completed but node itself is not.
 
         Parameters
         ----------
         completed : set of str
-            Set of nodes already completed/mastered.
+            Set of nodes already completed.
+            (Also accepts deprecated aliases ``mastered`` and ``succeeded``.)
 
         Returns
         -------
@@ -321,9 +344,23 @@ class DependencyGraph:
         >>> graph.available({"a", "b"})
         ['c']
         """
-        # Support old 'mastered' kwarg
+        # Support deprecated keyword aliases
         if completed is None and mastered is not None:
+            warnings.warn(
+                "mastered is deprecated, use completed instead. "
+                "Will be removed in v1.0.",
+                DeprecationWarning,
+                stacklevel=2,
+            )
             completed = mastered
+        if completed is None and succeeded is not None:
+            warnings.warn(
+                "succeeded is deprecated, use completed instead. "
+                "Will be removed in v1.0.",
+                DeprecationWarning,
+                stacklevel=2,
+            )
+            completed = succeeded
         if completed is None:
             completed = set()
 
@@ -337,12 +374,14 @@ class DependencyGraph:
 
         return sorted(result)
 
-    # Backward-compatible alias
+    # Backward-compatible aliases
+    available_categories = available
     available_skills = available
 
     def path_to(
         self, target: str, completed: Optional[Set[str]] = None,
         *, mastered: Optional[Set[str]] = None,
+        succeeded: Optional[Set[str]] = None,
     ) -> List[str]:
         """Return the ordered progression path to reach a target node.
 
@@ -354,6 +393,7 @@ class DependencyGraph:
             The target node to reach.
         completed : set of str, optional
             Set of nodes already completed. Defaults to empty set.
+            (Also accepts deprecated aliases ``mastered`` and ``succeeded``.)
 
         Returns
         -------
@@ -370,9 +410,23 @@ class DependencyGraph:
         >>> graph.path_to("calculus", completed={"algebra"})
         ['trigonometry', 'calculus']
         """
-        # Support old 'mastered' kwarg
+        # Support deprecated keyword aliases
         if completed is None and mastered is not None:
+            warnings.warn(
+                "mastered is deprecated, use completed instead. "
+                "Will be removed in v1.0.",
+                DeprecationWarning,
+                stacklevel=2,
+            )
             completed = mastered
+        if completed is None and succeeded is not None:
+            warnings.warn(
+                "succeeded is deprecated, use completed instead. "
+                "Will be removed in v1.0.",
+                DeprecationWarning,
+                stacklevel=2,
+            )
+            completed = succeeded
         if completed is None:
             completed = set()
 
@@ -478,7 +532,7 @@ class DependencyGraph:
         """Return human-readable summary of graph structure.
 
         Generates a text summary with vertex/edge counts and identification
-        of root skills (no prerequisites) and leaf skills (no dependents).
+        of root categories (no prerequisites) and leaf categories (no dependents).
 
         Returns
         -------
@@ -488,11 +542,11 @@ class DependencyGraph:
 
         Examples
         --------
-        >>> graph = PrerequisiteGraph([("a", "b"), ("b", "c")])
+        >>> graph = DependencyGraph([("a", "b"), ("b", "c")])
         >>> print(graph.summary())
-        PrerequisiteGraph(vertices=3, edges=2)
-          Root skills (no prerequisites): ['a']
-          Leaf skills (no dependents): ['c']
+        DependencyGraph(vertices=3, edges=2)
+          Roots (no dependencies): ['a']
+          Leaves (no dependents): ['c']
         """
         if not self._vertices:
             return "Empty graph (0 vertices, 0 edges)"
@@ -602,21 +656,22 @@ class DependencyGraph:
 
 
 class ProgressionRecommender:
-    """Recommends next items respecting dependency ordering and proficiency.
+    """Recommends next items respecting dependency ordering and user competence.
 
     Combines a DependencyGraph with optional difficulty weighting to produce
-    valid progression recommendations. Incorporates zone of proximal development
-    (ZPD) principles by preferring items that match the user's current level.
+    valid progression recommendations. Incorporates stretch zone principles
+    by preferring items that match the user's current level.
 
-    Works for any sequenced domain: education (curricula), training (cert paths),
-    rehab (therapy plans), gaming (skill trees), onboarding (feature rollout).
+    Works for any sequenced domain: education (structured catalogs), training
+    (cert paths), rehab (therapy plans), gaming (category trees), onboarding
+    (feature rollout).
 
     Parameters
     ----------
     graph : DependencyGraph
         DAG of item dependencies.
     difficulty_map : dict, optional
-        Mapping of item to difficulty float in [0, 1]. If provided,
+        Mapping of category to difficulty float in [0, 1]. If provided,
         recommendations are sorted by difficulty preference.
 
     Attributes
@@ -624,7 +679,7 @@ class ProgressionRecommender:
     graph : DependencyGraph
         The underlying dependency graph.
     difficulty_map : dict or None
-        Optional difficulty scores for items.
+        Optional difficulty scores for categories.
 
     Examples
     --------
@@ -650,8 +705,8 @@ class ProgressionRecommender:
         graph : DependencyGraph
             The dependency graph defining item dependencies.
         difficulty_map : dict, optional
-            Mapping {item: difficulty} where difficulty is float in [0, 1].
-            Higher values indicate harder items.
+            Mapping {category: difficulty} where difficulty is float in [0, 1].
+            Higher values indicate harder categories.
         """
         self.graph = graph
         self.difficulty_map = difficulty_map or {}
@@ -660,10 +715,10 @@ class ProgressionRecommender:
 
         # Validate difficulty_map if provided
         if self.difficulty_map:
-            for skill, diff in self.difficulty_map.items():
+            for category, diff in self.difficulty_map.items():
                 if not isinstance(diff, (int, float)) or not 0 <= diff <= 1:
                     raise ValueError(
-                        f"Difficulty for '{skill}' must be float in [0, 1], got {diff}"
+                        f"Difficulty for '{category}' must be float in [0, 1], got {diff}"
                     )
 
     def __repr__(self) -> str:
@@ -673,6 +728,7 @@ class ProgressionRecommender:
     def recommend(
         self, completed: Set[str] = None, n: int = 5,
         *, student_mastery: Set[str] = None,
+        user_competence: Set[str] = None,
     ) -> List[str]:
         """Recommend next items considering dependencies, progress, and difficulty.
 
@@ -684,8 +740,9 @@ class ProgressionRecommender:
         Parameters
         ----------
         completed : set of str
-            Set of items/nodes already completed/mastered.
-            (Also accepts the old name ``student_mastery``.)
+            Set of items/nodes already completed.
+            (Also accepts deprecated aliases ``student_mastery`` and
+            ``user_competence``.)
         n : int, optional
             Maximum number of recommendations (default: 5).
 
@@ -701,9 +758,23 @@ class ProgressionRecommender:
         >>> rec.recommend({"a"}, n=2)
         ['b']
         """
-        # Support old 'student_mastery' kwarg
+        # Support deprecated keyword aliases
         if completed is None and student_mastery is not None:
+            warnings.warn(
+                "student_mastery is deprecated, use completed instead. "
+                "Will be removed in v1.0.",
+                DeprecationWarning,
+                stacklevel=2,
+            )
             completed = student_mastery
+        if completed is None and user_competence is not None:
+            warnings.warn(
+                "user_competence is deprecated, use completed instead. "
+                "Will be removed in v1.0.",
+                DeprecationWarning,
+                stacklevel=2,
+            )
+            completed = user_competence
         if completed is None:
             completed = set()
 
@@ -715,7 +786,7 @@ class ProgressionRecommender:
 
         # Sort by difficulty if map provided
         if self.difficulty_map:
-            # Sort by difficulty (ascending), with unmapped skills at end
+            # Sort by difficulty (ascending), with unmapped categories at end
             candidates = sorted(
                 candidates,
                 key=lambda s: (
@@ -726,8 +797,10 @@ class ProgressionRecommender:
 
         return candidates[:n]
 
-    def filter_candidates(self, candidates: List[str], completed: Set[str] = None,
-                           *, mastered: Set[str] = None) -> List[str]:
+    def filter_candidates(
+        self, candidates: List[str], completed: Set[str] = None,
+        *, mastered: Set[str] = None, succeeded: Set[str] = None,
+    ) -> List[str]:
         """Filter candidates to only those whose prerequisites are completed.
 
         Parameters
@@ -735,7 +808,8 @@ class ProgressionRecommender:
         candidates : list of str
             Candidate items to filter.
         completed : set of str
-            Set of completed items. (Alias: ``mastered``.)
+            Set of completed items.
+            (Also accepts deprecated aliases ``mastered`` and ``succeeded``.)
 
         Returns
         -------
@@ -750,7 +824,21 @@ class ProgressionRecommender:
         ['b']
         """
         if completed is None and mastered is not None:
+            warnings.warn(
+                "mastered is deprecated, use completed instead. "
+                "Will be removed in v1.0.",
+                DeprecationWarning,
+                stacklevel=2,
+            )
             completed = mastered
+        if completed is None and succeeded is not None:
+            warnings.warn(
+                "succeeded is deprecated, use completed instead. "
+                "Will be removed in v1.0.",
+                DeprecationWarning,
+                stacklevel=2,
+            )
+            completed = succeeded
         if completed is None:
             completed = set()
         return [c for c in candidates if self.graph.prerequisites_met(c, completed)]
@@ -762,6 +850,7 @@ __all__ = [
     # Backward-compatible aliases (deprecated)
     "PrerequisiteGraph",
     "CurriculumRecommender",
+    "SkillGraph",
 ]
 
 
@@ -769,6 +858,7 @@ __all__ = [
 _DEPRECATED_NAMES = {
     "PrerequisiteGraph": "DependencyGraph",
     "CurriculumRecommender": "ProgressionRecommender",
+    "SkillGraph": "DependencyGraph",
 }
 
 
