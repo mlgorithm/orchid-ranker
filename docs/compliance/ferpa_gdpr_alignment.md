@@ -1,15 +1,15 @@
 # FERPA & GDPR Alignment (Draft)
 
 ## Data Minimization
-- Preprocessing pipelines should ingest only required learner identifiers and assessment data.
+- Preprocessing pipelines should ingest only required user identifiers and interaction data.
 - Optional features (e.g., demographic fields) must be configurable and disabled by default unless explicit consent is obtained.
 
 ## Consent & Lawful Basis
-- Platforms embedding Orchid must capture learner consent for data usage and clearly surface adaptive learning objectives.
+- Platforms embedding Orchid must capture user consent for data usage and clearly surface adaptive recommendation objectives.
 - Maintain records of consent per customer tenancy.
 
-## Student Rights (FERPA)
-- Provide mechanisms for students/guardians to request access or deletion of records processed by Orchid pipelines.
+## User Rights (FERPA)
+- Provide mechanisms for users (or guardians, in educational contexts) to request access or deletion of records processed by Orchid pipelines.
 - Data exports must be provided within 45 days of request; align deletion with retention policy.
 
 ## Data Subject Rights (GDPR)
@@ -25,7 +25,7 @@
 - RBAC enforcement limits preprocessing and experiment operations to authorized roles.
 
 ## Incident Notification
-- Align with incident response playbook: notify educational institutions promptly (FERPA) and supervisory authorities within 72 hours when required (GDPR Article 33).
+- Align with incident response playbook: notify affected organizations promptly (FERPA) and supervisory authorities within 72 hours when required (GDPR Article 33).
 
 ## Continuous Review
 - Revisit alignment quarterly and upon regulatory updates.

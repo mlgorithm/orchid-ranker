@@ -19,7 +19,8 @@ PYTHONPATH=src python benchmarks/run_agentic_ml100k.py \
   --log-dir runs/ml100k-baseline --quick
 ```
 
-This produces `fixed.jsonl` and `adaptive.jsonl` with per-round metrics, useful as the teacher baseline.
+This produces `fixed.jsonl` and `adaptive.jsonl` with per-round metrics. The
+fixed run is the frozen baseline used when the adaptive policy is unsafe.
 
 ## 2. SafeSwitch smoke run
 
@@ -45,10 +46,11 @@ Each `round_summary` entry now includes:
 }
 ```
 
-- `serve_policy`: which policy served the slate.
+- `serve_policy`: which policy served the slate. The legacy value `teacher`
+  means the frozen baseline; `adaptive` means the adaptive policy.
 - `p_used` / `p`: mix probability (before & after updates).
-- `lcb`: DR uplift lower bound (needs to cross > 0 for the student to ramp).
-- `acc_lcb`: acceptance-rate lower bound; if below the floor, the gate falls back to the teacher.
+- `lcb`: DR uplift lower bound (needs to cross > 0 for the adaptive policy to ramp).
+- `acc_lcb`: acceptance-rate lower bound; if below the floor, the gate falls back to the frozen baseline.
 
 Plotting these values over rounds demonstrates the safety guarantee.
 

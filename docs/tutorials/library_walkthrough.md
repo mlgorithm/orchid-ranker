@@ -40,10 +40,14 @@ strategies = [
 
 recs = {}
 for name, params in strategies:
-    rec = OrchidRecommender(strategy=name, **params)
-    rec.fit(train, rating_col="label")
+    rec = OrchidRecommender.from_interactions(
+        train,
+        strategy=name,
+        rating_col="label",
+        **params,
+    )
     recs[name] = rec
-    print(name, rec.recommend(user_id=1, top_k=3))
+    print(name, rec.recommend(user_id=1, top_k=3, candidate_item_ids=[11, 12, 13, 14]))
 ```
 
 ## 4. Evaluate with CLI
@@ -112,7 +116,7 @@ except ImportError:
 ## 9. Agentic Simulation Snapshot
 
 ```python
-from orchid_ranker.agents import StudentAgent, MultiConfig, MultiUserOrchestrator
+from orchid_ranker.agents import AdaptiveAgent, MultiConfig, MultiUserOrchestrator
 from orchid_ranker.agents.recommender_agent import TwoTowerRecommender
 import torch
 
@@ -124,14 +128,14 @@ model = TwoTowerRecommender(
     item_dim=4,
     dp_cfg={"enabled": False},
 )
-students = [StudentAgent(user_id=i, seed=42 + i) for i in range(num_users)]
+agents = [AdaptiveAgent(user_id=i, seed=42 + i) for i in range(num_users)]
 users = []
-for idx, student in enumerate(students):
+for idx, agent in enumerate(agents):
     users.append(
         MultiUserOrchestrator.UserCtx(  # type: ignore[attr-defined]
             user_id=idx,
             user_idx=idx,
-            student=student,
+            student=agent,  # legacy UserCtx field name; pass the AdaptiveAgent here
             user_vec=torch.rand(1, 4),
         )
     )

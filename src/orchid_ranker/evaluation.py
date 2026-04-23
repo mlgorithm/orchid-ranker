@@ -1,4 +1,9 @@
-"""Evaluation utilities for Orchid Ranker."""
+"""Evaluation utilities for Orchid Ranker.
+
+Provides ranking metrics, calibration helpers, and progression-domain metrics
+(stretch fit, category coverage, sequence adherence, engagement) used to
+assess adaptive recommendation quality for any outcome-tracing domain.
+"""
 
 from __future__ import annotations
 
@@ -320,6 +325,78 @@ def progression_gain(pre_score: float, post_score: float) -> float:
     return gain
 
 
+def category_coverage(
+    successful_categories: Optional[set[Any]] = None,
+    total_categories: Optional[set[Any]] = None,
+    *,
+    # Positional-friendly aliases (used by internal callers)
+    achieved: Optional[set[Any]] = None,
+    total: Optional[set[Any]] = None,
+    # Deprecated aliases
+    mastered_skills: Optional[set[Any]] = None,
+    total_skills: Optional[set[Any]] = None,
+) -> float:
+    """Compute fraction of total categories achieved.
+
+    Measures the breadth of a user's competence across a category domain.
+
+    Parameters
+    ----------
+    successful_categories : set
+        Set of category identifiers the user has succeeded in.
+    total_categories : set
+        Set of all categories in the domain.
+    achieved : set, optional
+        Alias for ``successful_categories`` (backward compatibility).
+    total : set, optional
+        Alias for ``total_categories`` (backward compatibility).
+    mastered_skills : set, optional
+        Deprecated alias for ``successful_categories``.
+    total_skills : set, optional
+        Deprecated alias for ``total_categories``.
+
+    Returns
+    -------
+    float
+        Fraction of categories achieved, in [0, 1]. Returns 0.0 if total is empty.
+    """
+    import warnings as _w
+
+    # Resolve deprecated params
+    if mastered_skills is not None:
+        _w.warn(
+            "Parameter 'mastered_skills' is deprecated, use 'successful_categories' instead. "
+            "Will be removed in v1.0.",
+            DeprecationWarning,
+            stacklevel=2,
+        )
+        if successful_categories is None:
+            successful_categories = mastered_skills
+    if total_skills is not None:
+        _w.warn(
+            "Parameter 'total_skills' is deprecated, use 'total_categories' instead. "
+            "Will be removed in v1.0.",
+            DeprecationWarning,
+            stacklevel=2,
+        )
+        if total_categories is None:
+            total_categories = total_skills
+    # Support old positional 'achieved' / 'total' aliases
+    if successful_categories is None and achieved is not None:
+        successful_categories = achieved
+    if total_categories is None and total is not None:
+        total_categories = total
+    if successful_categories is None:
+        successful_categories = set()
+    if total_categories is None:
+        total_categories = set()
+    total_categories = set(total_categories)
+    if not total_categories:
+        return 0.0
+    successful_categories = set(successful_categories)
+    return float(len(successful_categories & total_categories)) / float(len(total_categories))
+
+
 def proficiency_coverage(
     achieved: Optional[set[Any]] = None,
     total: Optional[set[Any]] = None,
@@ -329,12 +406,13 @@ def proficiency_coverage(
 ) -> float:
     """Compute fraction of total competencies achieved.
 
-    Measures the breadth of a user's proficiency across a competency domain.
+    .. deprecated::
+        Use :func:`category_coverage` instead. Will be removed in v1.0.
 
     Parameters
     ----------
     achieved : set
-        Set of competency identifiers the user has demonstrated proficiency in.
+        Set of competency identifiers the user has demonstrated competence in.
     total : set
         Set of all competencies in the domain.
     mastered_skills : set, optional
@@ -347,26 +425,28 @@ def proficiency_coverage(
     float
         Fraction of competencies achieved, in [0, 1]. Returns 0.0 if total is empty.
     """
-    # Support old parameter names
-    if achieved is None and mastered_skills is not None:
-        achieved = mastered_skills
-    if total is None and total_skills is not None:
-        total = total_skills
-    if achieved is None:
-        achieved = set()
-    if total is None:
-        total = set()
-    total = set(total)
-    if not total:
-        return 0.0
-    achieved = set(achieved)
-    return float(len(achieved & total)) / float(len(total))
+    import warnings as _w
+    _w.warn(
+        "proficiency_coverage is deprecated, use category_coverage instead. "
+        "Will be removed in v1.0.",
+        DeprecationWarning,
+        stacklevel=2,
+    )
+    return category_coverage(
+        achieved=achieved,
+        total=total,
+        mastered_skills=mastered_skills,
+        total_skills=total_skills,
+    )
 
 
 def sequence_adherence(
     recommended_items: Sequence[int],
     prerequisite_graph: Dict[int, set],
-    mastered: set,
+    succeeded: Optional[set] = None,
+    *,
+    # Deprecated alias
+    mastered: Optional[set] = None,
 ) -> float:
     """Compute fraction of recommendations whose dependencies are met.
 
@@ -380,8 +460,10 @@ def sequence_adherence(
     prerequisite_graph : dict
         Mapping from item ID to set of prerequisite item IDs.
         Example: {3: {1, 2}} means item 3 requires items 1 and 2.
-    mastered : set
+    succeeded : set
         Set of item IDs (prerequisites) already completed.
+    mastered : set, optional
+        Deprecated alias for ``succeeded``. Will be removed in v1.0.
 
     Returns
     -------
@@ -389,55 +471,145 @@ def sequence_adherence(
         Fraction of recommendations with all dependencies met, in [0, 1].
         Returns 1.0 if recommended_items is empty.
     """
+    if mastered is not None:
+        import warnings
+        warnings.warn(
+            "Parameter 'mastered' is deprecated, use 'succeeded' instead. "
+            "Will be removed in v1.0.",
+            DeprecationWarning,
+            stacklevel=2,
+        )
+        if succeeded is None:
+            succeeded = mastered
+    if succeeded is None:
+        succeeded = set()
     if not recommended_items:
         return 1.0
-    mastered = set(mastered)
+    succeeded = set(succeeded)
     adherent = 0
     for item_id in recommended_items:
         prereqs = prerequisite_graph.get(item_id, set())
-        if prereqs.issubset(mastered):
+        if prereqs.issubset(succeeded):
             adherent += 1
     return float(adherent) / float(len(recommended_items))
 
 
-def difficulty_appropriateness(
+def stretch_fit(
     recommended_difficulties: Sequence[float],
-    student_ability: float,
-    zpd_width: float = 0.25,
+    user_competence: Optional[float] = None,
+    stretch_width: float = 0.25,
+    *,
+    # Deprecated aliases
+    student_ability: Optional[float] = None,
+    zpd_width: Optional[float] = None,
 ) -> float:
-    """Compute fraction of recommendations within the student's Zone of Proximal Development.
+    """Compute fraction of recommendations within the user's stretch zone.
 
-    Implements Vygotsky's ZPD: recommendations should be slightly above current ability
-    but not so far as to be discouraging. Items are in the ZPD if their difficulty is
-    in [student_ability, student_ability + zpd_width].
+    Recommendations should be slightly above current competence but not so
+    far as to be discouraging.  Items are in the stretch zone if their
+    difficulty is in ``[user_competence, user_competence + stretch_width]``.
 
     Parameters
     ----------
     recommended_difficulties : Sequence[float]
         Difficulty scores of recommended items, typically in [0, 1].
-    student_ability : float
-        Current ability level of the student, typically in [0, 1].
+    user_competence : float
+        Current competence level of the user, typically in [0, 1].
+    stretch_width : float, optional
+        Width of the stretch zone (default: 0.25).
+    student_ability : float, optional
+        Deprecated alias for ``user_competence``. Will be removed in v1.0.
     zpd_width : float, optional
-        Width of the zone of proximal development (default: 0.25).
-        Items with difficulty in [ability, ability + width] are considered appropriate.
+        Deprecated alias for ``stretch_width``. Will be removed in v1.0.
 
     Returns
     -------
     float
-        Fraction of items within the ZPD, in [0, 1].
+        Fraction of items within the stretch zone, in [0, 1].
         Returns 1.0 if recommended_difficulties is empty.
     """
+    import warnings as _w
+
+    if student_ability is not None:
+        _w.warn(
+            "Parameter 'student_ability' is deprecated, use 'user_competence' instead. "
+            "Will be removed in v1.0.",
+            DeprecationWarning,
+            stacklevel=2,
+        )
+        if user_competence is None:
+            user_competence = student_ability
+    if user_competence is None:
+        raise TypeError("user_competence is required")
+    if zpd_width is not None:
+        _w.warn(
+            "Parameter 'zpd_width' is deprecated, use 'stretch_width' instead. "
+            "Will be removed in v1.0.",
+            DeprecationWarning,
+            stacklevel=2,
+        )
+        stretch_width = zpd_width
+
     if not recommended_difficulties:
         return 1.0
-    student_ability = float(student_ability)
-    zpd_width = float(zpd_width)
-    zpd_min = student_ability
-    zpd_max = student_ability + zpd_width
-    in_zpd = sum(
+    user_competence = float(user_competence)
+    stretch_width = float(stretch_width)
+    zone_min = user_competence
+    zone_max = user_competence + stretch_width
+    in_zone = sum(
         1 for diff in recommended_difficulties
-        if zpd_min <= float(diff) <= zpd_max
+        if zone_min <= float(diff) <= zone_max
     )
-    return float(in_zpd) / float(len(recommended_difficulties))
+    return float(in_zone) / float(len(recommended_difficulties))
+
+
+def difficulty_appropriateness(
+    recommended_difficulties: Sequence[float],
+    student_ability: Optional[float] = None,
+    zpd_width: float = 0.25,
+    *,
+    user_competence: Optional[float] = None,
+    stretch_width: Optional[float] = None,
+) -> float:
+    """Compute fraction of recommendations within the user's stretch zone.
+
+    .. deprecated::
+        Use :func:`stretch_fit` instead. Will be removed in v1.0.
+
+    Parameters
+    ----------
+    recommended_difficulties : Sequence[float]
+        Difficulty scores of recommended items, typically in [0, 1].
+    student_ability : float, optional
+        Deprecated alias for ``user_competence``.
+    zpd_width : float, optional
+        Deprecated alias for ``stretch_width``.
+    user_competence : float, optional
+        Current competence level.
+    stretch_width : float, optional
+        Width of the stretch zone.
+
+    Returns
+    -------
+    float
+        Fraction of items within the stretch zone, in [0, 1].
+        Returns 1.0 if recommended_difficulties is empty.
+    """
+    import warnings as _w
+    _w.warn(
+        "difficulty_appropriateness is deprecated, use stretch_fit instead. "
+        "Will be removed in v1.0.",
+        DeprecationWarning,
+        stacklevel=2,
+    )
+    # Merge old positional into keyword form for stretch_fit
+    uc = user_competence if user_competence is not None else student_ability
+    sw = stretch_width if stretch_width is not None else zpd_width
+    return stretch_fit(
+        recommended_difficulties,
+        user_competence=uc,
+        stretch_width=sw if sw is not None else 0.25,
+    )
 
 
 def engagement_score(
@@ -449,14 +621,14 @@ def engagement_score(
 ) -> float:
     """Compute ratio of items interacted with to items recommended.
 
-    Measures student engagement as a fraction of total recommendations.
+    Measures user engagement as a fraction of total recommendations.
 
     Parameters
     ----------
     interacted_items : Sequence
-        Items the student actually interacted with (clicked, answered, etc.).
+        Items the user actually interacted with (clicked, answered, etc.).
     total_recommended : int
-        Total number of items that were recommended to the student.
+        Total number of items that were recommended to the user.
     interactions : Sequence
         Deprecated alias for interacted_items (backward compatibility).
     total_available : int
@@ -496,13 +668,13 @@ class ProgressionReport:
     progression_gain : float
         Normalized gain: (post - pre) / (1 - pre). Measures improvement
         from pre-assessment to post-assessment.
-    coverage : float
-        Fraction of total competencies achieved. Measures breadth of proficiency.
+    category_coverage : float
+        Fraction of total categories achieved. Measures breadth of competence.
     adherence : float
         Fraction of recommendations with satisfied dependencies. Measures
         sequencing validity of recommendations.
-    difficulty_fit : float
-        Fraction of recommendations within user's Zone of Proximal Development.
+    stretch_fit : float
+        Fraction of recommendations within user's stretch zone.
         Measures appropriateness of difficulty level.
     engagement : float
         Ratio of items interacted with to items recommended. Measures user
@@ -510,10 +682,21 @@ class ProgressionReport:
     """
 
     progression_gain: float
-    coverage: float
+    category_coverage: float
     adherence: float
-    difficulty_fit: float
+    stretch_fit: float
     engagement: float
+
+    # Backward-compatible aliases for old field names
+    @property
+    def coverage(self) -> float:
+        """Deprecated alias for ``category_coverage``."""
+        return self.category_coverage
+
+    @property
+    def difficulty_fit(self) -> float:
+        """Deprecated alias for ``stretch_fit``."""
+        return self.stretch_fit
 
 
 __all__ = [
@@ -524,14 +707,16 @@ __all__ = [
     "expected_calibration_error",
     "RankingReport",
     "evaluate_recommendations",
-    # Generic names (primary)
+    # Primary names (domain-neutral)
     "progression_gain",
-    "proficiency_coverage",
+    "category_coverage",
+    "stretch_fit",
     "sequence_adherence",
-    "difficulty_appropriateness",
     "engagement_score",
     "ProgressionReport",
-    # Backward-compatible aliases (deprecated)
+    # Deprecated aliases (still importable, emit warnings)
+    "proficiency_coverage",
+    "difficulty_appropriateness",
     "learning_gain",
     "knowledge_coverage",
     "curriculum_adherence",

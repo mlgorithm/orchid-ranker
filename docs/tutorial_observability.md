@@ -2,7 +2,7 @@
 
 ## 1. Timing logs
 
-Run benchmarks with `--timing-log runs/foo/timing.jsonl --timing-rounds 5`. Each entry contains durations for `candidate_sampling`, `tower_infer`, `decide`, `student_interact`, `train_step`, `warmup_sync`.
+Run benchmarks with `--timing-log runs/foo/timing.jsonl --timing-rounds 5`. Each entry contains durations for `candidate_sampling`, `tower_infer`, `decide`, `user_interact`, `train_step`, `warmup_sync`.
 
 ## 2. Prometheus exporter
 

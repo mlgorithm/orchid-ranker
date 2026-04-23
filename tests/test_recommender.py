@@ -3,7 +3,7 @@ import logging
 import pandas as pd
 import pytest
 
-from orchid_ranker import OrchidRecommender, configure_logging, SUPPORTED_STRATEGIES
+from orchid_ranker import SUPPORTED_STRATEGIES, OrchidRecommender, configure_logging
 
 
 def _dataset():
@@ -81,6 +81,42 @@ def test_neural_mf_recommender_outputs_scores():
     assert all(0.0 <= r.score <= 1.0 for r in slate)
 
 
+def test_from_interactions_default_auto_fits():
+    data = _dataset()
+    rec = OrchidRecommender.from_interactions(data, rating_col="label", epochs=1)
+    assert rec.is_fitted
+    assert rec.recommend(user_id=1, top_k=1)
+
+
+def test_recommend_respects_candidate_item_ids():
+    data = _dataset()
+    rec = OrchidRecommender(strategy="popularity").fit(data, rating_col="label")
+
+    slate = rec.recommend(
+        user_id=1,
+        top_k=5,
+        filter_seen=False,
+        candidate_item_ids=[13, 999, 10, 13],
+    )
+    assert [r.item_id for r in slate] == [10, 13]
+
+    unseen_slate = rec.recommend(
+        user_id=1,
+        top_k=5,
+        filter_seen=True,
+        candidate_item_ids=[10, 13],
+    )
+    assert [r.item_id for r in unseen_slate] == [13]
+
+
+def test_baseline_rank_respects_candidate_item_ids():
+    data = _dataset()
+    rec = OrchidRecommender(strategy="popularity").fit(data, rating_col="label")
+
+    slate = rec.baseline_rank(user_id=1, top_k=5, candidate_item_ids=[10, 13])
+    assert [r.item_id for r in slate] == [13]
+
+
 def test_unknown_strategy_is_rejected():
     with pytest.raises(ValueError):
         OrchidRecommender(strategy="does_not_exist")
@@ -146,3 +182,56 @@ def test_configure_logging_returns_logger():
     assert logger.name == "orchid_ranker.enterprise"
     assert logger.level == logging.DEBUG
     assert logger.handlers, "configure_logging should attach at least one handler"
+
+
+# ---------------------------------------------------------------------------
+# as_streaming() error conditions
+# ---------------------------------------------------------------------------
+def test_as_streaming_unfitted_raises():
+    """as_streaming on an unfitted recommender raises RuntimeError."""
+    rec = OrchidRecommender(strategy="neural_mf", epochs=1, emb_dim=8, hidden=(16,))
+    with pytest.raises(RuntimeError, match="fitted"):
+        rec.as_streaming()
+
+
+def test_as_streaming_non_neural_strategy_raises():
+    """as_streaming on a strategy without a neural tower raises RuntimeError."""
+    data = _dataset()
+    rec = OrchidRecommender(strategy="popularity")
+    rec.fit(data, rating_col="label")
+    with pytest.raises(RuntimeError, match="tower"):
+        rec.as_streaming()
+
+
+def test_as_streaming_als_strategy_raises_clear_error():
+    """ALS has a torch model, but not the streaming tower protocol."""
+    data = _dataset()
+    rec = OrchidRecommender(strategy="als", epochs=1)
+    rec.fit(data, rating_col="label")
+    with pytest.raises(RuntimeError, match="neural_mf"):
+        rec.as_streaming()
+
+
+def test_as_streaming_neural_mf_uses_external_ids():
+    """The OrchidRecommender bridge accepts original user/item IDs, not row indexes."""
+    data = _dataset()
+    rec = OrchidRecommender.from_interactions(
+        data,
+        strategy="neural_mf",
+        rating_col="label",
+        epochs=1,
+        emb_dim=8,
+        hidden=(16,),
+    )
+
+    streamer = rec.as_streaming(lr=0.05)
+    before = streamer.rank(user_id=1, candidate_item_ids=[10, 11, 13, 999], top_k=2)
+    assert before
+    assert {item_id for item_id, _score in before}.issubset({10, 11, 13})
+
+    update = streamer.observe(user_id=1, item_id=10, correct=True)
+    after = streamer.rank(user_id=1, candidate_item_ids=[10, 11, 13], top_k=2)
+
+    assert update["p_known"] >= 0.0
+    assert after
+    assert streamer.updates_for(1) == 1

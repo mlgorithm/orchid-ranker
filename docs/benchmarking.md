@@ -193,7 +193,7 @@ smaller user/item subsets).
 
 ### System-level tuning helpers
 
-- Use `--timing-log runs/foo/timing.jsonl --timing-rounds 5` on `run_agentic_ml100k.py` (or `run_agentic_smoke.py`) to capture per-phase timings without the heavy Torch profiler. The orchestrator writes one JSON line per sampled round with `candidate_sampling`, `tower_infer`, `decide`, `student_interact`, `train_step`, and `warmup_sync` durations so you can diff runs in CI.
+- Use `--timing-log runs/foo/timing.jsonl --timing-rounds 5` on `run_agentic_ml100k.py` (or `run_agentic_smoke.py`) to capture per-phase timings without the heavy Torch profiler. The orchestrator writes one JSON line per sampled round with `candidate_sampling`, `tower_infer`, `decide`, `user_interact`, `train_step`, and `warmup_sync` durations so you can diff runs in CI.
 - Enable `--native-score` on any agentic benchmark or smoke test to route the tower dot-products through the optional C++ `fast_score` kernel when the build environment supports PyTorch extensions. When the extension cannot be built, the flag silently falls back to pure PyTorch matmul and the run still succeeds.
 - For micro-level sanity checks (including CI), run `PYTHONPATH=src python benchmarks/bench_infer.py --iters 20 --users 64 --items 512 --candidates 128 --dim 32 --native-score`. The script reports milliseconds per inference call on the selected device (CPU, CUDA, or Apple MPS) and honours `--torch-compile` if you want to compare eager vs compiled towers.
 

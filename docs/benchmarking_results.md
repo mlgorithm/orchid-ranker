@@ -5,7 +5,7 @@ Orchid Ranker vs. popular recommender libraries on the frozen fixture dataset
 
 ## Methodology
 
-- **Dataset**: Synthetic educational interactions with explicit 1-5 ratings and latent skill alignment
+- **Dataset**: Synthetic interactions with explicit 1-5 ratings and latent category alignment
 - **Split**: 80/20 train/test, deterministic (seed=42)
 - **Metrics**: Precision@10, Recall@10, NDCG@10 (quality); fit time, inference p50/p95 (performance)
 - **Seeds**: 3-seed averaging (42, 13, 17) for variance estimation
@@ -40,7 +40,7 @@ Orchid Ranker vs. popular recommender libraries on the frozen fixture dataset
 
 4. **Zero-config with `auto`** — No need to choose a strategy. `OrchidRecommender(strategy="auto")` automatically detects data type and selects the optimal algorithm.
 
-5. **Surprise's advantage is on explicit ratings** — Surprise SVD/NMF use Cython-optimized SGD specifically designed for 1-5 star ratings. On this explicit-rating benchmark, it leads on P@10 (0.034 vs 0.025). Orchid's strength is breadth: it handles implicit, explicit, and educational scenarios.
+5. **Surprise's advantage is on explicit ratings** — Surprise SVD/NMF use Cython-optimized SGD specifically designed for 1-5 star ratings. On this explicit-rating benchmark, it leads on P@10 (0.034 vs 0.025). Orchid's strength is breadth: it handles implicit, explicit, and progression-aware scenarios.
 
 6. **LightFM** could not be benchmarked due to C extension build failures on this platform.
 
@@ -48,11 +48,11 @@ Orchid Ranker vs. popular recommender libraries on the frozen fixture dataset
 
 Quality metrics tell part of the story. Orchid Ranker differentiates on capabilities no competitor offers:
 
-1. **Education-native**: BKT knowledge tracing, ZPD-aware recommendations, curriculum sequencing, and mastery tracking built in — not bolted on.
+1. **Progression-native**: Bayesian competence tracing, stretch-zone-aware recommendations, structured catalog sequencing, and competence tracking built in --- not bolted on.
 
 2. **Differential privacy**: Production-ready DP-SGD with RDP accounting and configurable epsilon budgets. No other recommender library ships this.
 
-3. **Learner simulation**: Full agentic framework (StudentAgent + MultiUserOrchestrator) for offline evaluation of recommendation policies before deployment.
+3. **User simulation**: Full agentic framework (StudentAgent + MultiUserOrchestrator) for offline evaluation of recommendation policies before deployment.
 
 4. **Enterprise infrastructure**: RBAC, JWT/OIDC auth, HMAC audit logs, secrets management, Prometheus metrics, OpenTelemetry — all in one pip install.
 

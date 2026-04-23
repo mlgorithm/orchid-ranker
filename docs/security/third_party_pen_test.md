@@ -16,7 +16,7 @@
 - Sample audit log output and forwarding configuration (env variables, `scripts/ship_audit_logs.py`).
 
 ## Vendor Selection Criteria
-- Experience with privacy-preserving ML or EdTech platforms.
+- Experience with privacy-preserving ML or recommendation platforms.
 - Ability to perform code review, dependency analysis, and runtime testing.
 - Willingness to sign mutually agreeable NDAs and provide detailed remediation report.
 
