@@ -149,6 +149,30 @@ class TestLoadModel:
         with pytest.raises(RuntimeError, match="Unsafe pickle-based checkpoints are not supported"):
             load_model(path)
 
+    def test_restore_implicit_factors_without_implicit_library(self):
+        import torch
+
+        from orchid_ranker.serialization import _restore_baseline_from_data
+
+        baseline = _restore_baseline_from_data(
+            "ImplicitALSBaseline",
+            {
+                "user_factors": np.ones((2, 3), dtype=np.float32),
+                "item_factors": np.arange(12, dtype=np.float32).reshape(4, 3),
+            },
+            num_users=2,
+            num_items=4,
+            device="cpu",
+            strategy_kwargs={},
+        )
+
+        scores = baseline.infer(
+            user_ids=torch.tensor([0], dtype=torch.long),
+            item_ids=torch.tensor([1, 2], dtype=torch.long),
+        )
+        assert scores.shape == (1, 2)
+        assert torch.isfinite(scores).all()
+
 
 # ============================================================================
 # Save/Load Roundtrip Tests

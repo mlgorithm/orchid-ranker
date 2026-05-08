@@ -1,11 +1,10 @@
 """Comprehensive tests for GridSearchCV and RandomSearchCV tuning utilities."""
 
-import pytest
-import pandas as pd
 import numpy as np
+import pandas as pd
+import pytest
 
 from orchid_ranker.tuning import GridSearchCV, RandomSearchCV
-
 
 # ============================================================================
 # Fixtures for test data
@@ -214,6 +213,30 @@ class TestGridSearchCVFit:
         grid.fit(small_interactions)
         assert grid.n_iter_ == 1
         assert grid.best_params_["dummy"] == 1
+
+    def test_gridsearchcv_folds_keep_test_users_in_train(self, small_interactions, monkeypatch):
+        """Grid search should not create impossible cold-start validation folds."""
+        grid = GridSearchCV(
+            strategy="popularity",
+            param_grid={"dummy": [1]},
+            cv=3,
+        )
+        observed_folds = []
+
+        def fake_score(train_data, test_data, params, user_col="user_id", item_col="item_id", rating_col=None):
+            observed_folds.append(
+                (
+                    set(train_data[user_col].unique()),
+                    set(test_data[user_col].unique()),
+                )
+            )
+            return 1.0
+
+        monkeypatch.setattr(grid, "_compute_fold_score", fake_score)
+        grid.fit(small_interactions)
+
+        assert observed_folds
+        assert all(test_users <= train_users for train_users, test_users in observed_folds)
 
 
 # ============================================================================
@@ -429,6 +452,31 @@ class TestRandomSearchCVFit:
         assert "dummy" in rsearch.best_params_
         assert "other" in rsearch.best_params_
         assert len(rsearch.results_) == 5
+
+    def test_randomsearchcv_folds_keep_test_users_in_train(self, small_interactions, monkeypatch):
+        """Random search should use per-user validation folds."""
+        rsearch = RandomSearchCV(
+            strategy="popularity",
+            param_distributions={"dummy": [1, 2]},
+            n_iter=2,
+            cv=3,
+        )
+        observed_folds = []
+
+        def fake_score(train_data, test_data, params, user_col="user_id", item_col="item_id", rating_col=None):
+            observed_folds.append(
+                (
+                    set(train_data[user_col].unique()),
+                    set(test_data[user_col].unique()),
+                )
+            )
+            return 1.0
+
+        monkeypatch.setattr(rsearch, "_compute_fold_score", fake_score)
+        rsearch.fit(small_interactions)
+
+        assert observed_folds
+        assert all(test_users <= train_users for train_users, test_users in observed_folds)
 
 
 # ============================================================================

@@ -26,6 +26,7 @@ Installation extras
 -------------------
 ``pip install orchid-ranker``          -- core progression toolkit (BKT, dependency graph, evaluation)
 ``pip install orchid-ranker[ml]``      -- adds PyTorch for ML recommender strategies
+``pip install orchid-ranker[implicit]`` -- adds implicit ALS/BPR strategies
 ``pip install orchid-ranker[all]``     -- everything (ML, viz, agentic, observability, connectors)
 """
 

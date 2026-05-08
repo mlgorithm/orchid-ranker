@@ -1,5 +1,6 @@
 import logging
 
+import numpy as np
 import pandas as pd
 import pytest
 
@@ -59,6 +60,19 @@ def test_linucb_with_features_scores_items():
     suggestions = rec.recommend(user_id=1, top_k=2)
     assert suggestions, "expected non-empty slate"
     assert all(isinstance(item.item_id, int) for item in suggestions)
+
+
+def test_refit_non_linucb_clears_item_features():
+    data = _dataset()
+    item_features = np.ones((data.item_id.nunique(), 2), dtype=np.float32)
+
+    rec = OrchidRecommender(strategy="linucb", alpha=0.5)
+    rec.fit(data, rating_col="label", item_features=item_features)
+    assert rec._item_features is not None
+
+    rec.strategy = "popularity"
+    rec.fit(data, rating_col="label")
+    assert rec._item_features is None
 
 
 def test_cold_start_user_raises_key_error():

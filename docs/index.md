@@ -19,7 +19,7 @@ recommender systems, it ships with:
 Install from PyPI:
 
 ```bash
-pip install orchid-ranker
+pip install 'orchid-ranker[ml]'
 ```
 
 Create your first recommender:

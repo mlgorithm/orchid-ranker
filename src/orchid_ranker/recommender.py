@@ -602,6 +602,8 @@ class OrchidRecommender:
             _prev_idx2item = self._idx2item.copy()
             _prev_seen = self._seen_items.copy()
             _prev_baseline = self._baseline
+            _prev_item_features = None if self._item_features is None else self._item_features.copy()
+            _prev_resolved_strategy = self._resolved_strategy
 
             try:
                 self._build_mappings(interactions, user_col, item_col)
@@ -612,6 +614,8 @@ class OrchidRecommender:
                 self._item2idx, self._idx2item = _prev_item2idx, _prev_idx2item
                 self._seen_items = _prev_seen
                 self._baseline = _prev_baseline
+                self._item_features = _prev_item_features
+                self._resolved_strategy = _prev_resolved_strategy
                 raise
 
             num_users = len(self._user2idx)
@@ -621,6 +625,8 @@ class OrchidRecommender:
             item_idx = interactions[item_col].map(self._item2idx).astype(int).values
 
             try:
+                self._item_features = None
+                self._resolved_strategy = None
                 self._fit_baseline(
                     interactions, labels, user_idx, item_idx,
                     num_users, num_items, item_features, item_col, rating_col,
@@ -631,6 +637,8 @@ class OrchidRecommender:
                 self._item2idx, self._idx2item = _prev_item2idx, _prev_idx2item
                 self._seen_items = _prev_seen
                 self._baseline = _prev_baseline
+                self._item_features = _prev_item_features
+                self._resolved_strategy = _prev_resolved_strategy
                 raise
 
             self._logger.info("fitted strategy=%s users=%d items=%d", self.strategy, num_users, num_items)

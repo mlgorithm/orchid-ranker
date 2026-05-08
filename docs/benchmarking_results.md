@@ -69,7 +69,7 @@ recs = rec.recommend(user_id=1, top_k=10)
 ## How to Reproduce
 
 ```bash
-pip install orchid-ranker[torch] scikit-surprise implicit
+pip install "orchid-ranker[benchmarks]" scikit-surprise lightfm
 python benchmarks/bench_competitors.py
 ```
 

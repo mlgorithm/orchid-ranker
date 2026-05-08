@@ -9,7 +9,7 @@ Usage:
     python benchmarks/bench_competitors.py [--top-k 10] [--seeds 42,13,17] [--output results.json]
 
 Requirements:
-    pip install scikit-surprise implicit lightfm orchid-ranker
+    pip install "orchid-ranker[benchmarks]" scikit-surprise lightfm
 """
 from __future__ import annotations
 
@@ -20,7 +20,7 @@ import time
 import tracemalloc
 from collections import defaultdict
 from pathlib import Path
-from typing import Any, Callable, Dict, List, Optional
+from typing import Any, Callable, Dict, List
 
 import numpy as np
 import pandas as pd
@@ -31,7 +31,7 @@ from orchid_ranker import OrchidRecommender
 
 # Guard imports for optional dependencies
 try:
-    from surprise import Dataset, Reader, SVD, NMF, KNNBasic
+    from surprise import NMF, SVD, Dataset, KNNBasic, Reader
     HAS_SURPRISE = True
 except ImportError:
     HAS_SURPRISE = False

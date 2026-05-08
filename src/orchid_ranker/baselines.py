@@ -582,7 +582,10 @@ class _ImplicitBase(BaseBaseline):
 
     def __init__(self, *, factors: int = 64, iterations: int = 20, regularization: float = 0.01, **kwargs):
         if implicit is None:
-            raise ImportError("The 'implicit' package is required for this strategy. Install via `pip install implicit`.")
+            raise ImportError(
+                "The 'implicit' package is required for this strategy. "
+                "Install via `pip install orchid-ranker[implicit]`."
+            )
         super().__init__(torch.device("cpu"))
         self.factors = int(factors)
         self.iterations = int(iterations)
@@ -671,6 +674,35 @@ class _ImplicitBase(BaseBaseline):
         return [int(item_ids[i].item()) for i in top], {"policy": type(self).__name__.lower()}
 
 
+class RestoredImplicitFactorBaseline(BaseBaseline):
+    """Inference-only implicit baseline restored from saved factor matrices."""
+
+    def __init__(
+        self,
+        user_factors: np.ndarray,
+        item_factors: np.ndarray,
+        device: torch.device,
+        *,
+        policy: str = "implicit_factors",
+    ):
+        super().__init__(device)
+        self.user_factors = np.asarray(user_factors, dtype=np.float32)
+        self.item_factors = np.asarray(item_factors, dtype=np.float32)
+        self.policy = str(policy)
+
+    def infer(self, *, user_ids: torch.Tensor, item_ids: torch.Tensor, **_) -> torch.Tensor:
+        uid_np = user_ids.numpy() if user_ids.device.type == 'cpu' else user_ids.cpu().numpy()
+        iid_np = item_ids.numpy() if item_ids.device.type == 'cpu' else item_ids.cpu().numpy()
+        u = self.user_factors[uid_np]
+        i = self.item_factors[iid_np]
+        scores = np.dot(u, i.T)
+        return torch.tensor(scores, dtype=torch.float32, device=self.device)
+
+    def decide(self, *, logits: torch.Tensor, top_k: int, item_ids: torch.Tensor, **_):
+        top = torch.argsort(logits[0], descending=True)[:top_k]
+        return [int(item_ids[i].item()) for i in top], {"policy": self.policy}
+
+
 class ImplicitALSBaseline(_ImplicitBase):
     """Implicit ALS (Alternating Least Squares) baseline using the `implicit` library.
 
@@ -694,7 +726,7 @@ class ImplicitALSBaseline(_ImplicitBase):
             Total number of items.
         """
         if implicit is None:
-            raise ImportError("implicit is required for ImplicitALSBaseline")
+            raise ImportError("implicit is required for ImplicitALSBaseline. Install via `pip install orchid-ranker[implicit]`.")
         coo = self._coo_matrix(user_ids, item_ids, labels, num_users, num_items)
         model = implicit.als.AlternatingLeastSquares(
             factors=self.factors,
@@ -748,7 +780,7 @@ class ImplicitBPRBaseline(_ImplicitBase):
             Total number of items.
         """
         if implicit is None:
-            raise ImportError("implicit is required for ImplicitBPRBaseline")
+            raise ImportError("implicit is required for ImplicitBPRBaseline. Install via `pip install orchid-ranker[implicit]`.")
         user_arr = np.asarray(list(user_ids), dtype=np.int32)
         item_arr = np.asarray(list(item_ids), dtype=np.int32)
         label_arr = np.asarray(list(labels), dtype=np.float32)
@@ -1147,5 +1179,6 @@ __all__ = [
     "LinUCBBaseline",
     "ImplicitALSBaseline",
     "ImplicitBPRBaseline",
+    "RestoredImplicitFactorBaseline",
     "NeuralMatrixFactorizationBaseline",
 ]

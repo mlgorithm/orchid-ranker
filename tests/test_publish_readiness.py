@@ -6,35 +6,36 @@ stability, NeuralMF user broadcast, ECE ValueError, learning_gain
 edge cases, and CurriculumRecommender behaviour.
 """
 import math
+import tomllib
+from pathlib import Path
 
-import pytest
 import numpy as np
 import pandas as pd
+import pytest
 
 # ---------------------------------------------------------------------------
 # Torch-free imports always work
 # ---------------------------------------------------------------------------
 from orchid_ranker import (
-    __version__,
     BayesianKnowledgeTracing,
-    MasteryTracker,
-    ForgettingCurve,
-    PrerequisiteGraph,
     CurriculumRecommender,
-    learning_gain,
-    knowledge_coverage,
+    EducationalReport,
+    ForgettingCurve,
+    MasteryTracker,
+    PrerequisiteGraph,
+    __version__,
     curriculum_adherence,
     difficulty_appropriateness,
     engagement_score,
-    EducationalReport,
+    knowledge_coverage,
+    learning_gain,
 )
-from orchid_ranker._compat import torch_available, require_torch
+from orchid_ranker._compat import require_torch, torch_available
 from orchid_ranker.evaluation import expected_calibration_error
 
 # Torch-dependent imports -- skip the entire module if torch is absent.
 torch = pytest.importorskip("torch")
-from orchid_ranker import OrchidRecommender, save_model, load_model  # noqa: E402
-
+from orchid_ranker import OrchidRecommender, load_model, save_model  # noqa: E402
 
 # ===================================================================
 # Fixtures
@@ -108,8 +109,10 @@ class TestLazyImports:
         assert callable(save_model)
         assert callable(load_model)
 
-    def test_version_is_032(self):
-        assert __version__ == "0.3.2"
+    def test_version_matches_package_metadata(self):
+        with Path("pyproject.toml").open("rb") as fh:
+            metadata = tomllib.load(fh)
+        assert __version__ == metadata["project"]["version"]
 
     def test_compat_torch_available(self):
         """torch_available() returns True in dev environment."""
