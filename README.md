@@ -11,7 +11,7 @@ Orchid Ranker reframes every recommendation problem as a *progression problem* -
 ## Quickstart
 
 ```bash
-pip install orchid-ranker
+pip install 'orchid-ranker[ml]'
 ```
 
 ```python
@@ -84,6 +84,8 @@ Understand what makes Orchid different:
 | `user_knn` | Collaborative filtering | Small catalogs |
 | `popularity` | Non-personalized | Baseline comparison |
 | + 4 more | | See `OrchidRecommender.available_strategies()` |
+
+Install `orchid-ranker[implicit]` to use `implicit_als` or `implicit_bpr`.
 
 For the high-level `OrchidRecommender` API, use `neural_mf` when you want to
 promote a fitted model into `StreamingAdaptiveRanker` with `as_streaming()`.

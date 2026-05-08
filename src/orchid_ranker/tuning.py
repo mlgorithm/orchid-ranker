@@ -8,7 +8,6 @@ from typing import TYPE_CHECKING, Any, Dict, List, Optional
 
 import numpy as np
 import pandas as pd
-from sklearn.model_selection import KFold
 
 if TYPE_CHECKING:
     from .recommender import OrchidRecommender
@@ -19,6 +18,7 @@ from .evaluation import (
     precision_at_k,
     recall_at_k,
 )
+from .model_selection import _build_user_stratified_folds
 
 logger = logging.getLogger(__name__)
 
@@ -27,7 +27,7 @@ class GridSearchCV:
     """Exhaustive search over hyperparameter grid for OrchidRecommender.
 
     Performs an exhaustive search over all combinations of hyperparameters,
-    evaluating each combination using k-fold cross-validation. Tracks the
+    evaluating each combination using per-user cross-validation. Tracks the
     best-performing configuration and provides access to detailed results.
 
     Parameters
@@ -242,8 +242,14 @@ class GridSearchCV:
         if self.verbose > 0:
             logger.info(f"Running grid search with {self.n_iter_} parameter combinations")
 
-        # Setup k-fold splits
-        kf = KFold(n_splits=self.cv, shuffle=True, random_state=self.random_state)
+        fold_data = _build_user_stratified_folds(
+            interactions,
+            k=self.cv,
+            random_state=self.random_state,
+            user_col=user_col,
+        )
+        if not fold_data:
+            raise ValueError("Unable to build non-empty cross-validation folds from the provided interactions")
 
         results = []
 
@@ -252,10 +258,7 @@ class GridSearchCV:
             fold_scores = []
 
             # Cross-validation loop
-            for fold_idx, (train_idx, test_idx) in enumerate(kf.split(interactions)):
-                train_data = interactions.iloc[train_idx].reset_index(drop=True)
-                test_data = interactions.iloc[test_idx].reset_index(drop=True)
-
+            for fold_idx, (train_data, test_data) in enumerate(fold_data):
                 score = self._compute_fold_score(
                     train_data, test_data, params,
                     user_col=user_col,
@@ -323,7 +326,7 @@ class RandomSearchCV:
     """Random search over hyperparameter space for OrchidRecommender.
 
     Performs random sampling over the hyperparameter space, evaluating each
-    sampled configuration using k-fold cross-validation. Useful for large
+    sampled configuration using per-user cross-validation. Useful for large
     search spaces where exhaustive search is computationally expensive.
 
     Parameters
@@ -558,8 +561,14 @@ class RandomSearchCV:
         if self.verbose > 0:
             logger.info(f"Running random search with {self.n_iter_} parameter combinations")
 
-        # Setup k-fold splits
-        kf = KFold(n_splits=self.cv, shuffle=True, random_state=self.random_state)
+        fold_data = _build_user_stratified_folds(
+            interactions,
+            k=self.cv,
+            random_state=self.random_state,
+            user_col=user_col,
+        )
+        if not fold_data:
+            raise ValueError("Unable to build non-empty cross-validation folds from the provided interactions")
 
         results = []
 
@@ -567,10 +576,7 @@ class RandomSearchCV:
             fold_scores = []
 
             # Cross-validation loop
-            for fold_idx, (train_idx, test_idx) in enumerate(kf.split(interactions)):
-                train_data = interactions.iloc[train_idx].reset_index(drop=True)
-                test_data = interactions.iloc[test_idx].reset_index(drop=True)
-
+            for fold_idx, (train_data, test_data) in enumerate(fold_data):
                 score = self._compute_fold_score(
                     train_data, test_data, params,
                     user_col=user_col,

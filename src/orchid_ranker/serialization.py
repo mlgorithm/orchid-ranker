@@ -17,17 +17,28 @@ import torch
 # Register numpy types as safe for torch.load(weights_only=True).
 # Our checkpoints contain numpy arrays/dtypes; this allows safe loading
 # without falling back to full pickle.
-_numpy_reconstruct = getattr(np.core.multiarray, "_reconstruct", None)
-_NUMPY_SAFE_GLOBALS = [
+_numpy_core = getattr(np, "_core", None)
+_numpy_multiarray = getattr(_numpy_core, "multiarray", None)
+if _numpy_multiarray is None:
+    _numpy_multiarray = getattr(getattr(np, "core", None), "multiarray", None)
+_numpy_reconstruct = getattr(_numpy_multiarray, "_reconstruct", None)
+_NUMPY_SAFE_GLOBALS: list[Any] = [
     np.ndarray,
     np.dtype,
-    np.dtypes.Float32DType,
-    np.dtypes.Float64DType,
-    np.dtypes.Int32DType,
-    np.dtypes.Int64DType,
-    np.dtypes.UInt8DType,
-    np.dtypes.BoolDType,
 ]
+_numpy_dtypes = getattr(np, "dtypes", None)
+if _numpy_dtypes is not None:
+    for _dtype_name in (
+        "Float32DType",
+        "Float64DType",
+        "Int32DType",
+        "Int64DType",
+        "UInt8DType",
+        "BoolDType",
+    ):
+        _dtype_type = getattr(_numpy_dtypes, _dtype_name, None)
+        if _dtype_type is not None:
+            _NUMPY_SAFE_GLOBALS.append(_dtype_type)
 if _numpy_reconstruct is not None:
     _NUMPY_SAFE_GLOBALS.insert(0, _numpy_reconstruct)
 try:
@@ -303,6 +314,14 @@ def _extract_orchid_state(model: OrchidRecommender) -> Dict[str, Any]:
             "user_factors": baseline.user_factors,
             "item_factors": baseline.item_factors,
         }
+    elif baseline_name == "RestoredImplicitFactorBaseline":
+        state["baseline_type"] = (
+            "ImplicitALSBaseline" if baseline.policy == "implicit_als" else "ImplicitBPRBaseline"
+        )
+        state["baseline_data"] = {
+            "user_factors": baseline.user_factors,
+            "item_factors": baseline.item_factors,
+        }
     else:
         raise ValueError(f"Cannot serialize unknown baseline type: {baseline_name}")
 
@@ -504,12 +523,11 @@ def _restore_baseline_from_data(
     from .baselines import (
         ALSBaseline,
         ExplicitMFBaseline,
-        ImplicitALSBaseline,
-        ImplicitBPRBaseline,
         LinUCBBaseline,
         NeuralMatrixFactorizationBaseline,
         PopularityBaseline,
         RandomBaseline,
+        RestoredImplicitFactorBaseline,
         UserKNNBaseline,
     )
 
@@ -571,11 +589,13 @@ def _restore_baseline_from_data(
         return neural_mf_baseline
 
     if baseline_type in ("ImplicitALSBaseline", "ImplicitBPRBaseline"):
-        cls = ImplicitALSBaseline if baseline_type == "ImplicitALSBaseline" else ImplicitBPRBaseline
-        implicit_baseline = cls(**strategy_kwargs)
-        implicit_baseline.user_factors = data["user_factors"]
-        implicit_baseline.item_factors = data["item_factors"]
-        return implicit_baseline
+        policy = "implicit_als" if baseline_type == "ImplicitALSBaseline" else "implicit_bpr"
+        return RestoredImplicitFactorBaseline(
+            user_factors=data["user_factors"],
+            item_factors=data["item_factors"],
+            device=dev,
+            policy=policy,
+        )
 
     raise RuntimeError(f"Unknown baseline type: {baseline_type}")
 

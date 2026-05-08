@@ -3,6 +3,8 @@
 
 Run with: python examples/quickstart.py
 """
+from pathlib import Path
+
 import numpy as np
 import pandas as pd
 
@@ -14,7 +16,16 @@ n_users, n_items, n_interactions = 12, 50, 300
 interactions = pd.DataFrame({
     "user_id": rng.randint(0, n_users, n_interactions),
     "item_id": rng.randint(0, n_items, n_interactions),
+    "label": rng.binomial(1, 0.7, n_interactions),
 })
+
+# Also write the CSVs used by the CLI quickstart docs.
+data_dir = Path(__file__).resolve().parent / "data"
+data_dir.mkdir(exist_ok=True)
+train = interactions.sample(frac=0.8, random_state=42)
+test = interactions.drop(train.index)
+train.to_csv(data_dir / "quickstart_train.csv", index=False)
+test.to_csv(data_dir / "quickstart_test.csv", index=False)
 
 # 1. FIT — one-shot training on historical data.
 rec = OrchidRecommender.from_interactions(

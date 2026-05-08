@@ -7,7 +7,7 @@
 
 ## Supported Runtime Matrix
 - Python: 3.11 – 3.13 (verified in CI across CPython builds).
-- PyTorch: 1.13 – 2.9 (primary development targets 2.x; earlier versions may miss optional GPU optimisations).
+- PyTorch: 2.x for torch-backed extras (`ml`, `torch`, `implicit`, `streaming`, `enterprise`, `agentic`, `benchmarks`).
 - Operating systems: Ubuntu 22.04 LTS, macOS 14+, Windows Server 2022 (CPU paths).
 
 ## Deprecation Workflow
@@ -23,4 +23,4 @@
 - GitHub issues for bug reports and feature requests.
 - Enterprise subscribers gain access to dedicated support SLAs, onboarding sessions, and private roadmap briefings.
 
-Updated: 2026-04-12
+Updated: 2026-05-08

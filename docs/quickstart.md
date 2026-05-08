@@ -8,10 +8,12 @@ This walkthrough installs Orchid Ranker from PyPI, fits a simple recommender, an
 python -m venv .venv
 source .venv/bin/activate  # Windows: .venv\\Scripts\\activate
 pip install --upgrade pip
-pip install orchid-ranker
+pip install 'orchid-ranker[ml]'
 ```
 
-For agentic simulations or plots add extras, e.g. `pip install orchid-ranker[agentic,viz]`.
+The base `pip install orchid-ranker` package is for torch-free progression
+utilities. The recommender API shown below needs the `ml` extra. For agentic
+simulations or plots add extras, e.g. `pip install 'orchid-ranker[agentic,viz]'`.
 
 ## 2. Fit & Recommend (3 steps)
 
@@ -41,6 +43,8 @@ rec.recommend(user_id=1, top_k=3, candidate_item_ids=[10, 12, 14])
 ## 3. CLI Evaluation
 
 ```bash
+python examples/quickstart.py
+
 orchid-evaluate \
   --train examples/data/quickstart_train.csv \
   --test examples/data/quickstart_test.csv \
