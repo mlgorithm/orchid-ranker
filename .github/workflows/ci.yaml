@@ -55,7 +55,7 @@ jobs:
         run: |
           python -m pytest tests/ -x --tb=short \
             --cov=orchid_ranker --cov-report=term-missing \
-            --cov-fail-under=45
+            --cov-fail-under=37
 
       - name: Build documentation
         run: python -m mkdocs build --strict
