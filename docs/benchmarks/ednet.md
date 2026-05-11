@@ -98,17 +98,27 @@ works across both ends of the education spectrum: sparse, heterogeneous
 activity streams (OULAD) and dense, homogeneous question-response logs
 (EdNet).
 
-More importantly, the features that make Orchid effective on EdNet — competence
-tracking, stretch-zone targeting, temporal adaptation — are not
-education-specific. A music recommendation system faces an analogous problem:
-users have evolving taste (competence), songs have complexity
-(difficulty), and the optimal playlist balances familiarity with discovery
-(stretch zone). The [MovieLens-1M benchmark](movielens-1m.md) explores this
-generalization for movies; a planned
-[music discovery benchmark](../roadmap/IMPLEMENTATION_PLAN.md) will test it
-on listening data.
+More importantly, EdNet tests the adaptive-learning pieces Orchid now leads
+with: learner-state tracing, difficulty-aware ranking, and chronological replay
+without leakage. MovieLens and music remain specialty/fallback benchmarks, not
+the core proof point.
 
 ## Reproducibility
+
+Normalize KT1 data for the KT and policy-OPE benchmark CLIs:
+
+```bash
+PYTHONPATH=src python benchmarks/ednet/preprocess.py \
+  --interactions data/ednet/KT1 \
+  --questions data/ednet/contents/questions.csv \
+  --max-files 10000 \
+  --output data/ednet_kt/interactions.csv
+```
+
+`--interactions` may point to a single denormalized CSV or to the KT1
+directory of per-user CSV files. If rows already include `is_correct`, the
+question metadata is optional; otherwise pass `questions.csv` so the
+preprocessor can compare `user_answer` with `correct_answer`.
 
 ```bash
 # Full adaptive benchmark (deterministic under fixed seed)
@@ -131,6 +141,6 @@ specified in `configs/ednet.yaml`; all seeds are fixed for reproducibility.
 
 - [Case study: OULAD](oulad.md) — the companion education case study, focused
   on VLE activity ranking.
-- [MovieLens-1M benchmark](movielens-1m.md) — generalization to movie
-  recommendations.
+- [MovieLens-1M benchmark](movielens-1m.md) — generic recommender fallback
+  comparison outside the adaptive-learning core.
 - [Benchmarking guide](../benchmarking.md) — how to run all benchmarks.

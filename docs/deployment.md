@@ -15,7 +15,7 @@ Use the chart under `deploy/helm/orchid-ranker`:
 
 ```bash
 helm install orchid ./deploy/helm/orchid-ranker \
-  --set image.repository=ghcr.io/your-org/orchid-ranker \
+  --set image.repository=ghcr.io/mlgorithm/orchid-ranker \
   --set image.tag=v0.2.0 \
   --set env.ORCHID_AUDIT_ENDPOINT=https://siem.example/v1/events
 ```

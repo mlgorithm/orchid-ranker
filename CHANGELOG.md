@@ -1,5 +1,49 @@
 # Changelog
 
+## 0.5.0 - 2026-05-11
+
+### Adaptive Learning Focus
+
+- Repositioned Orchid Ranker around progression-aware adaptive recommendation:
+  learner state, prerequisite-aware candidate selection, learning-value policy
+  evaluation, and safe rollout checks.
+- Added business-facing docs for adaptive-learning fit, competitive positioning,
+  algorithm roadmap, offline policy evaluation, progression policy, and pyKT
+  integration.
+
+### Knowledge Tracing And Policy Evaluation
+
+- Added experimental `SAKTTracer` and `AKTTracer` for time-ordered correctness
+  prediction on adaptive-learning logs.
+- Added ASSISTments and EdNet preprocessing/benchmark paths for KT replay.
+- Added `ProgressionValuePolicy`, `DelayedGainValuePolicy`, and
+  `SupportConstrainedDelayedGainPolicy` for next-item ranking from KT state.
+- Added IPS, SNIPS, direct-method, and doubly robust policy evaluation utilities
+  for logged adaptive recommendations.
+- Added delayed same-skill gain rewards, training-only delayed-gain priors, and
+  reward-model diagnostics with calibration, cross-fit, and target-action bias
+  reporting.
+- Added pyKT sequence export/import helpers and prediction adapters so external
+  KT model-zoo outputs can be evaluated inside Orchid's policy layer.
+
+### Benchmarks
+
+- Added KT quality, KT policy OPE, adaptive-efficiency, and delayed-gain
+  reward-model benchmark CLIs.
+- Current ASSISTments evidence: AKT is the strongest one-epoch in-repo tracer;
+  progression reward shows positive offline value; strict delayed-gain policy is
+  near break-even; learned support-constrained delayed-gain policy remains
+  experimental because the direct value model overpredicts target-policy
+  actions.
+
+### Release Readiness
+
+- Kept torch-dependent recommender APIs lazy so base installs remain
+  torch-optional.
+- Added public API exports for OPE, progression policy, delayed-gain modeling,
+  and pyKT bridge helpers.
+- Cleaned package metadata and extras for PyPI distribution checks.
+
 ## 0.3.2 - 2026-04-12
 
 ### Enterprise Hardening

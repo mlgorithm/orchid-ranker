@@ -130,5 +130,5 @@ Results are written to `benchmarks/results_curated_feed.json`.
 
 ## See also
 
-- [MovieLens-1M benchmark](movielens-1m.md) -- core recommender evaluation
+- [MovieLens-1M benchmark](movielens-1m.md) -- generic recommender fallback evaluation
 - [Cold-start benchmark](cold-start.md) -- new-user handling

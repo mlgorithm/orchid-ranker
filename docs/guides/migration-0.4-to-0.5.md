@@ -4,7 +4,12 @@ This guide covers all breaking changes and deprecations in the v0.5 release. The
 
 ## Quick summary
 
-Orchid Ranker v0.5 reframes the library as a general-purpose progression-aware recommender. Education-origin terms have been replaced with domain-neutral equivalents. No code changes are required immediately — all old names emit deprecation warnings pointing to the new name.
+Orchid Ranker v0.5 introduced the domain-neutral progression vocabulary used
+throughout the library. The current product direction leads with adaptive
+learning again, but these generic names remain the stable API because they also
+support corporate training, onboarding, rehabilitation, and other progression
+domains. No code changes are required immediately -- all old names emit
+deprecation warnings pointing to the new name.
 
 ## Symbol renames
 

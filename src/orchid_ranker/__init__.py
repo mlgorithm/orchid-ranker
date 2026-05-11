@@ -1,17 +1,26 @@
-"""Orchid Ranker -- adaptive progression & recommender toolkit.
+"""Orchid Ranker -- adaptive-learning recommender stack.
 
-Build adaptive systems for any domain: education, corporate training,
-rehabilitation, fitness, gaming, onboarding, and more.
+Build systems that choose the next exercise, lesson, task, or review item from
+learner state, catalog structure, progression reward, and live outcome updates.
 
 Public API is organized into three stability tiers:
 
 **Tier 1 -- Stable** (semver-guaranteed, safe for production):
-    OrchidRecommender, Recommendation, BayesianKnowledgeTracing,
+    AdaptiveLearningRecommender, OrchidRecommender, Recommendation,
+    BayesianKnowledgeTracing,
     ProficiencyTracker, ForgettingCurve, DependencyGraph,
     ProgressionRecommender, save_model, load_model, cross_validate,
     compare_models, train_test_split, evaluate_on_holdout,
     progression_gain, proficiency_coverage, sequence_adherence,
-    difficulty_appropriateness, engagement_score, ProgressionReport
+    difficulty_appropriateness, engagement_score, ProgressionReport,
+    evaluate_logged_policy, compare_logged_policies,
+    PyKTPredictionAdapter, export_pykt_sequences,
+    ProgressionValuePolicy, DelayedGainValuePolicy,
+    SupportConstrainedDelayedGainPolicy, ProgressionRewardConfig,
+    DelayedGainRewardModel, build_delayed_gain_training_frame,
+    diagnose_delayed_gain_predictions, fit_delayed_gain_reward_model,
+    fit_delayed_gain_reward_model_from_frame,
+    ScenarioFit, ScenarioRecipe, available_scenarios, recommend_scenarios
 
 **Tier 2 -- Advanced** (stable but may evolve between minor versions):
     AdaptiveAgent, AdaptiveAgentFactory, MultiUserOrchestrator,
@@ -25,7 +34,7 @@ Public API is organized into three stability tiers:
 Installation extras
 -------------------
 ``pip install orchid-ranker``          -- core progression toolkit (BKT, dependency graph, evaluation)
-``pip install orchid-ranker[ml]``      -- adds PyTorch for ML recommender strategies
+``pip install orchid-ranker[ml]``      -- adds PyTorch for AdaptiveLearningRecommender and ML strategies
 ``pip install orchid-ranker[implicit]`` -- adds implicit ALS/BPR strategies
 ``pip install orchid-ranker[all]``     -- everything (ML, viz, agentic, observability, connectors)
 """
@@ -37,6 +46,13 @@ __version__ = "0.5.0"
 from .curriculum import (
     DependencyGraph,
     ProgressionRecommender,
+)
+from .delayed_gain import (
+    DelayedGainRewardModel,
+    build_delayed_gain_training_frame,
+    diagnose_delayed_gain_predictions,
+    fit_delayed_gain_reward_model,
+    fit_delayed_gain_reward_model_from_frame,
 )
 from .evaluation import (
     ProgressionReport,
@@ -51,6 +67,32 @@ from .knowledge_tracing import (
     ForgettingCurve,
     ProficiencyTracker,
 )
+from .learning_policy import (
+    DelayedGainValuePolicy,
+    ProgressionValuePolicy,
+    SupportConstrainedDelayedGainPolicy,
+)
+from .ope import (
+    LoggedPolicyReport,
+    PolicyComparisonReport,
+    compare_logged_policies,
+    deterministic_policy_probabilities,
+    evaluate_logged_policy,
+)
+from .progression_reward import ProgressionRewardConfig
+from .pykt_bridge import (
+    PyKTPredictionAdapter,
+    PyKTSequence,
+    export_pykt_sequences,
+    load_pykt_sequences,
+    pykt_sequences_to_interactions,
+)
+from .scenarios import (
+    ScenarioFit,
+    ScenarioRecipe,
+    available_scenarios,
+    recommend_scenarios,
+)
 
 # ── Lazy imports for torch-dependent and optional-dependency modules ──────
 #
@@ -60,6 +102,9 @@ from .knowledge_tracing import (
 
 _TORCH_LAZY = {
     # Tier 1 -- requires torch
+    "AdaptiveLearningConfig": (".adaptive_learning", "AdaptiveLearningConfig"),
+    "AdaptiveLearningRecommendation": (".adaptive_learning", "AdaptiveLearningRecommendation"),
+    "AdaptiveLearningRecommender": (".adaptive_learning", "AdaptiveLearningRecommender"),
     "OrchidRecommender": (".recommender", "OrchidRecommender"),
     "Recommendation": (".recommender", "Recommendation"),
     "SUPPORTED_STRATEGIES": (".recommender", "SUPPORTED_STRATEGIES"),
@@ -175,6 +220,9 @@ def __getattr__(name: str):
 __all__ = [
     # Tier 1 -- Stable (generic names)
     "__version__",
+    "AdaptiveLearningConfig",
+    "AdaptiveLearningRecommendation",
+    "AdaptiveLearningRecommender",
     "OrchidRecommender",
     "Recommendation",
     "SUPPORTED_STRATEGIES",
@@ -190,6 +238,29 @@ __all__ = [
     "difficulty_appropriateness",
     "engagement_score",
     "ProgressionReport",
+    "LoggedPolicyReport",
+    "PolicyComparisonReport",
+    "evaluate_logged_policy",
+    "compare_logged_policies",
+    "deterministic_policy_probabilities",
+    "PyKTSequence",
+    "PyKTPredictionAdapter",
+    "export_pykt_sequences",
+    "load_pykt_sequences",
+    "pykt_sequences_to_interactions",
+    "DelayedGainRewardModel",
+    "build_delayed_gain_training_frame",
+    "diagnose_delayed_gain_predictions",
+    "fit_delayed_gain_reward_model",
+    "fit_delayed_gain_reward_model_from_frame",
+    "ScenarioFit",
+    "ScenarioRecipe",
+    "available_scenarios",
+    "recommend_scenarios",
+    "DelayedGainValuePolicy",
+    "ProgressionValuePolicy",
+    "ProgressionRewardConfig",
+    "SupportConstrainedDelayedGainPolicy",
     "save_model",
     "load_model",
     "cross_validate",

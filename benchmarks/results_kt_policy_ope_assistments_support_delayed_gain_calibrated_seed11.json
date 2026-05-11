@@ -1,0 +1,105 @@
+{
+  "assumptions": {
+    "baseline_policy": "random_uniform_candidate",
+    "candidate_size": 20.0,
+    "logging": "synthetic_uniform_over_candidate_set",
+    "max_events": 10000.0,
+    "policy": "support_delayed_gain",
+    "reward": "delayed_same_concept_gain_proxy",
+    "reward_mode": "delayed_gain",
+    "target_correct": 0.95
+  },
+  "candidate_size_mean": 20.0,
+  "comparison": {
+    "baseline": {
+      "ci_high": 0.5485487265882627,
+      "ci_low": 0.5403829842516419,
+      "clipped_fraction": 0.0,
+      "coverage": 1.0,
+      "direct_method": 0.5245550475555439,
+      "doubly_robust": 0.5444658554199523,
+      "effective_sample_size": 6845.0,
+      "estimator": "doubly_robust",
+      "ips": 0.5476573201372316,
+      "logging_reward": 0.5476573201372316,
+      "n_events": 6845,
+      "snips": 0.5476573201372316,
+      "standard_error": 0.002083135812961655,
+      "value": 0.5444658554199523,
+      "weight_max": 1.0,
+      "weight_mean": 1.0
+    },
+    "ci_high": -0.08422536178308386,
+    "ci_low": -0.1393211461970556,
+    "estimator": "doubly_robust",
+    "standard_error": 0.014055305313913998,
+    "target": {
+      "ci_high": 0.46149027714351837,
+      "ci_low": 0.4038949257162468,
+      "clipped_fraction": 0.0,
+      "coverage": 0.09013878743608474,
+      "direct_method": 0.5858189825679726,
+      "doubly_robust": 0.4326926014298826,
+      "effective_sample_size": 617.0,
+      "estimator": "doubly_robust",
+      "ips": 0.9838937002832593,
+      "logging_reward": 0.5476573201372316,
+      "n_events": 6845,
+      "snips": 0.5457659950112569,
+      "standard_error": 0.014692961677249271,
+      "value": 0.4326926014298826,
+      "weight_max": 20.0,
+      "weight_mean": 1.8027757487216947
+    },
+    "uplift": -0.11177325399006972
+  },
+  "delayed_gain": {
+    "dropped_no_future_same_concept": 3155.0,
+    "future_same_concept_count_mean": 3.3398100803506208,
+    "future_window": 5.0
+  },
+  "delayed_gain_policy": {
+    "concept_priors": 107.0,
+    "global_gain_prior": 0.5231360730149056,
+    "item_priors": 13297.0,
+    "shrinkage": 10.0
+  },
+  "delayed_gain_reward_model": {
+    "calibrated": true,
+    "default_prediction": 0.5233667917545699,
+    "fallback_only": false,
+    "feature_names": [
+      "p_correct",
+      "difficulty",
+      "competence",
+      "recent_repetition",
+      "progression_expected_reward",
+      "progression_stretch_fit",
+      "progression_mastery_gain",
+      "delayed_gain_prior",
+      "item_support_log",
+      "concept_support_log",
+      "support_score"
+    ],
+    "n_examples": 50000,
+    "target_mean": 0.5233667917545699,
+    "train_rmse": 0.09748061803275018,
+    "validation_ece": 0.0012454566664075685,
+    "validation_mae": 0.07407169349996612,
+    "validation_rmse": 0.0980577823521004
+  },
+  "logging_reward": 0.5476573201372316,
+  "n_events": 6845,
+  "random_match_probability": 0.05,
+  "random_value_mean": 0.5245550475555439,
+  "split": {
+    "test_events": 77114.0,
+    "test_items": 14770.0,
+    "test_users": 3768.0,
+    "train_events": 302649.0,
+    "train_items": 17648.0,
+    "train_users": 3770.0
+  },
+  "target_match_rate": 0.09013878743608474,
+  "target_value_mean": 0.5858189825679726
+}

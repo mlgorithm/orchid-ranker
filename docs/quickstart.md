@@ -1,6 +1,8 @@
 # Quickstart Guide
 
-This walkthrough installs Orchid Ranker from PyPI, fits a simple recommender, and runs the evaluation CLI. No external services are required.
+This walkthrough installs Orchid Ranker from PyPI and fits the
+adaptive-learning recommender path: learner state, difficulty-aware ranking,
+prerequisites, and live re-ranking after an outcome.
 
 ## 1. Install
 
@@ -12,35 +14,50 @@ pip install 'orchid-ranker[ml]'
 ```
 
 The base `pip install orchid-ranker` package is for torch-free progression
-utilities. The recommender API shown below needs the `ml` extra. For agentic
-simulations or plots add extras, e.g. `pip install 'orchid-ranker[agentic,viz]'`.
+utilities. `AdaptiveLearningRecommender` uses PyTorch-backed tracing, so install
+the `ml` extra for the primary workflow.
 
-## 2. Fit & Recommend (3 steps)
+## 2. Fit, Rank, Observe
 
 ```python
 import pandas as pd
-from orchid_ranker import OrchidRecommender
+from orchid_ranker import AdaptiveLearningRecommender
 
-interactions = pd.DataFrame({
+events = pd.DataFrame({
     "user_id": [1, 1, 2, 2, 3, 3],
-    "item_id": [10, 11, 10, 13, 12, 14],
-    "label":   [1, 0, 1, 1, 0, 1],
+    "item_id": [101, 201, 101, 202, 101, 201],
+    "correct": [1, 0, 1, 1, 0, 1],
+    "concept": ["number-sense", "fractions", "number-sense", "fractions", "number-sense", "fractions"],
+    "difficulty": [0.20, 0.45, 0.20, 0.50, 0.20, 0.45],
 })
 
-rec = OrchidRecommender.from_interactions(interactions, strategy="als",
-                                          rating_col="label", epochs=3)
-print(rec.recommend(user_id=1, top_k=3))
+rec = AdaptiveLearningRecommender(policy="auto", epochs=1).fit(
+    events,
+    correct_col="correct",
+    concept_col="concept",
+    item_difficulty_col="difficulty",
+    prerequisite_by_concept={"fractions": ["number-sense"]},
+)
+
+ranked = rec.rank(user_id=1, candidate_item_ids=[101, 201, 202], top_k=2)
+rec.observe(user_id=1, item_id=ranked[0].item_id, correct=True)
+print(ranked)
 ```
 
-See `examples/quickstart.py` for a runnable script.
+See `examples/adaptive_learning_quickstart.py` for the full adaptive-learning
+script and `examples/quickstart.py` for the generic batch recommender fallback.
+See `examples/scenario_selection.py` when you want Orchid to choose a workflow
+from product and data signals. See `examples/knowledge_tracing_quickstart.py`
+for predicted-correctness ranking from learner sequences,
+`examples/akt_quickstart.py` for difficulty-aware tracing, and
+`examples/kt_policy_quickstart.py` for KT-guided next-item ranking.
 
-To rank a specific candidate pool, pass original item IDs:
+## 3. Batch fallback
 
-```python
-rec.recommend(user_id=1, top_k=3, candidate_item_ids=[10, 12, 14])
-```
+Use `OrchidRecommender.from_interactions(...)` when you only have ordinary
+user-item interactions and no learning concepts, difficulty, or prerequisites.
 
-## 3. CLI Evaluation
+## 4. CLI Evaluation
 
 ```bash
 python examples/quickstart.py
@@ -54,7 +71,7 @@ orchid-evaluate \
 
 Sample CSVs are auto-generated when you run `examples/quickstart.py`. The CLI outputs Precision@5, Recall@5, MAP@10, and NDCG@10.
 
-## 4. Optional Extras
+## 5. Optional Extras
 
 - Prometheus metrics: `orchid_ranker.start_metrics_server()`.
 - Differential privacy: pass `dp_cfg` with engine `"opacus"` or `"per_sample"` (see `docs/privacy.md`).
@@ -62,7 +79,9 @@ Sample CSVs are auto-generated when you run `examples/quickstart.py`. The CLI ou
 
 ## Next Steps
 
+- Read `docs/adaptive-learning-positioning.md` to understand the business fit.
 - Browse `docs/overview.md` for module map.
 - Browse `docs/scenarios.md` for practical deployment recipes.
+- Browse `docs/algorithm-roadmap.md` for planned KT and policy-learning algorithms.
 - Use `docs/guides/01-fit-offline.md` for batch usage.
 - Use `docs/guides/02-serve-streaming.md` when you need live adaptation.

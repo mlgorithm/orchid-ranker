@@ -1,0 +1,239 @@
+{
+  "runs": [
+    {
+      "report": {
+        "assumptions": {
+          "baseline_policy": "random_uniform_candidate",
+          "candidate_size": 20.0,
+          "logging": "synthetic_uniform_over_candidate_set",
+          "max_events": 10000.0,
+          "policy": "progression",
+          "reward": "observed_progression_reward",
+          "reward_mode": "progression",
+          "target_correct": 0.7
+        },
+        "candidate_size_mean": 20.0,
+        "comparison": {
+          "baseline": {
+            "ci_high": 0.6190171556340429,
+            "ci_low": 0.6157642036670079,
+            "clipped_fraction": 0.0,
+            "coverage": 1.0,
+            "direct_method": 0.611699719804993,
+            "doubly_robust": 0.6173906796505254,
+            "effective_sample_size": 10000.0,
+            "estimator": "doubly_robust",
+            "ips": 0.4751081108337478,
+            "logging_reward": 0.4751081108337478,
+            "n_events": 10000,
+            "snips": 0.4751081108337478,
+            "standard_error": 0.0008298499341553949,
+            "value": 0.6173906796505254,
+            "weight_max": 1.0,
+            "weight_mean": 1.0
+          },
+          "ci_high": 0.3193721626270024,
+          "ci_low": 0.31020964428173536,
+          "estimator": "doubly_robust",
+          "standard_error": 0.0023374200795371215,
+          "target": {
+            "ci_high": 0.9368225295117019,
+            "ci_low": 0.9275406366980867,
+            "clipped_fraction": 0.0,
+            "coverage": 0.0205,
+            "direct_method": 0.9419219872125912,
+            "doubly_robust": 0.9321815831048943,
+            "effective_sample_size": 205.0,
+            "estimator": "doubly_robust",
+            "ips": 0.3629700672438142,
+            "logging_reward": 0.4751081108337478,
+            "n_events": 10000,
+            "snips": 0.8852928469361321,
+            "standard_error": 0.0023678733096193566,
+            "value": 0.9321815831048943,
+            "weight_max": 20.0,
+            "weight_mean": 0.41
+          },
+          "uplift": 0.3147909034543689
+        },
+        "logging_reward": 0.4751081108337478,
+        "n_events": 10000,
+        "random_match_probability": 0.049999999999999996,
+        "random_value_mean": 0.611699719804993,
+        "split": {
+          "test_events": 77114.0,
+          "test_items": 14770.0,
+          "test_users": 3768.0,
+          "train_events": 302649.0,
+          "train_items": 17648.0,
+          "train_users": 3770.0
+        },
+        "target_match_rate": 0.0205,
+        "target_value_mean": 0.9419219872125912
+      },
+      "seed": 11
+    },
+    {
+      "report": {
+        "assumptions": {
+          "baseline_policy": "random_uniform_candidate",
+          "candidate_size": 20.0,
+          "logging": "synthetic_uniform_over_candidate_set",
+          "max_events": 10000.0,
+          "policy": "progression",
+          "reward": "observed_progression_reward",
+          "reward_mode": "progression",
+          "target_correct": 0.7
+        },
+        "candidate_size_mean": 20.0,
+        "comparison": {
+          "baseline": {
+            "ci_high": 0.6308871074841182,
+            "ci_low": 0.6276212785289175,
+            "clipped_fraction": 0.0,
+            "coverage": 1.0,
+            "direct_method": 0.6280895492044765,
+            "doubly_robust": 0.6292541930065179,
+            "effective_sample_size": 10000.0,
+            "estimator": "doubly_robust",
+            "ips": 0.485605910960837,
+            "logging_reward": 0.485605910960837,
+            "n_events": 10000,
+            "snips": 0.485605910960837,
+            "standard_error": 0.0008331349404787905,
+            "value": 0.6292541930065179,
+            "weight_max": 1.0,
+            "weight_mean": 1.0
+          },
+          "ci_high": 0.3264932121997529,
+          "ci_low": 0.31846907179416817,
+          "estimator": "doubly_robust",
+          "standard_error": 0.002047012207591102,
+          "target": {
+            "ci_high": 0.955717738979915,
+            "ci_low": 0.9477529310270418,
+            "clipped_fraction": 0.0,
+            "coverage": 0.0172,
+            "direct_method": 0.9615076824487591,
+            "doubly_robust": 0.9517353350034784,
+            "effective_sample_size": 172.0,
+            "estimator": "doubly_robust",
+            "ips": 0.3148149492519783,
+            "logging_reward": 0.485605910960837,
+            "n_events": 10000,
+            "snips": 0.9151597361976114,
+            "standard_error": 0.002031876099688168,
+            "value": 0.9517353350034784,
+            "weight_max": 20.0,
+            "weight_mean": 0.344
+          },
+          "uplift": 0.32248114199696054
+        },
+        "logging_reward": 0.485605910960837,
+        "n_events": 10000,
+        "random_match_probability": 0.049999999999999996,
+        "random_value_mean": 0.6280895492044765,
+        "split": {
+          "test_events": 77114.0,
+          "test_items": 14770.0,
+          "test_users": 3768.0,
+          "train_events": 302649.0,
+          "train_items": 17648.0,
+          "train_users": 3770.0
+        },
+        "target_match_rate": 0.0172,
+        "target_value_mean": 0.9615076824487591
+      },
+      "seed": 17
+    },
+    {
+      "report": {
+        "assumptions": {
+          "baseline_policy": "random_uniform_candidate",
+          "candidate_size": 20.0,
+          "logging": "synthetic_uniform_over_candidate_set",
+          "max_events": 10000.0,
+          "policy": "progression",
+          "reward": "observed_progression_reward",
+          "reward_mode": "progression",
+          "target_correct": 0.7
+        },
+        "candidate_size_mean": 20.0,
+        "comparison": {
+          "baseline": {
+            "ci_high": 0.6208628442120091,
+            "ci_low": 0.6175850095679697,
+            "clipped_fraction": 0.0,
+            "coverage": 1.0,
+            "direct_method": 0.6190102617918718,
+            "doubly_robust": 0.6192239268899894,
+            "effective_sample_size": 10000.0,
+            "estimator": "doubly_robust",
+            "ips": 0.4754629413582604,
+            "logging_reward": 0.4754629413582604,
+            "n_events": 10000,
+            "snips": 0.4754629413582604,
+            "standard_error": 0.0008361976724813542,
+            "value": 0.6192239268899894,
+            "weight_max": 1.0,
+            "weight_mean": 1.0
+          },
+          "ci_high": 0.3308145372269301,
+          "ci_low": 0.32166101428638283,
+          "estimator": "doubly_robust",
+          "standard_error": 0.0023351252912678757,
+          "target": {
+            "ci_high": 0.9500363012603972,
+            "ci_low": 0.9408871040328943,
+            "clipped_fraction": 0.0,
+            "coverage": 0.0216,
+            "direct_method": 0.9594507916165811,
+            "doubly_robust": 0.9454617026466458,
+            "effective_sample_size": 216.0,
+            "estimator": "doubly_robust",
+            "ips": 0.3931584407548919,
+            "logging_reward": 0.4754629413582604,
+            "n_events": 10000,
+            "snips": 0.9100889832289165,
+            "standard_error": 0.0023340217727648317,
+            "value": 0.9454617026466458,
+            "weight_max": 20.0,
+            "weight_mean": 0.432
+          },
+          "uplift": 0.32623777575665647
+        },
+        "logging_reward": 0.4754629413582604,
+        "n_events": 10000,
+        "random_match_probability": 0.049999999999999996,
+        "random_value_mean": 0.6190102617918718,
+        "split": {
+          "test_events": 77114.0,
+          "test_items": 14770.0,
+          "test_users": 3768.0,
+          "train_events": 302649.0,
+          "train_items": 17648.0,
+          "train_users": 3770.0
+        },
+        "target_match_rate": 0.0216,
+        "target_value_mean": 0.9594507916165811
+      },
+      "seed": 23
+    }
+  ],
+  "summary": {
+    "baseline_value_mean": 0.6219562665156776,
+    "n_runs": 3.0,
+    "seeds": [
+      11,
+      17,
+      23
+    ],
+    "target_ess_mean": 197.66666666666666,
+    "target_match_rate_mean": 0.019766666666666665,
+    "target_value_mean": 0.9431262069183394,
+    "uplift_ci_high": 0.32777273672170687,
+    "uplift_ci_low": 0.314567144083617,
+    "uplift_mean": 0.32116994040266195,
+    "uplift_std": 0.005834994309499195
+  }
+}

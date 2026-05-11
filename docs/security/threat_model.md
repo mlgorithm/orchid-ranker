@@ -2,7 +2,7 @@
 
 ## 1. Overview
 
-This document outlines the security architecture and threat model for Orchid Ranker, a progression-aware recommender system library. It is intended for security reviewers, enterprise procurement teams, and system operators evaluating Orchid Ranker for production deployment.
+This document outlines the security architecture and threat model for Orchid Ranker, an adaptive-learning recommender library. It is intended for security reviewers, enterprise procurement teams, and system operators evaluating Orchid Ranker for production deployment.
 
 Orchid Ranker is **not a service**—it is a Python library embedded within the customer's application. This document clarifies security boundaries, responsibilities, and residual risks.
 

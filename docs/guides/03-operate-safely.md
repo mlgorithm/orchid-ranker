@@ -24,10 +24,27 @@ metrics on every event: `progression_gain`, `category_coverage`,
 `sequence_adherence`, and `stretch_fit`. Values are automatically pushed to
 Prometheus gauges.
 
-Wire the monitor into the streaming ranker so every `observe` feeds it:
+Record each served item after the learner outcome arrives. With the primary
+adaptive-learning API, capture competence before and after `observe()`:
 
 ```python
-streamer = rec.as_streaming(lr=0.05, l2=1e-3, monitor=monitor)
+ranked = rec.rank(user_id=42, candidate_item_ids=candidates, top_k=10)
+chosen = ranked[0]
+concept = chosen.concept_id or "__default__"
+pre = rec.competence_for(user_id=42, concept=concept)
+
+rec.observe(user_id=42, item_id=chosen.item_id, correct=True)
+post = rec.competence_for(user_id=42, concept=concept)
+
+monitor.record(
+    user_id=42,
+    item_id=chosen.item_id,
+    correct=True,
+    pre_competence=pre,
+    post_competence=post,
+    category=str(concept),
+    difficulty=chosen.difficulty,
+)
 ```
 
 ## Add a progression guardrail
@@ -52,16 +69,18 @@ guardrail = ProgressionGuardrail(monitor, cfg)
 
 Before every rank call, ask the guardrail whether the adaptive policy is still
 safe. If it has tripped, fall back to the frozen baseline from Guide 1.
+Keep that baseline in a separate `baseline_rec` object so the adaptive
+learner and fallback model have clear responsibilities.
 
 ```python
 if guardrail.evaluate():
-    # Adaptive path -- live residuals and competence updates
-    top = streamer.rank(user_id=42, candidate_item_ids=candidates, top_k=10)
+    # Adaptive path -- KT, progression reward, and live competence updates
+    top = rec.rank(user_id=42, candidate_item_ids=candidates, top_k=10)
 else:
     # Guardrail fired -- serve the frozen batch baseline
     top = [(r.item_id, r.score)
-           for r in rec.baseline_rank(user_id=42, top_k=10,
-                                      candidate_item_ids=candidates)]
+           for r in baseline_rec.baseline_rank(user_id=42, top_k=10,
+                                               candidate_item_ids=candidates)]
 ```
 
 `baseline_rank` is identical to `recommend` but named explicitly for the

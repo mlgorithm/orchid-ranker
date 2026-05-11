@@ -1,0 +1,28 @@
+{
+  "note": "Tiny fixture smoke result only. Do not cite as an ASSISTments benchmark.",
+  "command": "PYTHONPATH=src python benchmarks/kt_sakt_benchmark.py --data /tmp/assistments_tiny_kt.csv --model akt --timestamp-col timestamp --item-difficulty-col difficulty --epochs 1 --d-model 16 --n-heads 2 --batch-size 4 --device cpu",
+  "akt": {
+    "accuracy": 0.75,
+    "auc": 0.3333333333333333,
+    "brier": 0.2175853774712433,
+    "ece": 0.26815035939216614,
+    "log_loss": 0.6279436387446845,
+    "n_events": 4
+  },
+  "item_mean": {
+    "accuracy": 0.75,
+    "auc": 0.5,
+    "brier": 0.23812501072883663,
+    "ece": 0.2250000238418579,
+    "log_loss": 0.6693779025412108,
+    "n_events": 4
+  },
+  "split": {
+    "test_events": 4.0,
+    "test_items": 1.0,
+    "test_users": 4.0,
+    "train_events": 16.0,
+    "train_items": 3.0,
+    "train_users": 4.0
+  }
+}

@@ -1,5 +1,5 @@
 site_name: Orchid Ranker
-site_description: Progression-aware recommender that optimises long-term user value.
+site_description: Adaptive-learning recommender stack with learner-state tracing, progression reward, and safe rollout.
 site_url: https://mlgorithm.github.io/orchid-ranker/
 repo_url: https://github.com/mlgorithm/orchid-ranker
 repo_name: mlgorithm/orchid-ranker
@@ -49,6 +49,9 @@ plugins:
 
 nav:
   - Home: index.md
+  - Adaptive learning fit: adaptive-learning-positioning.md
+  - Algorithm roadmap: algorithm-roadmap.md
+  - Literature notes: adaptive-recommender-literature.md
   - Why Orchid: why-orchid.md
   - Competitors: competitors.md
   - Application scenarios: application-scenarios.md
@@ -58,15 +61,20 @@ nav:
     - Quickstart: quickstart.md
     - Overview: overview.md
     - "Guide 1: Fit offline": guides/01-fit-offline.md
+    - Offline policy evaluation: offline-policy-evaluation.md
+    - Progression policy: progression-policy.md
+    - pyKT integration: pykt-integration.md
     - "Guide 2: Serve streaming": guides/02-serve-streaming.md
     - "Guide 3: Operate safely": guides/03-operate-safely.md
     - Migration (0.4 to 0.5): guides/migration-0.4-to-0.5.md
   - Benchmarks:
+    - "ASSISTments KT": benchmarks/assistments-kt.md
+    - "KT policy OPE": benchmarks/kt-policy-ope.md
+    - "Case study: EdNet": benchmarks/ednet.md
+    - "Case study: OULAD": benchmarks/oulad.md
+    - "End-to-end pipeline": benchmarks/end-to-end.md
     - MovieLens-1M: benchmarks/movielens-1m.md
     - Music discovery: benchmarks/music.md
-    - "Case study: OULAD": benchmarks/oulad.md
-    - "Case study: EdNet": benchmarks/ednet.md
-    - "End-to-end pipeline": benchmarks/end-to-end.md
     - "Scaling (specialty)": benchmarks/scaling.md
     - "Cold-start (specialty)": benchmarks/cold-start.md
     - "Taste progression (specialty)": benchmarks/taste-progression.md

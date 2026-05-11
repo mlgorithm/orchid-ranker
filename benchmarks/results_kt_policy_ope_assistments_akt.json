@@ -1,0 +1,67 @@
+{
+  "assumptions": {
+    "baseline_policy": "random_uniform_candidate",
+    "candidate_size": 20.0,
+    "logging": "synthetic_uniform_over_candidate_set",
+    "max_events": 10000.0,
+    "reward": "correct"
+  },
+  "candidate_size_mean": 20.0,
+  "comparison": {
+    "baseline": {
+      "ci_high": 0.7072970067715673,
+      "ci_low": 0.6903820463204356,
+      "clipped_fraction": 0.0,
+      "coverage": 1.0,
+      "direct_method": 0.6789725389748812,
+      "doubly_robust": 0.6988395265460015,
+      "effective_sample_size": 10000.0,
+      "estimator": "doubly_robust",
+      "ips": 0.7031,
+      "logging_reward": 0.7031,
+      "n_events": 10000,
+      "snips": 0.7031,
+      "standard_error": 0.004315120222757843,
+      "value": 0.6988395265460015,
+      "weight_max": 1.0,
+      "weight_mean": 1.0
+    },
+    "ci_high": 0.06725506026633067,
+    "ci_low": -0.004494221149757352,
+    "estimator": "doubly_robust",
+    "standard_error": 0.018303724451581058,
+    "target": {
+      "ci_high": 0.7669874735281481,
+      "ci_low": 0.6934524186804281,
+      "clipped_fraction": 0.0,
+      "coverage": 0.0448,
+      "direct_method": 0.6869749630272388,
+      "doubly_robust": 0.7302199461042881,
+      "effective_sample_size": 448.0,
+      "estimator": "doubly_robust",
+      "ips": 0.66,
+      "logging_reward": 0.7031,
+      "n_events": 10000,
+      "snips": 0.7366071428571429,
+      "standard_error": 0.018759287269499644,
+      "value": 0.7302199461042881,
+      "weight_max": 20.0,
+      "weight_mean": 0.896
+    },
+    "uplift": 0.03138041955828666
+  },
+  "logging_reward": 0.7031,
+  "n_events": 10000,
+  "random_match_probability": 0.049999999999999996,
+  "random_value_mean": 0.6789725389748812,
+  "split": {
+    "test_events": 77114.0,
+    "test_items": 14770.0,
+    "test_users": 3768.0,
+    "train_events": 302649.0,
+    "train_items": 17648.0,
+    "train_users": 3770.0
+  },
+  "target_match_rate": 0.0448,
+  "target_value_mean": 0.6869749630272388
+}

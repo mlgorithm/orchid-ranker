@@ -89,14 +89,11 @@ exercises the full Orchid pipeline:
 - Side-information features (prior attempts, credit load, activity velocity)
   enrich the two-tower model's user representations.
 
-That said, the same approach generalizes. The [MovieLens-1M](movielens-1m.md)
-benchmark demonstrates that progression-aware scoring improves long-term
-engagement even in a domain (movie recommendations) where "competence" maps
-to evolving taste rather than knowledge. A planned
-[music discovery benchmark](../roadmap/IMPLEMENTATION_PLAN.md) will extend
-the story further. The thesis is not "Orchid is an education tool" — it is
-"Orchid is a progression-aware recommender that started in education because
-that is where the need is most legible."
+That said, OULAD is weaker than ASSISTments/EdNet for the core adaptive-learning
+claim because it is mostly click-stream activity rather than direct
+correct/incorrect outcomes. Treat it as a case study for structured education
+activity streams, while ASSISTments and EdNet carry the cleaner learner-state
+and policy-OPE story.
 
 ## Reproducibility
 
@@ -120,6 +117,6 @@ specified in `configs/oulad.yaml`; all seeds are fixed for reproducibility.
 
 - [Case study: EdNet](ednet.md) — the companion education case study, focused
   on adaptive question sequencing.
-- [MovieLens-1M benchmark](movielens-1m.md) — generalization to movie
-  recommendations.
+- [ASSISTments KT benchmark](assistments-kt.md) — correctness tracing and
+  adaptive policy evidence.
 - [Benchmarking guide](../benchmarking.md) — how to run all benchmarks.

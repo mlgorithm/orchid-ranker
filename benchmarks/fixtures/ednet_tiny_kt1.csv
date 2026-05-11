@@ -1,0 +1,10 @@
+timestamp,solving_id,question_id,user_answer,elapsed_time,subject_id
+1000,1,q1,a,12000,u1
+2000,2,q2,b,14000,u1
+3000,3,q3,c,16000,u1
+1100,1,q1,b,13000,u2
+2100,2,q2,b,15000,u2
+3100,3,q3,d,17000,u2
+1200,1,q1,a,11000,u3
+2200,2,q2,c,12000,u3
+3200,3,q3,d,13000,u3
