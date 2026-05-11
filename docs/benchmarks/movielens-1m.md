@@ -71,11 +71,12 @@ survival rates.
 ### What to look for
 
 1. **Surv@10 ≥ 10% above best non-Orchid baseline** is the acceptance
-   criterion from the implementation plan. If Orchid Adaptive achieves this,
-   the generalisation thesis holds.
+   criterion for this generic fallback benchmark. If Orchid Adaptive achieves
+   this, the streaming recommender has evidence outside the adaptive-learning
+   core; it is not the main learner-state proof point.
 2. **NDCG@10 parity** — Orchid should be *close* to the best baseline on
    pure ranking quality. Winning here is a bonus, not the goal.
-3. **Coverage and novelty** — Orchid's progression-aware scoring should
+3. **Coverage and novelty** — Orchid's progression scoring should
    naturally diversify recommendations, leading to higher coverage and
    novelty than pure accuracy-optimised systems.
 

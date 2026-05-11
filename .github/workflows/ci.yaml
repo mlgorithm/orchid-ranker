@@ -57,6 +57,9 @@ jobs:
             --cov=orchid_ranker --cov-report=term-missing \
             --cov-fail-under=45
 
+      - name: Build documentation
+        run: python -m mkdocs build --strict
+
   install-contracts:
     runs-on: ubuntu-latest
     strategy:

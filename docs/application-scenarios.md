@@ -6,20 +6,25 @@ Where Orchid Ranker fits — and where it doesn't.
 
 ## The core differentiator
 
-Orchid Ranker isn't a general-purpose "Netflix-style" recommender. It has a specific thesis: **the user is getting better at something over time, and a recommender that models that trajectory outperforms one that only maximizes the next click.**
+Orchid Ranker is not a general-purpose "Netflix-style" recommender. Its
+beachhead is adaptive learning: **the learner is getting better over time, and
+the next recommendation should be chosen from learner state, prerequisites,
+difficulty, and progression reward.**
 
 Orchid has capabilities most recommender libraries lack:
 
 | Capability | What it does |
 |------------|-------------|
-| **Outcome tracing (BKT)** | Tracks per-user competence as a hidden Bayesian state |
+| **Outcome tracing (KT/BKT)** | Tracks per-user competence and predicted correctness |
 | **Dependency graphs** | Enforces prerequisite ordering (can't recommend calculus before algebra) |
 | **Stretch-zone scoring** | Recommends items at the right difficulty — not too easy, not too hard |
-| **Streaming adaptation** | Sub-10ms per-interaction updates without retraining |
+| **Live outcome updates** | `observe()` updates the next recommendation without retraining |
 | **Safety guardrails** | Circuit breakers that halt the adaptive policy if metrics degrade |
 | **Differential privacy** | Built-in DP-SGD for regulated environments |
 
-Standard recommenders (implicit, LightFM, RecBole) optimize `argmax P(click)`. Orchid optimizes **progression** — how much the user grows over time.
+Standard recommenders (implicit, LightFM, RecBole) optimize `argmax P(click)`.
+Orchid's adaptive-learning path optimizes **progression**: what the learner
+should work on next to improve.
 
 For implementation recipes, see [Usage scenarios](scenarios.md). This page is
 for fit and positioning; `scenarios.md` is for code paths.
@@ -38,28 +43,33 @@ outcomes.
 
 | Need | Orchid feature |
 |------|---------------|
-| Track each user's completed categories | BKT outcome tracing per category |
+| Track each user's completed categories | KT/BKT outcome tracing per category |
 | Don't assign problems that are too easy or too hard | Stretch-zone scoring (`stretch_fit`) |
 | Enforce prerequisite order (algebra -> calculus) | `DependencyGraph` with topological sorting |
-| Adapt in real-time as the user responds | `StreamingAdaptiveRanker.observe()` -> instant re-rank |
+| Adapt in real-time as the user responds | `AdaptiveLearningRecommender.observe()` -> live learner-state update |
 | Measure learning, not just engagement | `progression_gain`, `category_coverage`, `sequence_adherence` |
 | FERPA/COPPA compliance | DP-SGD presets, audit logging |
 
 **What it looks like in code:**
 
 ```python
-rec = OrchidRecommender.from_interactions(user_activity, strategy="neural_mf")
-streamer = rec.as_streaming(lr=0.05)
+from orchid_ranker import AdaptiveLearningRecommender
 
-# User completes an interaction
-streamer.observe(user_id=42, item_id=137, correct=True, category="fractions")
+rec = AdaptiveLearningRecommender(policy="auto").fit(
+    outcomes,
+    correct_col="correct",
+    concept_col="concept",
+    item_difficulty_col="difficulty",
+    prerequisite_by_concept={"fractions": ["number-sense"]},
+)
 
 # Get next question from the eligible pool
-next_items = streamer.rank(
+next_items = rec.rank(
     user_id=42,
     candidate_item_ids=question_pool,
     top_k=5,
 )
+rec.observe(user_id=42, item_id=next_items[0].item_id, correct=True)
 ```
 
 ---
@@ -73,7 +83,7 @@ next_items = streamer.rank(
 **Why Orchid fits:**
 
 - **Structured curricula.** Certification paths have strict prerequisite trees. `DependencyGraph` enforces them.
-- **Competence verification.** Need to prove employees actually learned, not just clicked through. BKT tracks competence probability per category.
+- **Competence verification.** Need to prove employees actually learned, not just clicked through. KT/BKT tracks competence probability per category.
 - **Personalized pace.** Senior hires skip basics, new grads need foundations. Stretch-zone scoring adapts automatically.
 - **Audit requirements.** SOC 2 and regulated industries need evidence of training completion. HMAC-chained audit logs and DP-SGD provide the paper trail.
 - **Time-constrained learners.** Corporate learners have 15 min/day — must recommend the highest-value next item. Progression-gain optimization does this.
@@ -90,7 +100,7 @@ next_items = streamer.rank(
 
 - **Progressive difficulty.** Exercises must ramp up gradually — knee bend, full squat, weighted squat, jump landing. `DependencyGraph` + stretch-zone handles this.
 - **Regression detection.** If a patient's competence drops (pain increase, ROM decrease), `ProgressionGuardrail` halts progression and falls back to safer exercises.
-- **Per-patient adaptation.** Each patient recovers at different rates. Streaming per-user adaptation personalizes the pace.
+- **Per-patient adaptation.** Each patient recovers at different rates. Live learner-state updates personalize the pace.
 - **HIPAA/medical privacy.** DP-SGD with configurable epsilon ensures no raw data exposure.
 - **Outcome tracking.** "Did the patient successfully complete this exercise?" maps directly to BKT's binary observation model.
 
@@ -98,7 +108,7 @@ next_items = streamer.rank(
 
 ## Scenario 4: Music & audio with learning intent
 
-**Commercial priority:** Showcase tier — great for demos and the generalization claim; smaller commercial fit for the pure-engagement sub-domains. Target the progression-native sub-domains (language-through-music, theory apps, curated-listening education), not Spotify-style homepage discovery.
+**Commercial priority:** Showcase tier — useful for adjacent progression demos, but smaller commercial fit for the pure-engagement sub-domains. Target the progression-native sub-domains (language-through-music, theory apps, curated-listening education), not Spotify-style homepage discovery.
 
 **Examples:** Language-learning-through-music (Lyricly, LyricsTraining), music theory apps (Tenuto, TonedEar), Masterclass-style guided listening, curated classical-music pedagogy apps, podcast series with learning arc (Huberman Lab, Hardcore History), audiobook language courses.
 
@@ -258,13 +268,13 @@ Not all scenarios are equally important commercially or technically. The table b
 | **Native** | Education (#1) | Library was conceived for this; organic adoption will happen here for free. |
 | **Lead** | Corporate training (#2), Clinical rehab (#3) | Clearest buyer intent, measurable ROI, compliance stack is a real wedge. Highest-priority outreach targets. |
 | **High-TAM** | Product onboarding (#8), Fitness (#7) | Largest commercial opportunity if we prove the fit. Shorter sales cycles. Ideal for second-wave case studies. |
-| **Showcase** | Progression gaming (#5), Music/audio with learning intent (#4), Structured knowledge content (#6) | Great for demos and the generalization claim. Smaller TAM, secondary for pipeline. |
+| **Showcase** | Progression gaming (#5), Music/audio with learning intent (#4), Structured knowledge content (#6) | Great for adjacent progression demos. Smaller TAM, secondary for pipeline. |
 
 ---
 
-## Scaling to 100M registered users
+## Scaling the generic streaming fallback to 100M registered users
 
-The default `StreamingAdaptiveRanker` stores per-user state in a dense embedding table. That works well up to ~1M users. Beyond that, use the `orchid_ranker.scaling` module:
+The default `StreamingAdaptiveRanker` stores per-user state in a dense embedding table. That works well up to ~1M users when you are using the generic streaming fallback. Beyond that, use the `orchid_ranker.scaling` module:
 
 ```python
 from orchid_ranker.scaling import ScalingConfig

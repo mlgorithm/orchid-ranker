@@ -6,7 +6,7 @@ Orchid Ranker ships two kinds of modules. Understanding the distinction will sav
 
 ## Core
 
-The core library delivers **progression-aware recommendation** for domains that satisfy three conditions:
+The core library delivers **adaptive-learning recommendation** for domains that satisfy three conditions:
 
 1. Items have an ordering (prerequisites, difficulty, curator-authored progression).
 2. Each interaction produces a signal richer than "they clicked" (completed, answered correctly, adhered, adopted, kept).
@@ -18,7 +18,11 @@ Core modules have:
 - Stable APIs under semver. Breaking changes require a major version bump.
 - Regression tests that run on every PR.
 
-Core modules: `OrchidRecommender`, `StreamingAdaptiveRanker`, `BayesianKnowledgeTracing`, `DependencyGraph`, `ProgressionRecommender`, `SafeSwitchDR`, evaluation metrics, serialization.
+Core modules: `AdaptiveLearningRecommender`, `AKTTracer`, `SAKTTracer`,
+`ProgressionValuePolicy`, `BayesianKnowledgeTracing`, `DependencyGraph`,
+`ProgressionRecommender`, `ProgressionGuardrail`, `SafeSwitchDR`, OPE,
+evaluation metrics, and serialization. `OrchidRecommender` remains core as the
+batch/generic fallback for teams without learning metadata.
 
 ---
 
@@ -74,9 +78,8 @@ Until then, specialty modules are shipped, supported, and tested — but adopter
 
 Open-source recommender libraries lose credibility one of two ways: they claim too little (and nobody tries them) or they claim too much (and early adopters get burned). The specialty/core distinction is how we claim precisely as much as we can defend.
 
-If you're evaluating Orchid for a core use case (education, corporate training,
-clinical rehab, fitness, gaming, onboarding), the library is built around that
-shape of problem: ordered items, richer outcomes than clicks, and stakeholders
-who care about long-term progress.
+If you're evaluating Orchid for the core use case, start with adaptive
+learning: ordered items, learner outcomes, concept/difficulty metadata,
+prerequisites, and stakeholders who care about measurable progress.
 
 If you're evaluating a specialty module, two of four now have public-dataset benchmarks (`cold_start` on MovieLens-1M, `taste_progression` on Amazon Digital Music). The remaining burden is domain-specific: benchmark on your data, verify the fit, and tell us what you find. Your results are what graduate these modules.

@@ -200,6 +200,7 @@ cython_debug/
 *.xlsx
 *.zip
 benchmarks/results.json
+benchmarks/*_local.json
 
 # Cursor
 #  Cursor is an AI-powered code editor. `.cursorignore` specifies files/directories to

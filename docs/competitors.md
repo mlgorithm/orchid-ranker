@@ -13,8 +13,8 @@ fitness progression, expertise-driven shopping, or curated content discovery.
 
 | Use case | Best first choice |
 |----------|-------------------|
-| You need a quick Python recommender with a simple fit/recommend API | Orchid `OrchidRecommender` or `implicit` |
-| You need progression metrics, live adaptation, and safe fallback | Orchid |
+| You need adaptive learning with learner state, prerequisites, progression reward, and live outcome updates | Orchid `AdaptiveLearningRecommender` |
+| You need fast generic collaborative filtering on implicit feedback | `implicit` |
 | You need dozens of research algorithms and standard benchmark protocols | RecBole |
 | You need GPU-scale feature engineering, training, and Triton serving | NVIDIA Merlin |
 | You need hybrid matrix factorization with user/item metadata | LightFM |
@@ -24,32 +24,33 @@ fitness progression, expertise-driven shopping, or curated content discovery.
 
 ## What Orchid is optimized for
 
-Orchid has three opinionated capabilities:
+Orchid has four opinionated capabilities:
 
-1. **Progression-aware ranking.** It can evaluate whether users are moving
+1. **Learner-state-aware ranking.** It estimates correctness and competence
+   from historical and live learner outcomes.
+2. **Progression-aware ranking.** It can evaluate whether users are moving
    through useful content, categories, or sophistication levels instead of only
    clicking the next item.
-2. **Streaming adaptation.** A fitted neural recommender can be promoted with
-   `as_streaming()` so recent outcomes affect the next rank call.
-3. **Operational safety.** Progression monitors, guardrails, and frozen
+3. **Live adaptation.** `observe()` lets the next recommendation change after
+   a response, completion, or failure.
+4. **Operational safety.** Progression monitors, guardrails, and frozen
    baseline fallback make adaptive behavior easier to review and operate.
 
 The core user journey is:
 
 ```python
-from orchid_ranker import OrchidRecommender
+from orchid_ranker import AdaptiveLearningRecommender
 
-rec = OrchidRecommender.from_interactions(df, strategy="als", rating_col="rating")
-batch_recs = rec.recommend(user_id=42, top_k=10, candidate_item_ids=candidates)
+rec = AdaptiveLearningRecommender(policy="auto").fit(
+    outcomes,
+    correct_col="correct",
+    concept_col="concept",
+    item_difficulty_col="difficulty",
+    prerequisite_by_concept={"fractions": ["number-sense"]},
+)
 
-adaptive = OrchidRecommender.from_interactions(
-    df,
-    strategy="neural_mf",
-    rating_col="rating",
-).as_streaming()
-
-adaptive.observe(user_id=42, item_id=7, correct=True, category="onboarding")
-live_recs = adaptive.rank(user_id=42, candidate_item_ids=candidates, top_k=10)
+ranked = rec.rank(user_id=42, candidate_item_ids=candidates, top_k=5)
+rec.observe(user_id=42, item_id=ranked[0].item_id, correct=True)
 ```
 
 ## How Orchid differs
@@ -58,7 +59,7 @@ live_recs = adaptive.rank(user_id=42, candidate_item_ids=candidates, top_k=10)
 |---------|--------------------|--------------------|
 | [RecBole](https://recbole.io/docs/) | PyTorch framework for reproducing and developing recommendation models, with broad algorithm and dataset coverage. | Orchid has fewer algorithms, but gives a product-oriented progression loop: fit, adapt, monitor, and fall back safely. |
 | [NVIDIA Merlin](https://developer.nvidia.com/nvidia-merlin/nvtabular) | GPU-accelerated recommender pipeline components for feature engineering, training, and production inference. | Orchid is not a GPU infrastructure stack. It is a Python runtime for progression-aware ranking and adaptive safety. |
-| [implicit](https://github.com/benfred/implicit) | Fast collaborative filtering for implicit feedback datasets. | Orchid includes simple recommender strategies, but adds candidate-pool ranking, streaming adaptation, progression metrics, and safety patterns. |
+| [implicit](https://github.com/benfred/implicit) | Fast collaborative filtering for implicit feedback datasets. | `implicit` is stronger for plain collaborative filtering. Orchid's reason to exist is adaptive learning: learner state, prerequisites, progression reward, live `observe()`, OPE, and guardrails. |
 | [LightFM](https://making.lyst.com/lightfm/docs/) | Hybrid recommendation algorithms for implicit and explicit feedback, with user and item metadata. | Orchid's wedge is user trajectory and operational safety, not only hybrid matrix factorization. |
 | [TensorFlow Recommenders](https://www.tensorflow.org/recommenders) | Keras-based library for building recommender system models across data preparation, modeling, training, evaluation, and deployment. | Orchid sits at a higher product layer: a ready recommender API plus progression-specific serving and monitoring behavior. |
 | [Microsoft Recommenders](https://github.com/recommenders-team/recommenders) | Jupyter notebook examples and best practices for recommendation systems. | Orchid is an importable runtime with a narrow progression thesis, not primarily an examples repository. |
@@ -79,10 +80,10 @@ Choose another stack when:
 
 The strongest public claim is:
 
-> Orchid Ranker is a progression-aware recommender library for products where
-> user outcomes matter more than the next click. It combines a simple
-> fit/recommend API with streaming adaptation, progression metrics, and safe
-> fallback patterns.
+> Orchid Ranker is an adaptive-learning recommender stack for products where
+> recommendations should make the user better, not merely more engaged. It
+> combines learner-state tracing, prerequisite-aware ranking, progression
+> reward, live outcome updates, OPE, and safe fallback patterns.
 
 That claim is clearer, narrower, and easier to prove than saying Orchid is a
 general replacement for RecBole, Merlin, implicit, LightFM, TensorFlow

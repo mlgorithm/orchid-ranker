@@ -4,11 +4,38 @@ Complete reference for public classes and functions in Orchid Ranker v0.5.0.
 
 ---
 
+## Start here: adaptive learning
+
+The primary public workflow is `AdaptiveLearningRecommender`: fit from learner
+outcomes, rank eligible learning items, observe the next outcome, and re-rank
+from updated learner state.
+
+```python
+from orchid_ranker import AdaptiveLearningRecommender
+
+rec = AdaptiveLearningRecommender(policy="auto").fit(
+    events,
+    correct_col="correct",
+    concept_col="skill_id",
+    item_difficulty_col="difficulty",
+    prerequisite_by_concept={"fractions": ["number-sense"]},
+)
+ranked = rec.rank("learner-7", [10, 20, 30], top_k=3)
+rec.observe("learner-7", ranked[0].item_id, correct=True)
+```
+
+Use `OrchidRecommender` when you only have ordinary user-item interactions and
+need a batch/generic recommender fallback.
+
+---
+
 ## orchid_ranker.recommender
 
 ### OrchidRecommender
 
-High-level, Surprise-style recommender supporting all built-in strategies.
+Batch/generic recommender supporting all built-in strategies. This is the
+fallback path for ordinary user-item interactions without learning concepts,
+difficulty, prerequisites, or live outcome state.
 
 ```python
 class OrchidRecommender:
@@ -61,6 +88,274 @@ class Recommendation:
 STRATEGY_GUIDE: Dict[str, str]
 # Maps strategy name to human-readable description
 ```
+
+---
+
+## orchid_ranker.adaptive_learning
+
+High-level adaptive-learning recommender that composes KT prediction,
+progression reward, delayed-gain priors, support-aware reward modeling, and
+optional prerequisite gating.
+
+```python
+class AdaptiveLearningRecommender:
+    def __init__(self, config: AdaptiveLearningConfig | None = None, **overrides)
+    def fit(
+        self,
+        interactions,
+        *,
+        user_col="user_id",
+        item_col="item_id",
+        correct_col="correct",
+        timestamp_col=None,
+        concept_col=None,
+        item_difficulty_col=None,
+        item_difficulty_map=None,
+        concept_by_item=None,
+        prerequisite_by_concept=None,
+    )
+    def rank(self, user_id, candidate_item_ids, *, top_k=5) -> list[AdaptiveLearningRecommendation]
+    def observe(self, user_id, item_id, correct)
+```
+
+`policy="auto"` resolves to `ProgressionValuePolicy`, the stable default for
+adaptive-learning serving. `DelayedGainValuePolicy` and
+`SupportConstrainedDelayedGainPolicy` remain explicit opt-ins because they need
+stronger logged-support and reward-model calibration evidence. The policy state
+is warm-started from historical outcomes, so prerequisite gating and competence
+estimates reflect the learner's prior history before the first live `observe`.
+
+```python
+from orchid_ranker import AdaptiveLearningRecommender
+
+rec = AdaptiveLearningRecommender(
+    tracer_model="akt",
+    policy="auto",
+    epochs=2,
+    d_model=32,
+).fit(
+    events,
+    timestamp_col="timestamp",
+    concept_col="skill_id",
+    item_difficulty_col="difficulty",
+)
+
+ranked = rec.rank("learner-7", [10, 20, 30], top_k=3)
+rec.observe("learner-7", ranked[0].item_id, correct=True)
+```
+
+### AdaptiveLearningRecommendation
+
+```python
+@dataclass
+class AdaptiveLearningRecommendation:
+    item_id: Any
+    score: float
+    p_correct: float
+    policy: str
+    difficulty: float | None = None
+    concept_id: Any | None = None
+    competence: float | None = None
+    expected_reward: float | None = None
+    delayed_gain_prior: float | None = None
+    model_prediction: float | None = None
+    support_penalty: float = 0.0
+    prerequisites_met: bool = True
+```
+
+Use `diagnostics()` to log the resolved tracer/policy, concept and item counts,
+delayed-gain prior coverage, and reward-model report.
+
+---
+
+## orchid_ranker.scenarios
+
+Scenario-selection helpers for choosing the right Orchid workflow before
+instantiating a model.
+
+```python
+from orchid_ranker import available_scenarios, recommend_scenarios
+
+matches = recommend_scenarios(
+    has_outcomes=True,
+    has_concepts=True,
+    has_difficulty=True,
+    has_prerequisites=True,
+    needs_live_adaptation=True,
+    use_case="adaptive math practice",
+)
+
+top = matches[0]
+print(top.scenario.id)
+print(top.scenario.entrypoints)
+```
+
+```python
+@dataclass(frozen=True)
+class ScenarioRecipe:
+    id: str
+    name: str
+    summary: str
+    use_when: str
+    signals: tuple[str, ...]
+    algorithms: tuple[str, ...]
+    entrypoints: tuple[str, ...]
+    docs_anchor: str
+    tags: tuple[str, ...] = ()
+
+@dataclass(frozen=True)
+class ScenarioFit:
+    scenario: ScenarioRecipe
+    score: float
+    reasons: tuple[str, ...]
+```
+
+`available_scenarios()` returns the stable catalog. `recommend_scenarios()`
+scores the catalog from product-level booleans such as `has_outcomes`,
+`has_concepts`, `needs_live_adaptation`, `needs_safe_rollout`,
+`has_new_users`, and `is_regulated`.
+
+---
+
+## orchid_ranker.ope
+
+Offline policy evaluation utilities for adaptive rollout decisions.
+
+```python
+def evaluate_logged_policy(
+    events: pd.DataFrame,
+    *,
+    reward_col: str,
+    propensity_col: str,
+    target_probability_col: str,
+    target_value_col: str | None = None,
+    logged_action_value_col: str | None = None,
+    max_weight: float | None = None,
+) -> LoggedPolicyReport
+```
+
+```python
+def compare_logged_policies(
+    events: pd.DataFrame,
+    *,
+    reward_col: str,
+    propensity_col: str,
+    target_probability_col: str,
+    baseline_probability_col: str,
+    target_value_col: str | None = None,
+    baseline_value_col: str | None = None,
+    logged_action_value_col: str | None = None,
+    max_weight: float | None = None,
+) -> PolicyComparisonReport
+```
+
+Reports include IPS, SNIPS, direct-method and doubly robust estimates when the
+required columns are supplied, plus coverage, effective sample size, weight
+diagnostics, and confidence intervals.
+
+---
+
+## orchid_ranker.progression_reward / learning_policy
+
+Progression-aware policy scoring for adaptive sequencing.
+
+```python
+class ProgressionRewardConfig:
+    target_correct: float = 0.70
+    stretch_margin: float = 0.15
+    stretch_width: float = 0.30
+    default_competence: float = 0.50
+    correctness_weight: float = 0.25
+    mastery_gain_weight: float = 1.00
+    stretch_weight: float = 0.75
+    difficulty_weight: float = 0.20
+    easy_penalty_weight: float = 0.35
+    hard_penalty_weight: float = 0.15
+    repetition_penalty_weight: float = 0.25
+    easy_correct_threshold: float = 0.88
+    hard_correct_threshold: float = 0.25
+    incorrect_attempt_credit: float = 0.10
+    repetition_window: int = 3
+    clip_reward: bool = True
+```
+
+```python
+class ProgressionValuePolicy:
+    def rank(self, user_id, candidate_item_ids, *, top_k=5) -> list
+    def observe(self, user_id, item_id, correct)
+
+class DelayedGainValuePolicy:
+    def rank(self, user_id, candidate_item_ids, *, top_k=5) -> list
+    def observe(self, user_id, item_id, correct)
+
+class SupportConstrainedDelayedGainPolicy:
+    def rank(self, user_id, candidate_item_ids, *, top_k=5) -> list
+    def observe(self, user_id, item_id, correct)
+
+class DelayedGainRewardModel:
+    def predict_one(self, features) -> float
+    def predict_many(self, feature_rows) -> list[float]
+
+def build_delayed_gain_training_frame(split, *, concept_col, **kwargs) -> pd.DataFrame
+def fit_delayed_gain_reward_model_from_frame(
+    examples,
+    *,
+    example_weighting="uniform",
+    sample_weight_col=None,
+    cross_fit_folds=1,
+) -> DelayedGainRewardModel
+def diagnose_delayed_gain_predictions(labels, predictions, *, n_bins=10) -> dict
+```
+
+Use `ProgressionValuePolicy` when correctness alone is too shallow. It ranks
+items using expected progression reward, including target-correctness fit,
+stretch-zone fit, mastery-gain potential, difficulty, and repetition/easy-item
+penalties.
+
+Use `DelayedGainValuePolicy` when you have concept labels and want ranking to
+prefer items that historically preceded future same-concept improvement. It
+combines training-only delayed-gain priors with the progression reward.
+
+Use `SupportConstrainedDelayedGainPolicy` when you also have a fitted
+`DelayedGainRewardModel` and want to penalize items with weak logged support.
+The benchmark path exposes this as `--policy support_delayed_gain`.
+
+For direct reward-model work, `build_delayed_gain_training_frame` exposes the
+same feature frame used by the benchmark. `fit_delayed_gain_reward_model_from_frame`
+supports uniform weighting, support-inverse weighting, and MRDR-style weighting
+when `target_probability` and `logging_propensity` columns are available.
+`diagnose_delayed_gain_predictions` reports RMSE, MAE, calibration error, and
+decile lift for validation or target-policy action slices.
+
+---
+
+## orchid_ranker.pykt_bridge
+
+Interoperability helpers for pyKT-style knowledge-tracing workflows.
+
+```python
+def export_pykt_sequences(
+    interactions: pd.DataFrame,
+    output_path: str | Path,
+    *,
+    user_col: str = "user_id",
+    item_col: str = "item_id",
+    correct_col: str = "correct",
+    concept_col: str | None = None,
+    timestamp_col: str | None = None,
+    duration_col: str | None = None,
+) -> list[PyKTSequence]
+```
+
+```python
+class PyKTPredictionAdapter:
+    def predict_many(self, user_id, item_ids) -> dict
+    def predict_correct(self, user_id, item_id) -> float
+```
+
+Use `export_pykt_sequences` to write Orchid interactions into pyKT's six-line
+learner-sequence format. Use `PyKTPredictionAdapter` to feed exported pyKT
+probability tables into `KTValuePolicy` and OPE.
 
 ---
 

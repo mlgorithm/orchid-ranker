@@ -1,0 +1,67 @@
+{
+  "assumptions": {
+    "baseline_policy": "random_uniform_candidate",
+    "candidate_size": 3.0,
+    "logging": "synthetic_uniform_over_candidate_set",
+    "max_events": null,
+    "reward": "correct"
+  },
+  "candidate_size_mean": 3.0,
+  "comparison": {
+    "baseline": {
+      "ci_high": 1.1008381766734834,
+      "ci_low": 0.4590964766682867,
+      "clipped_fraction": 0.0,
+      "coverage": 1.0,
+      "direct_method": 0.36590219661593437,
+      "doubly_robust": 0.7799673266708851,
+      "effective_sample_size": 8.0,
+      "estimator": "doubly_robust",
+      "ips": 0.75,
+      "logging_reward": 0.75,
+      "n_events": 8,
+      "snips": 0.75,
+      "standard_error": 0.1637126256061779,
+      "value": 0.7799673266708851,
+      "weight_max": 1.0,
+      "weight_mean": 1.0
+    },
+    "ci_high": -0.027204956462768604,
+    "ci_low": -0.6587821882458649,
+    "estimator": "doubly_robust",
+    "standard_error": 0.16111960137147852,
+    "target": {
+      "ci_high": 0.44784818332952986,
+      "ci_low": 0.4260993253036069,
+      "clipped_fraction": 0.0,
+      "coverage": 0.0,
+      "direct_method": 0.4369737543165684,
+      "doubly_robust": 0.4369737543165684,
+      "effective_sample_size": 0.0,
+      "estimator": "doubly_robust",
+      "ips": 0.0,
+      "logging_reward": 0.75,
+      "n_events": 8,
+      "snips": null,
+      "standard_error": 0.005548280018784839,
+      "value": 0.4369737543165684,
+      "weight_max": 0.0,
+      "weight_mean": 0.0
+    },
+    "uplift": -0.3429935723543167
+  },
+  "logging_reward": 0.75,
+  "n_events": 8,
+  "random_match_probability": 0.3333333333333333,
+  "random_value_mean": 0.36590219661593437,
+  "split": {
+    "test_events": 8.0,
+    "test_items": 2.0,
+    "test_users": 4.0,
+    "train_events": 12.0,
+    "train_items": 3.0,
+    "train_users": 4.0
+  },
+  "target_match_rate": 0.0,
+  "target_value_mean": 0.4369737543165684
+}

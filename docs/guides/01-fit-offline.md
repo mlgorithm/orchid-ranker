@@ -1,10 +1,11 @@
 # Guide 1: Fit a batch recommender
 
-Orchid Ranker ships a single entry point -- `OrchidRecommender` -- that wraps
-ten ranking strategies behind one API. This guide walks through the minimal
-path: load interactions, fit, recommend, predict, and save. No streaming, no
-monitoring, just a working batch recommender you can query from a notebook or a
-cron job.
+`OrchidRecommender` is Orchid's batch fallback for ordinary user-item data. Use
+it when you do not yet have learning concepts, difficulty, prerequisites, or
+live outcome updates. For the primary adaptive-learning workflow, start with
+`AdaptiveLearningRecommender` in the [Quickstart](../quickstart.md). This guide
+walks through the minimal batch path: load interactions, fit, recommend,
+predict, and save.
 
 ## Install
 
@@ -80,5 +81,8 @@ with one-line descriptions.
 
 ---
 
-You can stop here and have a working batch recommender. For real-time
-adaptation, continue to [Guide 2: Serve a streaming recommender](02-serve-streaming.md).
+You can stop here and have a working batch recommender. For adaptive learning
+with learner state and live outcomes, use
+`examples/adaptive_learning_quickstart.py`. For generic real-time adaptation
+without learning metadata, continue to
+[Guide 2: Serve a streaming recommender](02-serve-streaming.md).

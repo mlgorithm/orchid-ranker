@@ -4,7 +4,29 @@ This document summarises the core building blocks exposed by the Orchid Ranker
 library. It is intentionally lightweight so scientists and engineers can locate
 entry points quickly.
 
-## Recommenders
+## Adaptive-Learning Stack
+
+- `orchid_ranker.AdaptiveLearningRecommender`: primary API for fit -> rank ->
+  observe adaptive-learning loops. It composes KT prediction, progression
+  reward, prerequisite gating, and live policy state.
+- `orchid_ranker.scenarios.recommend_scenarios`: choose an Orchid workflow
+  from product/data signals before picking a model.
+- `orchid_ranker.kt.AKTTracer`: difficulty-aware tracer for candidate learning
+  items from a learner's recent interaction sequence.
+- `orchid_ranker.kt.SAKTTracer`: compact SAKT-style tracer when difficulty
+  metadata is unavailable.
+- `orchid_ranker.learning_policy.ProgressionValuePolicy`: stable default policy
+  for adaptive-learning serving. It scores target-correctness fit, stretch-zone
+  fit, mastery-gain potential, difficulty, and repetition/easy-item penalties.
+- `orchid_ranker.learning_policy.DelayedGainValuePolicy`: experimental
+  delayed-gain-aware policy using training-only same-concept gain priors.
+- `orchid_ranker.learning_policy.SupportConstrainedDelayedGainPolicy`: learned
+  delayed-gain reward policy with support penalties for low-coverage actions.
+- `orchid_ranker.pykt_bridge`: export Orchid interactions to pyKT sequence
+  format and reuse pyKT prediction tables behind Orchid policies and OPE.
+
+## Generic Recommender Fallbacks
+
 - `orchid_ranker.OrchidRecommender`: Surprise-style API with strategies such as
   `explicit_mf` (FunkSVD-style explicit MF), `als`, `neural_mf` (with `loss="bce"|"bpr"|"softmax"`),
   `implicit_als`, `implicit_bpr`, `linucb`, `user_knn`, `popularity`, and `random`.
@@ -26,6 +48,20 @@ entry points quickly.
   metrics for production monitoring.
 - `orchid_ranker.live_metrics.ProgressionGuardrail` and
   `orchid_ranker.safety.SafeSwitchDR`: fallback controls for adaptive rollouts.
+- `orchid_ranker.ope.evaluate_logged_policy`: IPS, SNIPS, direct-method, and
+  doubly robust value estimates from logged propensities.
+- `orchid_ranker.ope.compare_logged_policies`: paired target-vs-baseline policy
+  uplift with confidence intervals and weight diagnostics.
+
+## Knowledge Tracing Benchmarks
+
+- `orchid_ranker.kt.build_sakt_examples`: leakage-safe sequence builder for
+  next-response training examples.
+- `orchid_ranker.kt_benchmark`: time-ordered replay evaluation for
+  EdNet/ASSISTments-style CSVs.
+- `orchid_ranker.learning_policy.KTValuePolicy`: transparent next-item policy
+  using predicted correctness, stretch fit, uncertainty, and expected-gain
+  proxy.
 
 ## Agentic Simulation
 - `orchid_ranker.agents.MultiUserOrchestrator`: primary orchestrator coordinating

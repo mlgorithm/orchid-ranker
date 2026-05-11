@@ -3,7 +3,9 @@
 ## Semantic Versioning
 - The `orchid-ranker` package follows semantic versioning (MAJOR.MINOR.PATCH).
 - Breaking API changes are introduced only in MAJOR releases, with deprecation notices provided at least one MINOR release beforehand.
-- Public interfaces include the `OrchidRecommender` class, experiment runner, benchmarking scripts, and documented extras.
+- Public interfaces include `AdaptiveLearningRecommender`, `OrchidRecommender`,
+  scenario-selection helpers, experiment runners, benchmarking scripts, and
+  documented extras.
 
 ## Supported Runtime Matrix
 - Python: 3.11 – 3.13 (verified in CI across CPython builds).

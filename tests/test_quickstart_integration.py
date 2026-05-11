@@ -85,3 +85,47 @@ class TestQuickstartIntegration:
         )
         assert result.returncode == 0, f"quickstart.py failed:\n{result.stderr}"
         assert "Quickstart complete" in result.stdout
+
+    def test_adaptive_learning_quickstart_script_runs(self):
+        """The adaptive-learning quickstart executes without error."""
+        import subprocess
+        import sys
+        result = subprocess.run(
+            [sys.executable, "examples/adaptive_learning_quickstart.py"],
+            capture_output=True, text=True, timeout=60,
+        )
+        assert result.returncode == 0, f"adaptive_learning_quickstart.py failed:\n{result.stderr}"
+        assert "Adaptive learning quickstart complete" in result.stdout
+
+    def test_offline_policy_evaluation_quickstart_script_runs(self):
+        """The OPE quickstart executes without error."""
+        import subprocess
+        import sys
+        result = subprocess.run(
+            [sys.executable, "examples/offline_policy_evaluation_quickstart.py"],
+            capture_output=True, text=True, timeout=60,
+        )
+        assert result.returncode == 0, f"offline_policy_evaluation_quickstart.py failed:\n{result.stderr}"
+        assert '"uplift": 0.5' in result.stdout
+
+    def test_pykt_bridge_quickstart_script_runs(self):
+        """The pyKT bridge quickstart executes without error."""
+        import subprocess
+        import sys
+        result = subprocess.run(
+            [sys.executable, "examples/pykt_bridge_quickstart.py"],
+            capture_output=True, text=True, timeout=60,
+        )
+        assert result.returncode == 0, f"pykt_bridge_quickstart.py failed:\n{result.stderr}"
+        assert "pyKT bridge quickstart complete" in result.stdout
+
+    def test_progression_policy_quickstart_script_runs(self):
+        """The progression policy quickstart executes without error."""
+        import subprocess
+        import sys
+        result = subprocess.run(
+            [sys.executable, "examples/progression_policy_quickstart.py"],
+            capture_output=True, text=True, timeout=60,
+        )
+        assert result.returncode == 0, f"progression_policy_quickstart.py failed:\n{result.stderr}"
+        assert "Progression policy quickstart complete" in result.stdout

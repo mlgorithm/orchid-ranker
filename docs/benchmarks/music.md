@@ -78,17 +78,18 @@ keeps the user listening, while a bad one causes them to skip away.
 ### What to look for
 
 1. **Surv@10 >= 10% above best non-Orchid baseline** is the acceptance
-   criterion from the implementation plan. If Orchid Adaptive achieves this,
-   the generalisation thesis holds across domains (movies -> music).
+   criterion for this specialty benchmark. If Orchid Adaptive achieves this,
+   the music module has evidence as an adjacent progression workflow; it is
+   not the core adaptive-learning proof point.
 2. **NDCG@10 parity** -- Orchid should be *close* to the best baseline on
    pure ranking quality. Winning here is a bonus, not the goal.
 3. **Coverage and novelty** -- Orchid's progression-aware scoring should
    naturally diversify recommendations, leading to higher coverage and
    novelty than pure accuracy-optimised systems. This is especially important
    for music, where discovery of new artists drives long-term engagement.
-4. **Cross-domain consistency** -- comparing this table with the MovieLens-1M
-   results shows whether Orchid's advantage generalises from explicit-rating
-   movie data to implicit-feedback music data.
+4. **Adjacent-domain consistency** -- comparing this table with MovieLens-1M
+   shows whether Orchid's generic streaming fallback and progression metrics
+   behave sensibly outside education-style learner outcomes.
 
 ### Music-specific considerations
 

@@ -58,11 +58,12 @@ The outcome tracing layer (BKT) runs per-category: if items are tagged with cate
 
 ## Evidence
 
-Progression-aware recommendation is not a theoretical exercise. In our benchmark on the MovieLens-1M dataset (adapted with synthetic difficulty labels and category tags to simulate a progression domain), Orchid achieved a 12% improvement in session-N survival rate compared to a standard ALS baseline tuned for NDCG.
-
-Session-N survival is the metric that matters here. It measures the probability that a user returns for their Nth session, and it is a direct proxy for the long-term retention that progression domains care about. A system that recommends items the user can already do will show strong session-1 and session-2 survival (the user feels competent) but declining session-5+ survival (the user gets bored). A system that recommends items that are too hard will show the opposite pattern: low early survival as frustrated users drop out. Orchid's stretch-zone targeting produces a flatter, higher survival curve across session horizons.
-
-These numbers are from a controlled benchmark, not a production A/B test, and should be treated accordingly. The magnitude of the effect will vary with the domain, the quality of the difficulty labels, and the fidelity of the prerequisite graph. But the direction is consistent: modeling the user's trajectory and recommending into the stretch zone improves retention in progression domains.
+Progression-aware recommendation is not a theoretical exercise. The current
+adaptive-learning evidence is directly aligned with the product claim: AKT
+improves held-out correctness prediction over an item-mean baseline on
+ASSISTments, and `ProgressionValuePolicy` shows positive offline
+policy-evaluation uplift on a progression reward. Delayed-gain policies remain
+experimental until reward-model calibration and logged support improve.
 
 ## Getting started
 
@@ -70,26 +71,28 @@ A minimal Orchid workflow fits in ten lines:
 
 ```python
 import pandas as pd
-from orchid_ranker import OrchidRecommender
+from orchid_ranker import AdaptiveLearningRecommender
 
-# Fit on historical interactions
-rec = OrchidRecommender.from_interactions(interactions, strategy="als")
+events = pd.read_csv("learner_outcomes.csv")  # user_id, item_id, correct, concept, difficulty
 
-# Batch recommendations
-top5 = rec.recommend(user_id=0, top_k=5)
-
-# Wrap for streaming adaptation (requires the high-level neural_mf strategy)
-rec_neural = OrchidRecommender.from_interactions(interactions, strategy="neural_mf")
-ranker = rec_neural.as_streaming(lr=0.05, l2=1e-3)
+rec = AdaptiveLearningRecommender(policy="auto").fit(
+    events,
+    correct_col="correct",
+    concept_col="concept",
+    item_difficulty_col="difficulty",
+    prerequisite_by_concept={"fractions": ["number-sense"]},
+)
 
 # Each new outcome updates the user model inline
-ranker.observe(user_id=0, item_id=42, correct=True, category="algebra")
+ranked = rec.rank(user_id=0, candidate_item_ids=[101, 201, 202], top_k=3)
+rec.observe(user_id=0, item_id=ranked[0].item_id, correct=True)
 
 # Next rank call reflects the observation
-ranked = ranker.rank(user_id=0, candidate_item_ids=[1, 2, 3, 42, 99], top_k=3)
+updated = rec.rank(user_id=0, candidate_item_ids=[101, 201, 202], top_k=3)
 ```
 
-The streaming path is optional. If your use case does not require sub-second adaptation, the batch `recommend()` API works out of the box with any strategy -- ALS, explicit MF, BPR, user-KNN, or popularity.
+If you only have ordinary user-item interactions and no concepts, difficulty,
+or prerequisites, use `OrchidRecommender` as the batch/generic fallback.
 
 For production deployments, add a progression guardrail:
 
@@ -101,9 +104,9 @@ guardrail = ProgressionGuardrail(monitor)
 
 # Before each recommendation
 if guardrail.evaluate():
-    recs = ranker.rank(user_id, candidate_item_ids=candidates, top_k=5)
+    recs = rec.rank(user_id, candidate_item_ids=candidates, top_k=5)
 else:
-    recs = rec.baseline_rank(user_id, top_k=5, candidate_item_ids=candidates)
+    recs = baseline_rec.baseline_rank(user_id, top_k=5, candidate_item_ids=candidates)
 ```
 
 This pattern -- adaptive policy gated by a progression guardrail with a frozen fallback -- is the recommended deployment topology. It gives you the upside of online adaptation with a hard safety bound: if the adaptive path starts hurting users, the system reverts to the offline model automatically.
@@ -128,12 +131,13 @@ Orchid Ranker is open-source and available on PyPI:
 
 ```bash
 pip install orchid-ranker        # core toolkit (BKT, dependency graphs, evaluation)
-pip install orchid-ranker[ml]    # adds PyTorch for ML recommender strategies
+pip install orchid-ranker[ml]    # adds PyTorch for AdaptiveLearningRecommender
 pip install orchid-ranker[all]   # everything (ML, viz, agentic, observability)
 ```
 
-- **GitHub**: [github.com/your-org/orchid-ranker](https://github.com/your-org/orchid-ranker)
+- **GitHub**: [github.com/mlgorithm/orchid-ranker](https://github.com/mlgorithm/orchid-ranker)
 - **Documentation**: See the `docs/` directory for API reference, deployment guides, and tutorials.
-- **Examples**: The `examples/` directory contains runnable scripts for batch recommendation, streaming integration, and safety guardrails.
+- **Examples**: Start with `examples/adaptive_learning_quickstart.py`, then use
+  scenario selection, OPE, and safety examples as needed.
 
 We welcome contributions, bug reports, and feedback. If you are building a progression-aware system and want to talk about your use case, open an issue or reach out.
