@@ -1,4 +1,4 @@
-"""Orchid Ranker -- adaptive-learning recommender stack.
+"""Orchid Ranker -- adaptive-learning engine.
 
 Build systems that choose the next exercise, lesson, task, or review item from
 learner state, catalog structure, progression reward, and live outcome updates.
@@ -6,7 +6,8 @@ learner state, catalog structure, progression reward, and live outcome updates.
 Public API is organized into three stability tiers:
 
 **Tier 1 -- Stable** (semver-guaranteed, safe for production):
-    AdaptiveLearningRecommender, OrchidRecommender, Recommendation,
+    AdaptiveLearningEngine, AdaptiveLearningRecommender,
+    OrchidRecommender, Recommendation,
     BayesianKnowledgeTracing,
     ProficiencyTracker, ForgettingCurve, DependencyGraph,
     ProgressionRecommender, save_model, load_model, cross_validate,
@@ -34,7 +35,7 @@ Public API is organized into three stability tiers:
 Installation extras
 -------------------
 ``pip install orchid-ranker``          -- core progression toolkit (BKT, dependency graph, evaluation)
-``pip install orchid-ranker[ml]``      -- adds PyTorch for AdaptiveLearningRecommender and ML strategies
+``pip install orchid-ranker[ml]``      -- adds PyTorch for AdaptiveLearningEngine and ML strategies
 ``pip install orchid-ranker[implicit]`` -- adds implicit ALS/BPR strategies
 ``pip install orchid-ranker[all]``     -- everything (ML, viz, agentic, observability, connectors)
 """
@@ -103,6 +104,7 @@ from .scenarios import (
 _TORCH_LAZY = {
     # Tier 1 -- requires torch
     "AdaptiveLearningConfig": (".adaptive_learning", "AdaptiveLearningConfig"),
+    "AdaptiveLearningEngine": (".adaptive_learning", "AdaptiveLearningRecommender"),
     "AdaptiveLearningRecommendation": (".adaptive_learning", "AdaptiveLearningRecommendation"),
     "AdaptiveLearningRecommender": (".adaptive_learning", "AdaptiveLearningRecommender"),
     "OrchidRecommender": (".recommender", "OrchidRecommender"),
@@ -221,6 +223,7 @@ __all__ = [
     # Tier 1 -- Stable (generic names)
     "__version__",
     "AdaptiveLearningConfig",
+    "AdaptiveLearningEngine",
     "AdaptiveLearningRecommendation",
     "AdaptiveLearningRecommender",
     "OrchidRecommender",

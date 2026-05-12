@@ -12,12 +12,10 @@ from __future__ import annotations
 
 import argparse
 import json
-import os
 import random
+import sys
 from pathlib import Path
 from typing import Optional
-
-import sys
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 SRC_PATH = PROJECT_ROOT / "src"

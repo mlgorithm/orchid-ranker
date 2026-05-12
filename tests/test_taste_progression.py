@@ -166,6 +166,9 @@ class TestTasteProgressionRanker:
         assert len(recs) == 3
         assert all(isinstance(r, tuple) and len(r) == 2 for r in recs)
 
+    def test_top_k_zero_returns_empty(self, ranker) -> None:
+        assert ranker.recommend(user_id=1, top_k=0, candidate_item_ids=[0, 1, 2]) == []
+
     def test_observe_updates_taste(self, ranker) -> None:
         level_before = ranker.taste_level(user_id=1, category="wine")
         for _ in range(10):
@@ -199,6 +202,12 @@ class TestTasteProgressionRanker:
         result = ranker.observe(user_id=1, item_id=0, category="wine",
                                 purchased=False)
         assert result["positive"] is False
+
+    def test_negative_high_sophistication_does_not_raise_taste_ema(self, ranker) -> None:
+        before = ranker.taste_level(user_id=1, category="coffee")
+        for _ in range(3):
+            ranker.observe(user_id=1, item_id=5, category="coffee", purchased=True, returned=True)
+        assert ranker.taste_level(user_id=1, category="coffee") < before
 
     def test_stretch_zone_favours_matching_sophistication(self, ranker) -> None:
         """A user with low taste should rank simple items higher."""
@@ -246,6 +255,27 @@ class TestTasteProgressionRanker:
         ranker = TasteProgressionRanker()
         with pytest.raises(ValueError, match="candidate_item_ids"):
             ranker.recommend(user_id=1, top_k=5)
+
+    def test_omitted_candidates_come_from_recommender(self) -> None:
+        class MockRecommender:
+            def __init__(self):
+                self.calls = []
+
+            def recommend(self, user_id, top_k, candidate_item_ids=None):
+                self.calls.append(candidate_item_ids)
+                items = candidate_item_ids or [42, 7]
+                return [
+                    type("Rec", (), {"item_id": item_id, "score": 1.0 / (idx + 1)})()
+                    for idx, item_id in enumerate(items)
+                ][:top_k]
+
+        recommender = MockRecommender()
+        ranker = TasteProgressionRanker(recommender=recommender)
+
+        recs = ranker.recommend(user_id=1, top_k=2)
+
+        assert {item_id for item_id, _score in recs} == {42, 7}
+        assert recommender.calls[0] is None
 
     def test_repr(self, ranker) -> None:
         r = repr(ranker)

@@ -256,6 +256,7 @@ class AdaptiveLearningRecommender:
                 difficulty_by_item=self.difficulty_by_item_,
                 concept_by_item=self.concept_by_item_,
                 config=self.progression_config_,
+                correct_threshold=self.config.correct_threshold,
             ).seed_history(
                 work,
                 user_col=user_col,
@@ -456,6 +457,7 @@ class AdaptiveLearningRecommender:
                 item_support=self.item_support_,
                 concept_support=self.concept_support_,
                 config=self.progression_config_,
+                correct_threshold=self.config.correct_threshold,
             )
         if policy == "delayed_gain":
             priors = self.delayed_gain_priors_ or {}
@@ -467,6 +469,7 @@ class AdaptiveLearningRecommender:
                 concept_gain_prior=priors.get("concept_gain_prior", {}),
                 global_gain_prior=float(priors.get("global_gain_prior", 0.5)),
                 config=self.progression_config_,
+                correct_threshold=self.config.correct_threshold,
             )
         if policy == "progression":
             return ProgressionValuePolicy(
@@ -474,6 +477,7 @@ class AdaptiveLearningRecommender:
                 difficulty_by_item=self.difficulty_by_item_,
                 concept_by_item=self.concept_by_item_,
                 config=self.progression_config_,
+                correct_threshold=self.config.correct_threshold,
             )
         return KTValuePolicy(
             self.tracer_,

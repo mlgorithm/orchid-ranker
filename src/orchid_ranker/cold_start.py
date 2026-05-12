@@ -450,12 +450,21 @@ class ColdStartBridge:
         list of (item_id, score)
             Sorted by blended score descending.
         """
+        if top_k <= 0:
+            return []
+
         alpha = self.warmth(user_id)
 
         if candidate_item_ids is None:
             candidates = list(range(self._index.num_items))
         else:
             candidates = [int(c) for c in candidate_item_ids]
+
+        history = set(self._user_interactions.get(int(user_id), []))
+        explicit_seeds = set(int(seed) for seed in (seed_item_ids or []))
+        exclude = history | explicit_seeds
+        if exclude:
+            candidates = [candidate for candidate in candidates if candidate not in exclude]
 
         if not candidates:
             return []
@@ -476,7 +485,7 @@ class ColdStartBridge:
         np.nan_to_num(blended, copy=False, nan=0.0, posinf=0.0, neginf=0.0)
 
         # --- Top-k selection ---
-        k = min(top_k, len(candidates))
+        k = min(int(top_k), len(candidates))
         top_idx = np.argpartition(blended, -k)[-k:]
         top_idx = top_idx[np.argsort(blended[top_idx])[::-1]]
 
@@ -510,7 +519,7 @@ class ColdStartBridge:
 
         if seeds:
             # Score all items, then pick candidates
-            all_scores = self._index.user_profile_scores(seeds)
+            all_scores = self._index.user_profile_scores(seeds, exclude=set(int(seed) for seed in seeds))
             content_scores = np.array(
                 [all_scores[c] if 0 <= c < len(all_scores) else 0.0 for c in candidates],
                 dtype=np.float32,

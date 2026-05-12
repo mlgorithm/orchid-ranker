@@ -405,16 +405,19 @@ def _build_training_examples(
         item_col=split.item_col,
         label_col="__orchid_label__",
     )
-    global_label_prior = float(train["__orchid_label__"].mean())
-    item_accuracy = train.groupby(split.item_col)["__orchid_label__"].mean().to_dict()
-    concept_accuracy = train.groupby(concept_col)["__orchid_label__"].mean().to_dict()
-    item_support = train.groupby(split.item_col).size().to_dict()
-    concept_support = train.groupby(concept_col).size().to_dict()
-    user_concept_prior = train.groupby([split.user_col, concept_col])["__orchid_label__"].mean().to_dict()
+    global_label_prior = 0.5
 
     rows = []
     histories: dict[Any, dict[Any, list[int]]] = {}
     recent_concepts: dict[Any, list[Any]] = {}
+    item_success: dict[Any, float] = {}
+    item_count: dict[Any, int] = {}
+    concept_success: dict[Any, float] = {}
+    concept_count: dict[Any, int] = {}
+    user_concept_success: dict[tuple[Any, Any], float] = {}
+    user_concept_count: dict[tuple[Any, Any], int] = {}
+    total_success = 0.0
+    total_count = 0
     for user_id, group in train.groupby(split.user_col, sort=False):
         user_history = histories.setdefault(user_id, {})
         user_recent = recent_concepts.setdefault(user_id, [])
@@ -423,24 +426,35 @@ def _build_training_examples(
         for pos, row in enumerate(records):
             item_id = row[split.item_col]
             concept = row[concept_col]
+            label = int(row["__orchid_label__"])
+            item_prior = item_success.get(item_id, 0.0) / item_count[item_id] if item_count.get(item_id, 0) else global_label_prior
+            concept_prior = (
+                concept_success.get(concept, 0.0) / concept_count[concept]
+                if concept_count.get(concept, 0)
+                else global_label_prior
+            )
+            user_concept_key = (row[split.user_col], concept)
+            prior_success = user_concept_success.get(user_concept_key, 0.0)
+            prior_count = user_concept_count.get(user_concept_key, 0)
+            user_concept_label_prior = (
+                prior_success / prior_count
+                if prior_count
+                else concept_prior
+            )
             future = future_by_pos.get(pos)
             if future is not None:
-                full_prior = user_concept_prior.get(
-                    (row[split.user_col], concept),
-                    concept_accuracy.get(concept, global_label_prior),
-                )
                 future_mean, _future_count = future
-                reward_label = float(np.clip(0.5 + 0.5 * (future_mean - float(full_prior)), 0.0, 1.0))
+                reward_label = float(np.clip(0.5 + 0.5 * (future_mean - float(user_concept_label_prior)), 0.0, 1.0))
                 competence = _competence(user_history.get(concept, []), default=config.default_competence)
                 p_correct = tracer_predictions.get(
                     int(row["__orchid_row_id__"]),
                     _clamp01(
                         0.55 * competence
-                        + 0.25 * float(item_accuracy.get(item_id, global_label_prior))
-                        + 0.20 * float(concept_accuracy.get(concept, global_label_prior))
+                        + 0.25 * float(item_prior)
+                        + 0.20 * float(concept_prior)
                     ),
                 )
-                difficulty = _difficulty(row, item_difficulty_col, item_accuracy.get(item_id, global_label_prior))
+                difficulty = _difficulty(row, item_difficulty_col, item_prior)
                 repetition = sum(1 for seen in user_recent[-max(1, config.repetition_window):] if seen == concept)
                 progression = expected_progression_reward(
                     p_correct=p_correct,
@@ -472,12 +486,22 @@ def _build_training_examples(
                             progression_stretch_fit=progression.stretch_fit,
                             progression_mastery_gain=progression.mastery_gain,
                             delayed_gain_prior=prior,
-                            item_support=float(item_support.get(item_id, 0.0)),
-                            concept_support=float(concept_support.get(concept, 0.0)),
+                            item_support=float(item_count.get(item_id, 0)),
+                            concept_support=float(concept_count.get(concept, 0)),
                         ),
                     }
                 )
-            user_history.setdefault(concept, []).append(int(row["__orchid_label__"]))
+            total_success += float(label)
+            total_count += 1
+            if total_count:
+                global_label_prior = total_success / total_count
+            item_success[item_id] = item_success.get(item_id, 0.0) + float(label)
+            item_count[item_id] = item_count.get(item_id, 0) + 1
+            concept_success[concept] = concept_success.get(concept, 0.0) + float(label)
+            concept_count[concept] = concept_count.get(concept, 0) + 1
+            user_concept_success[user_concept_key] = user_concept_success.get(user_concept_key, 0.0) + float(label)
+            user_concept_count[user_concept_key] = user_concept_count.get(user_concept_key, 0) + 1
+            user_history.setdefault(concept, []).append(label)
             if len(user_history[concept]) > 20:
                 del user_history[concept][: len(user_history[concept]) - 20]
             user_recent.append(concept)

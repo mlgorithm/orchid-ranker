@@ -1,9 +1,9 @@
-import torch
 import pytest
+import torch
 
-from orchid_ranker.dp import get_dp_config, DP_PRESETS
-from orchid_ranker.agents.simple_dp import SimpleDPConfig
 from orchid_ranker.agents.recommender_agent import TwoTowerRecommender
+from orchid_ranker.agents.simple_dp import SimpleDPConfig
+from orchid_ranker.dp import DP_PRESETS, get_dp_config
 from orchid_ranker.dp_accountant import build_accountant
 
 

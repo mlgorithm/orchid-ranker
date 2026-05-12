@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "orchid-ranker"
 version = "0.5.0"
-description = "Adaptive-learning recommender stack with learner-state tracing, progression reward, prerequisites, and safe rollout."
+description = "Adaptive-learning engine with learner-state tracing, progression reward, prerequisites, and safe rollout."
 readme = "README.md"
 authors = [
   {name = "Sam Urmian", email = "sam.urmian@gmail.com"}
@@ -22,16 +22,16 @@ dependencies = [
   "joblib>=1.2",
 ]
 keywords = [
-  "recommender-systems",
   "adaptive-learning",
-  "adaptive-recommendation",
-  "progression-aware",
+  "learner-state",
   "knowledge-tracing",
+  "progression-reward",
+  "prerequisites",
   "learning-analytics",
-  "streaming",
+  "adaptive-recommendation",
+  "safe-rollout",
+  "recommender-systems",
   "bandits",
-  "long-term-value",
-  "safety",
 ]
 classifiers = [
   "Development Status :: 4 - Beta",
@@ -75,6 +75,10 @@ enterprise = [
   "torch>=2.0,<3",
   "opacus>=1.5,<2",
   "prometheus-client>=0.16,<1",
+  "PyJWT[crypto]>=2.8,<3",
+]
+auth = [
+  "PyJWT[crypto]>=2.8,<3",
 ]
 agentic = [
   "torch>=2.0,<3",
@@ -84,6 +88,9 @@ agentic = [
 ]
 observability = [
   "prometheus-client>=0.16,<1",
+  "opentelemetry-api>=1.24,<2",
+  "opentelemetry-sdk>=1.24,<2",
+  "opentelemetry-exporter-otlp>=1.24,<2",
 ]
 connectors = [
   "snowflake-connector-python>=3.0,<4",
@@ -123,6 +130,10 @@ all = [
   "confluent-kafka>=2.1,<3",
   "opacus>=1.5,<2",
   "prometheus-client>=0.16,<1",
+  "PyJWT[crypto]>=2.8,<3",
+  "opentelemetry-api>=1.24,<2",
+  "opentelemetry-sdk>=1.24,<2",
+  "opentelemetry-exporter-otlp>=1.24,<2",
   "snowflake-connector-python>=3.0,<4",
   "google-cloud-bigquery>=3.11,<4",
   "boto3>=1.28,<2",
@@ -149,6 +160,7 @@ include = ["orchid_ranker", "orchid_ranker.*"]
 
 [project.scripts]
 orchid-evaluate = "orchid_ranker.cli.evaluate:main"
+orchid-serve = "orchid_ranker.cli.serve:main"
 
 [tool.ruff]
 line-length = 120

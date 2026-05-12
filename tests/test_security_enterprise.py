@@ -15,12 +15,13 @@ from __future__ import annotations
 
 import json
 import logging
-import os
 import threading
 from pathlib import Path
 
 import pytest
 
+from orchid_ranker.connectors.snowflake import SnowflakeConnector
+from orchid_ranker.security.access import AccessControl
 from orchid_ranker.security.audit import (
     AuditEvent,
     AuditLogger,
@@ -28,8 +29,6 @@ from orchid_ranker.security.audit import (
     verify_log_integrity,
 )
 from orchid_ranker.security.auth import JWTAuthenticator
-from orchid_ranker.security.access import AccessControl
-from orchid_ranker.connectors.snowflake import SnowflakeConnector
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -135,6 +134,24 @@ class TestAuditHashChain:
         result = verify_log_integrity(log_path, HMAC_KEY)
         assert result.valid is True
         assert result.lines_checked == 4
+
+    def test_append_after_reopen_preserves_hash_chain(self, tmp_path: Path):
+        """A new logger appending to an existing log must continue the chain."""
+        log_path = tmp_path / "audit.jsonl"
+        self._write_events(log_path, n=2)
+
+        logger = AuditLogger(log_path, hmac_key=HMAC_KEY)
+        logger.log(AuditEvent(event_type="test.action", actor="after_restart", payload={"seq": 2}))
+
+        result = verify_log_integrity(log_path, HMAC_KEY)
+        assert result.valid is True
+        assert result.lines_checked == 3
+
+    def test_new_audit_log_is_owner_only(self, tmp_path: Path):
+        log_path = tmp_path / "audit.jsonl"
+        self._write_events(log_path, n=1)
+
+        assert log_path.stat().st_mode & 0o777 == 0o600
 
     def test_integrity_detects_content_tamper(self, tmp_path: Path):
         """Changing event content must cause verification to fail."""

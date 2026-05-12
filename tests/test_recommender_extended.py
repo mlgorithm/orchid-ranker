@@ -1,13 +1,13 @@
 """Extended tests for OrchidRecommender."""
 import sys
+
 sys.path.insert(0, "src")
 
 import numpy as np
 import pandas as pd
 import pytest
-import torch
 
-from orchid_ranker.recommender import OrchidRecommender, Recommendation, SUPPORTED_STRATEGIES
+from orchid_ranker.recommender import SUPPORTED_STRATEGIES, OrchidRecommender, Recommendation
 
 
 class TestOrchidRecommenderInitialization:

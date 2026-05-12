@@ -1,9 +1,9 @@
 """Extended tests for safety modules (DR confidence sequence and SafeSwitch)."""
 import sys
+
 sys.path.insert(0, "src")
 
 import math
-import pytest
 
 from orchid_ranker.safety.dr_cs import DRConfidenceSequence, DRCSConfig
 from orchid_ranker.safety.safeswitch_dr import SafeSwitchDR, SafeSwitchDRConfig
@@ -177,7 +177,6 @@ class TestSafeSwitchDR:
         cfg = SafeSwitchDRConfig()
         sw = SafeSwitchDR(cfg)
 
-        initial_p = sw.p
 
         # Positive uplift should increase p
         sw.update(
@@ -218,7 +217,6 @@ class TestSafeSwitchDR:
         cfg = SafeSwitchDRConfig(step_up=0.1)
         sw = SafeSwitchDR(cfg)
 
-        initial_p = sw.p
 
         # Multiple rounds with positive uplift (adaptive better than baseline)
         for _ in range(50):

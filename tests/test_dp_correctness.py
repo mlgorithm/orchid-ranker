@@ -10,15 +10,17 @@ Tests with known expected values for:
 - Privacy budget composition: cumulative epsilon growth
 """
 import sys
+
 sys.path.insert(0, "src")
 
 import math
-import torch
-import torch.nn as nn
+
 import numpy as np
 import pytest
+import torch
+import torch.nn as nn
 
-from orchid_ranker.agents.simple_dp import SimpleDPConfig, SimpleDPAccountant, dp_sgd_step
+from orchid_ranker.agents.simple_dp import SimpleDPAccountant, SimpleDPConfig, dp_sgd_step
 
 
 class TestGradientClippingCorrectness:
@@ -185,7 +187,6 @@ class TestNoiseInjection:
         """Test noise std ≈ sigma * max_grad_norm (statistical check)."""
         # We'll sample noise from multiple runs and verify statistics
         device = torch.device("cpu")
-        noise_samples = []
         n_runs = 50
         sigma = 1.5
         max_grad_norm = 2.0
@@ -204,7 +205,7 @@ class TestNoiseInjection:
             optimizer = torch.optim.SGD(params, lr=0.01)
 
             # Run step with noise
-            loss = dp_sgd_step(
+            dp_sgd_step(
                 model=model,
                 params=params,
                 optimizer=optimizer,
@@ -530,8 +531,8 @@ class TestPrivacyBudgetComposition:
             eps_per_step.append(incr)
 
         # Early steps should have similar increments (quasi-linear growth)
-        early_increments = eps_per_step[:5]
-        late_increments = eps_per_step[5:]
+        eps_per_step[:5]
+        eps_per_step[5:]
 
         # Verify increments are all positive
         assert all(e > 0 for e in eps_per_step), "All increments should be positive"

@@ -20,8 +20,8 @@ from sklearn.datasets import load_digits
 from sklearn.decomposition import PCA
 
 from orchid_ranker import MultiConfig, MultiUserOrchestrator, UserCtx
+from orchid_ranker.agents.recommender_agent import DualRecommender, TwoTowerRecommender
 from orchid_ranker.agents.student_agent import StudentAgent
-from orchid_ranker.agents.recommender_agent import TwoTowerRecommender, DualRecommender
 
 
 def build_from_digits(dim: int, users: int, device: torch.device):
@@ -152,8 +152,8 @@ def main(argv: Optional[list[str]] = None) -> int:
     args = parse_args(argv)
     args.log_dir.mkdir(parents=True, exist_ok=True)
     out = run_once(args)
-    print("Fixed means:", out["fixed"]) 
-    print("Adaptive means:", out["adaptive"]) 
+    print("Fixed means:", out["fixed"])
+    print("Adaptive means:", out["adaptive"])
     return 0
 
 

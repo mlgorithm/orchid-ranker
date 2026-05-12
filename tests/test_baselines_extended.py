@@ -1,20 +1,20 @@
 """Extended tests for baseline recommenders."""
 import sys
+
 sys.path.insert(0, "src")
 
 import numpy as np
 import torch
-import pytest
 
 from orchid_ranker.baselines import (
+    ALSBaseline,
+    ExplicitMFBaseline,
+    LinUCBBaseline,
     MatrixFactorization,
+    NeuralMatrixFactorizationBaseline,
     PopularityBaseline,
     RandomBaseline,
-    ALSBaseline,
     UserKNNBaseline,
-    LinUCBBaseline,
-    ExplicitMFBaseline,
-    NeuralMatrixFactorizationBaseline,
 )
 
 
@@ -139,7 +139,7 @@ class TestRandomBaseline:
         """Test that random baseline returns different orders with different seeds."""
         device = torch.device("cpu")
         baseline1 = RandomBaseline(device)
-        baseline2 = RandomBaseline(device)
+        RandomBaseline(device)
 
         item_ids = torch.arange(10, dtype=torch.long, device=device)
 

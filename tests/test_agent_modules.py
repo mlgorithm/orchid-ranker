@@ -8,6 +8,7 @@
 - orchestrator.py (MultiUserOrchestrator)
 """
 import sys
+
 sys.path.insert(0, "src")
 
 import json
@@ -21,8 +22,8 @@ import torch
 import torch.nn as nn
 
 from orchid_ranker.agents.config import MultiConfig, OnlineState, PolicyState, UserCtx
-from orchid_ranker.agents.policies import LinUCBPolicy, BootTS
 from orchid_ranker.agents.logging_util import JSONLLogger
+from orchid_ranker.agents.policies import BootTS, LinUCBPolicy
 from orchid_ranker.agents.timing import _TimingRecorder
 
 
@@ -782,8 +783,8 @@ class TestMultiUserOrchestrator:
 
     @pytest.fixture
     def orchestrator_setup(self):
-        from orchid_ranker.agents.two_tower import TwoTowerRecommender
         from orchid_ranker.agents.orchestrator import MultiUserOrchestrator
+        from orchid_ranker.agents.two_tower import TwoTowerRecommender
 
         device = torch.device("cpu")
         num_users, num_items = 3, 10
@@ -887,9 +888,9 @@ class TestMultiUserOrchestratorAdaptive:
 
     @pytest.fixture
     def adaptive_setup(self):
-        from orchid_ranker.agents.two_tower import TwoTowerRecommender
         from orchid_ranker.agents.dual_recommender import DualRecommender
         from orchid_ranker.agents.orchestrator import MultiUserOrchestrator
+        from orchid_ranker.agents.two_tower import TwoTowerRecommender
 
         device = torch.device("cpu")
         num_users, num_items = 2, 8

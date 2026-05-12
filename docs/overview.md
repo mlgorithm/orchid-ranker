@@ -1,12 +1,14 @@
 # Orchid Ranker Overview
 
-This document summarises the core building blocks exposed by the Orchid Ranker
-library. It is intentionally lightweight so scientists and engineers can locate
-entry points quickly.
+This document summarises the core building blocks exposed by Orchid's
+adaptive-learning engine. It is intentionally lightweight so scientists and
+engineers can locate entry points quickly.
 
 ## Adaptive-Learning Stack
 
-- `orchid_ranker.AdaptiveLearningRecommender`: primary API for fit -> rank ->
+- `orchid_ranker.AdaptiveLearningEngine`: alias for the primary adaptive
+  learning API when you want the product concept in the import name.
+- `orchid_ranker.AdaptiveLearningRecommender`: existing implementation class for fit -> rank ->
   observe adaptive-learning loops. It composes KT prediction, progression
   reward, prerequisite gating, and live policy state.
 - `orchid_ranker.scenarios.recommend_scenarios`: choose an Orchid workflow
@@ -25,11 +27,13 @@ entry points quickly.
 - `orchid_ranker.pykt_bridge`: export Orchid interactions to pyKT sequence
   format and reuse pyKT prediction tables behind Orchid policies and OPE.
 
-## Generic Recommender Fallbacks
+## Ranking Machinery and Fallbacks
 
 - `orchid_ranker.OrchidRecommender`: Surprise-style API with strategies such as
   `explicit_mf` (FunkSVD-style explicit MF), `als`, `neural_mf` (with `loss="bce"|"bpr"|"softmax"`),
   `implicit_als`, `implicit_bpr`, `linucb`, `user_knn`, `popularity`, and `random`.
+  This is supporting machinery for non-learning metadata, baseline comparison,
+  and fallback paths rather than the main product surface.
 - `orchid_ranker.recommender.Recommendation`: lightweight dataclass returned by
   `recommend()`.
 - `recommend(..., candidate_item_ids=[...])`: rank a caller-provided candidate

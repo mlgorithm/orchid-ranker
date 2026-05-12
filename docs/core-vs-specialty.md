@@ -18,7 +18,7 @@ Core modules have:
 - Stable APIs under semver. Breaking changes require a major version bump.
 - Regression tests that run on every PR.
 
-Core modules: `AdaptiveLearningRecommender`, `AKTTracer`, `SAKTTracer`,
+Core modules: `AdaptiveLearningEngine`, `AKTTracer`, `SAKTTracer`,
 `ProgressionValuePolicy`, `BayesianKnowledgeTracing`, `DependencyGraph`,
 `ProgressionRecommender`, `ProgressionGuardrail`, `SafeSwitchDR`, OPE,
 evaluation metrics, and serialization. `OrchidRecommender` remains core as the

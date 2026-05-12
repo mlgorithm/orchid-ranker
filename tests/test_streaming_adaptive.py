@@ -137,6 +137,11 @@ class TestStreamingAdaptiveRanker:
         assert len(set(ids)) == 5, "ranked ids must be unique"
         assert all(0 <= i < NUM_ITEMS for i in ids)
 
+    def test_rank_top_k_zero_returns_empty(self, world):
+        tower, uf, ifeat = world
+        r = StreamingAdaptiveRanker(tower, uf, ifeat)
+        assert r.rank(user_id=3, candidate_item_ids=list(range(20)), top_k=0) == []
+
     def test_observe_then_rank_reflects_update(self, world):
         """The defining contract: a single observe must change the next rank."""
         tower, uf, ifeat = world

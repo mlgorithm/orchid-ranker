@@ -18,6 +18,6 @@ RUN pip install --upgrade pip \
 
 USER orchid
 
-EXPOSE 8000
+EXPOSE 8000 8081 9090
 
-ENTRYPOINT ["python", "-m", "orchid_ranker.cli.evaluate", "--help"]
+ENTRYPOINT ["python", "-m", "orchid_ranker.cli.serve"]

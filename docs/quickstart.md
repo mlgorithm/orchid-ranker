@@ -14,14 +14,14 @@ pip install 'orchid-ranker[ml]'
 ```
 
 The base `pip install orchid-ranker` package is for torch-free progression
-utilities. `AdaptiveLearningRecommender` uses PyTorch-backed tracing, so install
+utilities. `AdaptiveLearningEngine` uses PyTorch-backed tracing, so install
 the `ml` extra for the primary workflow.
 
 ## 2. Fit, Rank, Observe
 
 ```python
 import pandas as pd
-from orchid_ranker import AdaptiveLearningRecommender
+from orchid_ranker import AdaptiveLearningEngine
 
 events = pd.DataFrame({
     "user_id": [1, 1, 2, 2, 3, 3],
@@ -31,7 +31,7 @@ events = pd.DataFrame({
     "difficulty": [0.20, 0.45, 0.20, 0.50, 0.20, 0.45],
 })
 
-rec = AdaptiveLearningRecommender(policy="auto", epochs=1).fit(
+rec = AdaptiveLearningEngine(policy="auto", epochs=1).fit(
     events,
     correct_col="correct",
     concept_col="concept",

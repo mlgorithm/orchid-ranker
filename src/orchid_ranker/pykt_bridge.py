@@ -296,7 +296,10 @@ def _column_or_na(group: pd.DataFrame, column: Optional[str], length: int) -> tu
 def _label(value: Any, threshold: float) -> int:
     if isinstance(value, (bool, np.bool_)):
         return int(bool(value))
-    return int(float(value) >= threshold)
+    numeric = float(value)
+    if not np.isfinite(numeric):
+        raise ValueError("correct labels must be finite")
+    return int(numeric >= threshold)
 
 
 def _split_line(line: str) -> list[str]:

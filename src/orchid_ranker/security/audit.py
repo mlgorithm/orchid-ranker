@@ -103,7 +103,7 @@ class AuditLogger:
                     "from cryptography.fernet import Fernet; Fernet.generate_key()"
                 ) from exc
         self.encryption_key = encryption_key
-        self._prev_hash = "0" * 64  # Genesis hash for hash chaining
+        self._prev_hash = self._load_previous_hash() if self.hmac_key else "0" * 64
         # Thread safety: hash-chain state + file append must be atomic
         self._lock = threading.RLock()
 
@@ -129,8 +129,7 @@ class AuditLogger:
                 cipher = Fernet(self.encryption_key)
                 line = base64.b64encode(cipher.encrypt(line.encode("utf-8"))).decode("utf-8")
 
-            with self.path.open("a", encoding="utf-8") as fh:
-                fh.write(f"{line}\n")
+            self._append_line(line)
 
         # Remote send outside lock to avoid blocking
         self._send_remote(line)
@@ -151,6 +150,50 @@ class AuditLogger:
             status = getattr(resp, "status", 200)
             if status >= 400:
                 raise RuntimeError(f"Audit endpoint returned status {status}")
+
+    def _append_line(self, line: str) -> None:
+        def _secure_opener(path: str, flags: int) -> int:
+            return os.open(path, flags, 0o600)
+
+        with open(self.path, "a", encoding="utf-8", opener=_secure_opener) as fh:
+            fh.write(f"{line}\n")
+
+    def _load_previous_hash(self) -> str:
+        if not self.path.exists():
+            return "0" * 64
+        prev_hash = "0" * 64
+        with self.path.open("r", encoding="utf-8") as fh:
+            for line_num, line in enumerate(fh, 1):
+                line = line.rstrip("\n")
+                if not line:
+                    continue
+                try:
+                    line_dict = json.loads(line)
+                except json.JSONDecodeError:
+                    if self.encryption_key is None:
+                        raise ValueError(
+                            f"Existing audit log {self.path} is not plain JSON at line {line_num}; "
+                            "pass encryption_key to append to encrypted logs"
+                        )
+                    decrypted = _decrypt_audit_line(line, self.encryption_key, line_num=line_num)
+                    line_dict = json.loads(decrypted)
+                actual_prev_hash = line_dict.get("_prev_hash")
+                if actual_prev_hash != prev_hash:
+                    raise ValueError(
+                        f"Existing audit log hash chain is broken at line {line_num}: "
+                        f"expected _prev_hash={prev_hash}, got {actual_prev_hash}"
+                    )
+                current_hash = line_dict.get("_hash")
+                if not current_hash:
+                    raise ValueError(f"Existing audit log line {line_num} is missing _hash")
+                check_dict = dict(line_dict)
+                expected_hash = check_dict.pop("_hash")
+                line_content = json.dumps(check_dict, separators=(",", ":"), default=str)
+                computed_hash = hmac.new(self.hmac_key, line_content.encode("utf-8"), hashlib.sha256).hexdigest()
+                if computed_hash != expected_hash:
+                    raise ValueError(f"Existing audit log HMAC mismatch at line {line_num}")
+                prev_hash = str(current_hash)
+        return prev_hash
 
     @classmethod
     def from_env(cls, path: Path, *, ensure_dir: bool = True) -> "AuditLogger":

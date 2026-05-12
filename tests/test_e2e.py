@@ -12,7 +12,6 @@ import tempfile
 import numpy as np
 import pandas as pd
 
-
 # ════════════════════════════════════════════════════════════════════════
 # 1.  FULL RECOMMENDER PIPELINE
 # ════════════════════════════════════════════════════════════════════════
@@ -23,10 +22,10 @@ class TestRecommenderPipeline:
     def test_full_pipeline_popularity(self):
         from orchid_ranker import (
             OrchidRecommender,
-            save_model,
-            load_model,
-            train_test_split,
             evaluate_on_holdout,
+            load_model,
+            save_model,
+            train_test_split,
         )
 
         # 1. Generate raw data
@@ -78,8 +77,8 @@ class TestRecommenderPipeline:
     def test_full_pipeline_als(self):
         from orchid_ranker import (
             OrchidRecommender,
-            save_model,
             load_model,
+            save_model,
             train_test_split,
         )
 
@@ -117,7 +116,7 @@ class TestCVTuningPipeline:
     """Cross-validate → compare → tune → best model."""
 
     def test_cross_validate_and_compare(self):
-        from orchid_ranker import cross_validate, compare_models
+        from orchid_ranker import compare_models, cross_validate
 
         rng = np.random.RandomState(42)
         interactions = pd.DataFrame({
@@ -163,11 +162,10 @@ class TestKnowledgeTracingPipeline:
 
     def test_bkt_to_mastery_to_metrics(self):
         from orchid_ranker import (
-            BayesianKnowledgeTracing,
-            MasteryTracker,
             ForgettingCurve,
-            learning_gain,
+            MasteryTracker,
             knowledge_coverage,
+            learning_gain,
         )
 
         # 1. Track mastery across skills
@@ -224,9 +222,8 @@ class TestCurriculumPipeline:
 
     def test_full_curriculum_workflow(self):
         from orchid_ranker import (
-            PrerequisiteGraph,
             CurriculumRecommender,
-            MasteryTracker,
+            PrerequisiteGraph,
         )
 
         # 1. Build prerequisite graph
@@ -278,11 +275,11 @@ class TestEducationalMetricsPipeline:
     def test_combined_evaluation(self):
         from orchid_ranker import (
             OrchidRecommender,
-            train_test_split,
-            learning_gain,
-            knowledge_coverage,
             difficulty_appropriateness,
             engagement_score,
+            knowledge_coverage,
+            learning_gain,
+            train_test_split,
         )
 
         rng = np.random.RandomState(42)
@@ -297,7 +294,7 @@ class TestEducationalMetricsPipeline:
         rec.fit(train)
 
         uid = train["user_id"].iloc[0]
-        recs = rec.recommend(user_id=uid, top_k=10)
+        rec.recommend(user_id=uid, top_k=10)
 
         # Educational metrics
         gain = learning_gain(0.3, 0.75)

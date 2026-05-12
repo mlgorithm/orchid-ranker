@@ -1,17 +1,17 @@
 """Extended tests for TwoTowerRecommender and related policies."""
 import sys
+
 sys.path.insert(0, "src")
 
 import numpy as np
-import pytest
 import torch
 import torch.nn as nn
 
 from orchid_ranker.agents.recommender_agent import (
-    TwoTowerRecommender,
-    LinUCBPolicy,
     BootTS,
     JSONLLogger,
+    LinUCBPolicy,
+    TwoTowerRecommender,
 )
 
 
@@ -317,7 +317,7 @@ class TestTwoTowerUpdate:
         item_ids = torch.tensor([0, 1], dtype=torch.long, device=device)
         user_vec = torch.randn(2, 4, device=device)
         item_matrix = torch.randn(10, 4, device=device)
-        labels = torch.tensor([[1.0], [0.0]], device=device)
+        torch.tensor([[1.0], [0.0]], device=device)
 
         # Update
         model.train()
@@ -488,7 +488,7 @@ class TestLinUCBPolicy:
         x = np.random.randn(5).astype(np.float64)
         reward = 0.5
 
-        initial_A = policy.A.get(0, None)
+        policy.A.get(0, None)
         policy.update(0, x, reward)
 
         # A matrix should be updated
@@ -500,7 +500,7 @@ class TestLinUCBPolicy:
 
         for trial in range(5):
             x = np.random.randn(5).astype(np.float64)
-            score = policy.score(x, base=0.0, i=0)
+            policy.score(x, base=0.0, i=0)
             reward = float(np.random.rand())
             policy.update(0, x, reward)
 
@@ -545,7 +545,7 @@ class TestBootTS:
 
         for trial in range(5):
             x = np.random.randn(5).astype(np.float64)
-            score = policy.score_vec(x)
+            policy.score_vec(x)
             reward = float(np.random.rand())
             policy.update(x, reward, k=2)
 
@@ -558,8 +558,8 @@ class TestJSONLLogger:
 
     def test_construction(self):
         """Test JSONLLogger construction."""
-        import tempfile
         import os
+        import tempfile
         from pathlib import Path
 
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -570,9 +570,9 @@ class TestJSONLLogger:
 
     def test_log_writes_entry(self):
         """Test that log() writes an entry."""
-        import tempfile
-        import os
         import json
+        import os
+        import tempfile
 
         with tempfile.TemporaryDirectory() as tmpdir:
             log_path = os.path.join(tmpdir, "test.jsonl")
@@ -594,8 +594,8 @@ class TestJSONLLogger:
 
     def test_multiple_log_entries(self):
         """Test logging multiple entries."""
-        import tempfile
         import os
+        import tempfile
 
         with tempfile.TemporaryDirectory() as tmpdir:
             log_path = os.path.join(tmpdir, "test.jsonl")

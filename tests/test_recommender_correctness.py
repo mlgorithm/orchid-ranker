@@ -14,13 +14,11 @@ For each strategy:
 - Verifies top-k ranking: highest score is first
 """
 
-import logging
 import numpy as np
 import pandas as pd
 import pytest
 
-from orchid_ranker import OrchidRecommender, Recommendation, SUPPORTED_STRATEGIES
-
+from orchid_ranker import SUPPORTED_STRATEGIES, OrchidRecommender, Recommendation
 
 # ────────────────────────────────────────────────────────────────────────────
 # Fixtures

@@ -13,7 +13,7 @@ fitness progression, expertise-driven shopping, or curated content discovery.
 
 | Use case | Best first choice |
 |----------|-------------------|
-| You need adaptive learning with learner state, prerequisites, progression reward, and live outcome updates | Orchid `AdaptiveLearningRecommender` |
+| You need adaptive learning with learner state, prerequisites, progression reward, and live outcome updates | Orchid `AdaptiveLearningEngine` |
 | You need fast generic collaborative filtering on implicit feedback | `implicit` |
 | You need dozens of research algorithms and standard benchmark protocols | RecBole |
 | You need GPU-scale feature engineering, training, and Triton serving | NVIDIA Merlin |
@@ -39,9 +39,9 @@ Orchid has four opinionated capabilities:
 The core user journey is:
 
 ```python
-from orchid_ranker import AdaptiveLearningRecommender
+from orchid_ranker import AdaptiveLearningEngine
 
-rec = AdaptiveLearningRecommender(policy="auto").fit(
+rec = AdaptiveLearningEngine(policy="auto").fit(
     outcomes,
     correct_col="correct",
     concept_col="concept",
@@ -80,7 +80,7 @@ Choose another stack when:
 
 The strongest public claim is:
 
-> Orchid Ranker is an adaptive-learning recommender stack for products where
+> Orchid Ranker is an adaptive-learning engine for products where
 > recommendations should make the user better, not merely more engaged. It
 > combines learner-state tracing, prerequisite-aware ranking, progression
 > reward, live outcome updates, OPE, and safe fallback patterns.

@@ -1,6 +1,5 @@
 """Tests for model selection utilities: train_test_split and evaluate_on_holdout."""
 
-import numpy as np
 import pandas as pd
 
 from orchid_ranker.model_selection import cross_validate, evaluate_on_holdout, train_test_split

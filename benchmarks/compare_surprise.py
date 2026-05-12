@@ -28,7 +28,7 @@ import pandas as pd
 from orchid_ranker import OrchidRecommender
 
 try:
-    from surprise import Dataset, Reader, SVD
+    from surprise import SVD, Dataset, Reader
 except ImportError:  # pragma: no cover - optional dependency
     Dataset = None
     Reader = None

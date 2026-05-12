@@ -1,11 +1,11 @@
 """Tests for educational evaluation metrics: learning_gain, knowledge_coverage, etc."""
 
 from orchid_ranker.evaluation import (
-    learning_gain,
-    knowledge_coverage,
     curriculum_adherence,
     difficulty_appropriateness,
     engagement_score,
+    knowledge_coverage,
+    learning_gain,
 )
 
 

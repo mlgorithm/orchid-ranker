@@ -1,6 +1,7 @@
 """Learning policies that turn KT predictions into next-item rankings."""
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass
 from typing import Any, Dict, Mapping, Optional, Sequence
 
@@ -139,11 +140,15 @@ class ProgressionValuePolicy:
         difficulty_by_item: Optional[Mapping[Any, float]] = None,
         concept_by_item: Optional[Mapping[Any, Any]] = None,
         config: Optional[ProgressionRewardConfig] = None,
+        correct_threshold: float = 0.5,
     ) -> None:
+        if not 0.0 <= float(correct_threshold) <= 1.0:
+            raise ValueError("correct_threshold must be in [0, 1]")
         self.tracer = tracer
         self.difficulty_by_item = dict(difficulty_by_item or {})
         self.concept_by_item = dict(concept_by_item or {})
         self.config = config or ProgressionRewardConfig()
+        self.correct_threshold = float(correct_threshold)
         self._correct_by_user_concept: Dict[Any, Dict[Any, list[int]]] = {}
         self._recent_concepts_by_user: Dict[Any, list[Any]] = {}
 
@@ -265,7 +270,7 @@ class ProgressionValuePolicy:
 
     def _record_progression_outcome(self, user_id: Any, item_id: Any, correct: Any) -> None:
         concept = self._concept_for(item_id)
-        label = int(float(correct) >= 0.5)
+        label = int(float(correct) >= self.correct_threshold)
         by_concept = self._correct_by_user_concept.setdefault(user_id, {})
         history = by_concept.setdefault(concept, [])
         history.append(label)
@@ -333,6 +338,7 @@ class DelayedGainValuePolicy(ProgressionValuePolicy):
         concept_gain_prior: Optional[Mapping[Any, float]] = None,
         global_gain_prior: float = 0.5,
         config: Optional[ProgressionRewardConfig] = None,
+        correct_threshold: float = 0.5,
         progression_weight: float = 0.35,
         delayed_gain_weight: float = 0.55,
         stretch_weight: float = 0.10,
@@ -344,6 +350,7 @@ class DelayedGainValuePolicy(ProgressionValuePolicy):
             difficulty_by_item=difficulty_by_item,
             concept_by_item=concept_by_item,
             config=config,
+            correct_threshold=correct_threshold,
         )
         self.item_gain_prior = {item: _clamp01(value) for item, value in dict(item_gain_prior or {}).items()}
         self.concept_gain_prior = {
@@ -440,6 +447,7 @@ class SupportConstrainedDelayedGainPolicy(DelayedGainValuePolicy):
         item_support: Optional[Mapping[Any, float]] = None,
         concept_support: Optional[Mapping[Any, float]] = None,
         config: Optional[ProgressionRewardConfig] = None,
+        correct_threshold: float = 0.5,
         model_weight: float = 0.65,
         prior_weight: float = 0.20,
         progression_weight: float = 0.10,
@@ -460,6 +468,7 @@ class SupportConstrainedDelayedGainPolicy(DelayedGainValuePolicy):
             concept_gain_prior=concept_gain_prior,
             global_gain_prior=global_gain_prior,
             config=config,
+            correct_threshold=correct_threshold,
             progression_weight=progression_weight,
             delayed_gain_weight=prior_weight,
             stretch_weight=stretch_weight,
@@ -585,6 +594,8 @@ class SupportConstrainedDelayedGainPolicy(DelayedGainValuePolicy):
 
 def _clamp01(value: float) -> float:
     numeric = float(value)
+    if not math.isfinite(numeric):
+        return 0.5
     if numeric < 0.0:
         return 0.0
     if numeric > 1.0:

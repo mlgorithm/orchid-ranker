@@ -214,7 +214,11 @@ class BigQueryConnector:
 
             def _query():
                 job = client.query(sql, timeout=self.timeout)
-                return job.result().to_dataframe(create_bqstorage_client=False)
+                try:
+                    result = job.result(timeout=self.timeout)
+                except TypeError:
+                    result = job.result()
+                return result.to_dataframe(create_bqstorage_client=False)
 
             return self._retry_with_backoff(_query)
 

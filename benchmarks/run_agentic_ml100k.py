@@ -21,13 +21,13 @@ from __future__ import annotations
 import argparse
 import json
 from pathlib import Path
-from typing import Optional, Callable, Tuple
+from typing import Callable, Optional, Tuple
 
 import numpy as np
 import pandas as pd
 import torch
-from torch import profiler as torch_profiler
 from surprise import Dataset
+from torch import profiler as torch_profiler
 
 from orchid_ranker import MultiConfig, MultiUserOrchestrator, UserCtx
 from orchid_ranker.agents.recommender_agent import DualRecommender, TwoTowerRecommender
@@ -122,7 +122,7 @@ def build_simulation_matrices(
     dim: int,
     device: torch.device,
 ):
-    users = sorted(uid2idx.keys())
+    sorted(uid2idx.keys())
     items = sorted(iid2idx.keys())
 
     U = torch.tensor(user_emb, dtype=torch.float32, device=device)

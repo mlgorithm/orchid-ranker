@@ -1,13 +1,12 @@
 """Tests for knowledge tracing models: BayesianKnowledgeTracing, MasteryTracker, ForgettingCurve."""
 
 import math
-import time
 from datetime import datetime, timedelta
 
 from orchid_ranker.knowledge_tracing import (
     BayesianKnowledgeTracing,
-    MasteryTracker,
     ForgettingCurve,
+    MasteryTracker,
 )
 
 

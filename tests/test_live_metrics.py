@@ -92,6 +92,18 @@ class TestRollingMonitor:
         # User 1: 1 rec, not adherent. Average over 2 users = (1.0 + 0.0)/2 = 0.5
         assert snap.sequence_adherence == pytest.approx(0.5, abs=1e-6)
 
+    def test_sequence_adherence_is_chronological(self):
+        m = RollingProgressionMonitor(
+            policy="t_seq_chrono",
+            emit_prometheus=False,
+            prerequisite_graph={3: {1, 2}},
+        )
+        m.record(user_id=0, item_id=3, correct=False, pre_competence=0.1, post_competence=0.1)
+        m.record(user_id=0, item_id=1, correct=True, pre_competence=0.1, post_competence=0.9)
+        m.record(user_id=0, item_id=2, correct=True, pre_competence=0.1, post_competence=0.9)
+
+        assert m.snapshot().sequence_adherence == pytest.approx(2 / 3, abs=1e-6)
+
     def test_stretch_fit(self):
         m = RollingProgressionMonitor(
             policy="t_diff", emit_prometheus=False, stretch_width=0.2,

@@ -323,8 +323,23 @@ class OrchidRecommender:
                 "as_streaming() requires the high-level 'neural_mf' strategy "
                 "or a lower-level tower model used directly with StreamingAdaptiveRanker."
             )
-        user_features = self.user_features
-        item_features = self.item_features
+        if scaling_config is not None:
+            user_features = torch.zeros(
+                (len(self._user2idx), 1),
+                dtype=torch.float32,
+                device=self.device,
+            )
+            if self._item_features is not None:
+                item_features = torch.as_tensor(self._item_features, dtype=torch.float32, device=self.device)
+            else:
+                item_features = torch.zeros(
+                    (len(self._item2idx), 1),
+                    dtype=torch.float32,
+                    device=self.device,
+                )
+        else:
+            user_features = self.user_features
+            item_features = self.item_features
         if user_features is None or item_features is None:
             raise RuntimeError("Fitted recommender did not expose user/item feature tensors.")
 

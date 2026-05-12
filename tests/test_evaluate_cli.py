@@ -1,5 +1,4 @@
 import pandas as pd
-import pytest
 
 from orchid_ranker.cli.evaluate import main as eval_main
 
@@ -39,3 +38,36 @@ def test_cli_evaluate_runs(tmp_path, capsys):
     assert eval_main(args) == 0
     captured = capsys.readouterr()
     assert "Strategy" in captured.out
+
+
+def test_cli_evaluate_respects_custom_columns(tmp_path):
+    train = pd.DataFrame(
+        {
+            "learner": [1, 1, 2, 2],
+            "content": [10, 11, 10, 12],
+            "outcome": [1, 0, 1, 1],
+        }
+    )
+    test = pd.DataFrame(
+        {
+            "learner": [1, 2],
+            "content": [11, 12],
+            "outcome": [1, 1],
+        }
+    )
+    train_path = tmp_path / "train.csv"
+    test_path = tmp_path / "test.csv"
+    train.to_csv(train_path, index=False)
+    test.to_csv(test_path, index=False)
+
+    args = [
+        "--train", str(train_path),
+        "--test", str(test_path),
+        "--strategy", "popularity",
+        "--user-col", "learner",
+        "--item-col", "content",
+        "--label-col", "outcome",
+        "--top-k", "2",
+    ]
+
+    assert eval_main(args) == 0

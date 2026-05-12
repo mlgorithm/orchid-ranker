@@ -15,13 +15,13 @@ from __future__ import annotations
 import argparse
 import json
 import time
-from dataclasses import dataclass, asdict
-from typing import Dict, Iterable, List, Sequence
+from dataclasses import asdict, dataclass
+from typing import Dict, List, Sequence
 
 import numpy as np
 import pandas as pd
 
-from orchid_ranker import OrchidRecommender, SUPPORTED_STRATEGIES
+from orchid_ranker import SUPPORTED_STRATEGIES, OrchidRecommender
 
 
 @dataclass

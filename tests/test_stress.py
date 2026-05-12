@@ -13,17 +13,15 @@ These tests push the library to its limits:
 
 import copy
 import math
-
-import pytest
 import os
-import sys
-import time
 import tempfile
 import threading
-import traceback
+import time
 
 import numpy as np
 import pandas as pd
+import pytest
+
 
 # ── helpers ──────────────────────────────────────────────────────────────
 def make_interactions(n_users=100, n_items=50, n_rows=5000, seed=42):
@@ -199,8 +197,8 @@ class TestRecommenderStress:
 # ════════════════════════════════════════════════════════════════════════
 from orchid_ranker.knowledge_tracing import (
     BayesianKnowledgeTracing,
-    MasteryTracker,
     ForgettingCurve,
+    MasteryTracker,
 )
 
 
@@ -346,7 +344,7 @@ class TestForgettingCurveStress:
 # ════════════════════════════════════════════════════════════════════════
 # 3.  CURRICULUM / PREREQUISITE GRAPH STRESS
 # ════════════════════════════════════════════════════════════════════════
-from orchid_ranker.curriculum import PrerequisiteGraph, CurriculumRecommender
+from orchid_ranker.curriculum import CurriculumRecommender, PrerequisiteGraph
 
 
 class TestPrerequisiteGraphStress:
@@ -354,7 +352,7 @@ class TestPrerequisiteGraphStress:
         g = PrerequisiteGraph()
         for i in range(500):
             g.add_edge(f"s{i}", f"s{i+1}")
-        path = g.learning_path(f"s500")
+        path = g.learning_path("s500")
         assert len(path) >= 2  # at minimum includes target + prereqs
 
     def test_wide_fan_out(self):
@@ -432,9 +430,9 @@ class TestPrerequisiteGraphStress:
     def test_is_ready(self):
         g = PrerequisiteGraph()
         g.add_edge("A", "B")
-        assert g.is_ready("A", mastered=set()) == True
-        assert g.is_ready("B", mastered=set()) == False
-        assert g.is_ready("B", mastered={"A"}) == True
+        assert g.is_ready("A", mastered=set())
+        assert not g.is_ready("B", mastered=set())
+        assert g.is_ready("B", mastered={"A"})
 
     def test_all_prerequisites_for(self):
         g = PrerequisiteGraph()
@@ -477,9 +475,9 @@ class TestCurriculumRecommenderStress:
 # 4.  MODEL SELECTION STRESS
 # ════════════════════════════════════════════════════════════════════════
 from orchid_ranker.model_selection import (
-    train_test_split,
     cross_validate,
     evaluate_on_holdout,
+    train_test_split,
 )
 
 
@@ -584,7 +582,7 @@ class TestTuningStress:
 # ════════════════════════════════════════════════════════════════════════
 # 6.  SERIALIZATION STRESS
 # ════════════════════════════════════════════════════════════════════════
-from orchid_ranker.serialization import save_model, load_model
+from orchid_ranker.serialization import load_model, save_model
 
 
 class TestSerializationStress:
@@ -666,11 +664,10 @@ class TestSerializationStress:
 # 7.  EVALUATION METRICS STRESS
 # ════════════════════════════════════════════════════════════════════════
 from orchid_ranker.evaluation import (
-    learning_gain,
-    knowledge_coverage,
-    curriculum_adherence,
     difficulty_appropriateness,
     engagement_score,
+    knowledge_coverage,
+    learning_gain,
 )
 
 
@@ -730,7 +727,7 @@ class TestEvaluationMetricsStress:
     # engagement_score — takes (Sequence, int)
     def test_engagement_score_zero_available(self):
         try:
-            result = engagement_score([], 0)
+            engagement_score([], 0)
         except (ZeroDivisionError, ValueError):
             pass
 

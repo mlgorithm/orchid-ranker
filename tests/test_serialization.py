@@ -1,13 +1,14 @@
 """Comprehensive tests for model serialization utilities."""
 
-import pytest
-import pandas as pd
-import numpy as np
 import tempfile
 from pathlib import Path
 
-from orchid_ranker.serialization import save_model, load_model
+import numpy as np
+import pandas as pd
+import pytest
+
 from orchid_ranker.recommender import OrchidRecommender
+from orchid_ranker.serialization import load_model, save_model
 
 
 class UnsafeCheckpointPayload:

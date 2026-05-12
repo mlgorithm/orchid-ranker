@@ -5,6 +5,7 @@ import pandas as pd
 import pytest
 
 from orchid_ranker import SUPPORTED_STRATEGIES, OrchidRecommender, configure_logging
+from orchid_ranker.scaling import ScalingConfig
 
 
 def _dataset():
@@ -249,3 +250,20 @@ def test_as_streaming_neural_mf_uses_external_ids():
     assert update["p_known"] >= 0.0
     assert after
     assert streamer.updates_for(1) == 1
+
+
+def test_as_streaming_scaled_avoids_dense_identity_features():
+    data = _dataset()
+    rec = OrchidRecommender.from_interactions(
+        data,
+        strategy="neural_mf",
+        rating_col="label",
+        epochs=1,
+        emb_dim=8,
+        hidden=(16,),
+    )
+
+    streamer = rec.as_streaming(scaling_config=ScalingConfig(max_active_users=100, num_state_shards=2))
+
+    assert streamer.user_features.shape == (len(rec._user2idx), 1)
+    assert streamer.item_features.shape == (len(rec._item2idx), 1)

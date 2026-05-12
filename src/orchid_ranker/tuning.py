@@ -446,8 +446,8 @@ class RandomSearchCV:
         for _ in range(self.n_iter):
             params = {}
             for name in param_names:
-                choices = self.param_distributions[name]
-                params[name] = self._rng.choice(choices)
+                choices = list(self.param_distributions[name])
+                params[name] = choices[int(self._rng.randint(0, len(choices)))]
             sampled.append(params)
 
         return sampled

@@ -15,21 +15,17 @@ Tests production-failure scenarios including:
 - Model save/load edge cases
 """
 
-import tempfile
-from pathlib import Path
-import logging
 
 import numpy as np
 import pandas as pd
 import pytest
 
 from orchid_ranker import (
-    OrchidRecommender,
     BayesianKnowledgeTracing,
     MasteryTracker,
+    OrchidRecommender,
     PrerequisiteGraph,
 )
-
 
 # ────────────────────────────────────────────────────────────────────────────
 # OrchidRecommender edge cases

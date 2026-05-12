@@ -1,6 +1,6 @@
 # Usage scenarios
 
-Orchid is a first-class adaptive-learning recommender library. The primary
+Orchid is a first-class adaptive-learning engine. The primary
 path is next-item learning: estimate learner state, rank eligible items, observe
 the outcome, and update the next decision. The other scenarios are extensions
 or fallbacks for products that do not yet have the full learning signal stack.
@@ -43,12 +43,12 @@ optional prerequisites, plus live outcome events.
 prerequisite gating, and optional delayed-gain policy after diagnostics and
 offline policy evaluation.
 
-**Orchid path:** `AdaptiveLearningRecommender.fit()` -> `rank()` -> `observe()`.
+**Orchid path:** `AdaptiveLearningEngine.fit()` -> `rank()` -> `observe()`.
 
 ```python
-from orchid_ranker import AdaptiveLearningRecommender
+from orchid_ranker import AdaptiveLearningEngine
 
-rec = AdaptiveLearningRecommender(
+rec = AdaptiveLearningEngine(
     tracer_model="akt",
     policy="auto",
     epochs=2,
@@ -132,9 +132,9 @@ deployment metadata, and audit requirements.
 and privacy hooks.
 
 ```python
-from orchid_ranker import AdaptiveLearningRecommender, AuditLogger
+from orchid_ranker import AdaptiveLearningEngine, AuditLogger
 
-rec = AdaptiveLearningRecommender(policy="auto").fit(
+rec = AdaptiveLearningEngine(policy="auto").fit(
     outcomes,
     correct_col="completed",
     concept_col="competency",

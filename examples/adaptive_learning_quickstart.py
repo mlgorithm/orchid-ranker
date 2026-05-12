@@ -12,7 +12,7 @@ import pandas as pd
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
-from orchid_ranker import AdaptiveLearningRecommender, DependencyGraph, ProgressionRecommender
+from orchid_ranker import AdaptiveLearningEngine, DependencyGraph, ProgressionRecommender
 
 
 def build_catalog() -> pd.DataFrame:
@@ -74,7 +74,7 @@ def main() -> None:
     concept_difficulty = catalog.groupby("concept")["difficulty"].mean().to_dict()
     progression = ProgressionRecommender(graph, difficulty_map=concept_difficulty)
 
-    learner_rec = AdaptiveLearningRecommender(
+    learner_rec = AdaptiveLearningEngine(
         tracer_model="akt",
         policy="auto",
         max_seq_len=4,

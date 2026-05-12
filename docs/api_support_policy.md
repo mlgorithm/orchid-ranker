@@ -3,7 +3,7 @@
 ## Semantic Versioning
 - The `orchid-ranker` package follows semantic versioning (MAJOR.MINOR.PATCH).
 - Breaking API changes are introduced only in MAJOR releases, with deprecation notices provided at least one MINOR release beforehand.
-- Public interfaces include `AdaptiveLearningRecommender`, `OrchidRecommender`,
+- Public interfaces include `AdaptiveLearningEngine`, `AdaptiveLearningRecommender`, `OrchidRecommender`,
   scenario-selection helpers, experiment runners, benchmarking scripts, and
   documented extras.
 

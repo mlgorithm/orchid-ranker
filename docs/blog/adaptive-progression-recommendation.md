@@ -71,11 +71,11 @@ A minimal Orchid workflow fits in ten lines:
 
 ```python
 import pandas as pd
-from orchid_ranker import AdaptiveLearningRecommender
+from orchid_ranker import AdaptiveLearningEngine
 
 events = pd.read_csv("learner_outcomes.csv")  # user_id, item_id, correct, concept, difficulty
 
-rec = AdaptiveLearningRecommender(policy="auto").fit(
+rec = AdaptiveLearningEngine(policy="auto").fit(
     events,
     correct_col="correct",
     concept_col="concept",
@@ -131,7 +131,7 @@ Orchid Ranker is open-source and available on PyPI:
 
 ```bash
 pip install orchid-ranker        # core toolkit (BKT, dependency graphs, evaluation)
-pip install orchid-ranker[ml]    # adds PyTorch for AdaptiveLearningRecommender
+pip install orchid-ranker[ml]    # adds PyTorch for AdaptiveLearningEngine
 pip install orchid-ranker[all]   # everything (ML, viz, agentic, observability)
 ```
 

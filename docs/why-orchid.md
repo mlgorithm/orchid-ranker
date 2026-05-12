@@ -16,7 +16,7 @@ interaction as an independent click.
 |--------|--------------|-------------------|
 | **Learner state** | Estimate what the learner knows now | AKT/SAKT-style tracing plus BKT utilities |
 | **Progression reward** | Optimize learning progress, not engagement | Target-correctness, stretch-zone, mastery-gain, and repetition terms |
-| **Live adaptation** | Update after each learner outcome | `AdaptiveLearningRecommender.observe()` |
+| **Live adaptation** | Update after each learner outcome | `AdaptiveLearningEngine.observe()` |
 | **Safety-native** | Gate rollouts on user outcomes | Doubly-robust confidence sequences + progression guardrails |
 | **Privacy-native** | Compliance built in | DP-SGD presets, RBAC, HMAC audit chains |
 

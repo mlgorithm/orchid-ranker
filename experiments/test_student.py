@@ -1,5 +1,6 @@
-import numpy as np
 import matplotlib.pyplot as plt
+import numpy as np
+
 from orchid_ranker.agents.agents import StudentAgent
 
 
@@ -206,7 +207,7 @@ def compare_success_prob(theta_list=[0.3, 0.6, 0.8], fatigue=0.2, alpha=5.0, bet
     axes[0].set_xlabel("Knowledge θ")
     axes[0].set_ylabel("Difficulty d")
 
-    im2 = axes[1].imshow(P_zpd, origin="lower", extent=[0, 1, 0, 1],
+    axes[1].imshow(P_zpd, origin="lower", extent=[0, 1, 0, 1],
                          cmap="viridis", vmin=0, vmax=1, aspect="auto")
     axes[1].set_title("ZPD Mode")
     axes[1].set_xlabel("Knowledge θ")
@@ -229,36 +230,6 @@ def compare_success_prob(theta_list=[0.3, 0.6, 0.8], fatigue=0.2, alpha=5.0, bet
     plt.title("Success probability curves (IRT vs ZPD)")
     plt.legend()
     plt.show()
-
-def compare_setups():
-    setups = [
-        {"fatigue_growth": 0.05, "fatigue_recovery": 0.02, "trust_influence": True,  "label": "baseline (trust ON)"},
-        {"fatigue_growth": 0.05, "fatigue_recovery": 0.02, "trust_influence": False, "label": "trust OFF"},
-        {"fatigue_growth": 0.02, "fatigue_recovery": 0.02, "trust_influence": True,  "label": "slow fatigue growth"},
-        {"fatigue_growth": 0.08, "fatigue_recovery": 0.01, "trust_influence": True,  "label": "fast fatigue growth"},
-        {"fatigue_growth": 0.05, "fatigue_recovery": 0.05, "trust_influence": True,  "label": "fast recovery"},
-    ]
-
-    fig, axes = plt.subplots(2, 2, figsize=(12, 8))
-    axes = axes.ravel()
-
-    for setup in setups:
-        label = setup.pop("label")
-        logs = run_student(user_type="strong", policy="irt", **setup)  # <-- policy explicitly IRT
-        axes[0].plot(logs["knowledge"], label=label)
-        axes[1].plot(logs["fatigue"], label=label)
-        axes[2].plot(logs["trust"], label=label)
-        axes[3].plot(logs["engagement"], label=label)
-        setup["label"] = label  # restore
-
-    titles = ["Knowledge", "Fatigue", "Trust", "Engagement"]
-    for ax, title in zip(axes, titles):
-        ax.set_title(title)
-        ax.legend()
-
-    plt.tight_layout()
-    plt.show()
-
 
 # Compare student internal dynamics
 compare_setups()

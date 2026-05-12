@@ -1,5 +1,6 @@
 import os
-from typing import Tuple, Dict, Any, Union, Optional
+from pathlib import Path
+from typing import Any, Dict, Optional, Tuple, Union
 
 import pandas as pd
 import numpy as np
@@ -107,7 +108,8 @@ class DatasetLoader:
             """
             cfg = self._read_yaml(config_path)
             ds_name, ds_cfg = self._pick_dataset(cfg, dataset)
-            paths = self._resolve_paths(ds_cfg)
+            config_dir = Path(config_path).expanduser().resolve().parent
+            paths = self._resolve_paths(ds_cfg, config_dir=config_dir)
 
             # Load CSVs
             data = {
@@ -437,16 +439,20 @@ class DatasetLoader:
         return name, ds_cfg
 
     @staticmethod
-    def _resolve_paths(ds_cfg: Dict[str, Any]) -> Dict[str, str]:
+    def _resolve_paths(ds_cfg: Dict[str, Any], *, config_dir: Optional[Path] = None) -> Dict[str, str]:
         p = ds_cfg.get("paths", {})
         base = p.get("base_dir", ".")
+        base_path = Path(base)
+        if not base_path.is_absolute() and config_dir is not None:
+            base_path = config_dir / base_path
         required = ["train", "val", "test", "side_information_users", "side_information_items"]
         out = {}
         for k in required:
             rel = p.get(k)
             if rel is None:
                 raise KeyError(f"paths.{k} missing in YAML dataset block")
-            out[k] = rel if os.path.isabs(rel) else os.path.join(base, rel)
+            rel_path = Path(rel)
+            out[k] = str(rel_path if rel_path.is_absolute() else base_path / rel_path)
         return out
 
     @staticmethod
@@ -516,7 +522,8 @@ def load_dataset(dataset: str, base_path: str, config_path: str, *, encoding: st
 
     import tempfile, os
 
-    with tempfile.NamedTemporaryFile('w', suffix='.yaml', delete=False) as tmp:
+    config_dir = Path(config_path).expanduser().resolve().parent
+    with tempfile.NamedTemporaryFile('w', suffix='.yaml', delete=False, dir=str(config_dir)) as tmp:
         tmp_path = tmp.name
         yaml.safe_dump(cfg, tmp)
 

@@ -268,17 +268,16 @@ class S3StreamConnector:
         RetryExhaustedError
             If listing fails after all retry attempts.
         """
-        # Check dependencies before entering retry loop
-        self._client()
-
-        def _list():
+        def _list_once():
             client = self._client()
             paginator = client.get_paginator("list_objects_v2")
+            keys = []
             for page in paginator.paginate(Bucket=self.bucket, Prefix=self.prefix):
                 for item in page.get("Contents", []):
-                    yield item["Key"]
+                    keys.append(item["Key"])
+            return keys
 
-        return self._retry_with_backoff(_list)
+        return iter(self._retry_with_backoff(_list_once))
 
     def stream_object(self, key: str):
         """Stream lines from an S3 object with retry support.
@@ -302,15 +301,18 @@ class S3StreamConnector:
         RetryExhaustedError
             If streaming fails after all retry attempts.
         """
-        # Check dependencies before entering retry loop
-        self._client()
-
-        def _stream():
+        def _stream_once():
             client = self._client()
             obj = client.get_object(Bucket=self.bucket, Key=key)
-            return obj["Body"].iter_lines()
+            body = obj["Body"]
+            try:
+                return list(body.iter_lines())
+            finally:
+                close = getattr(body, "close", None)
+                if callable(close):
+                    close()
 
-        return self._retry_with_backoff(_stream)
+        return iter(self._retry_with_backoff(_stream_once))
 
 
 __all__ = ["S3StreamConnector"]

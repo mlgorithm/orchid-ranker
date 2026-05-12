@@ -12,9 +12,8 @@ from __future__ import annotations
 
 import argparse
 import json
-import random
 from pathlib import Path
-from typing import Dict, Iterable, Optional, Tuple
+from typing import Dict, Optional, Tuple
 
 import numpy as np
 import pandas as pd

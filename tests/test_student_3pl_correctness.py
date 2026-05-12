@@ -9,15 +9,17 @@ Tests with known expected values for:
 - Knowledge decay via forgetting
 """
 import sys
+
 sys.path.insert(0, "src")
 
 import math
+
 import numpy as np
 import pytest
 
 from orchid_ranker.agents.student_agent import (
-    StudentAgent,
     ItemMeta,
+    StudentAgent,
 )
 
 
@@ -537,7 +539,6 @@ class TestZPDMatchScore:
         agent = StudentAgent(user_id=70, zpd_delta=0.1, zpd_width=0.25, seed=42)
         theta = 0.5
         delta = agent.zpd_delta
-        width = agent.zpd_width
 
         target = theta + delta  # 0.6
 
@@ -602,7 +603,6 @@ class TestKnowledgeDecay:
             seed=42,
         )
         agent.knowledge = 0.8
-        initial_k = agent.knowledge
 
         agent._apply_forgetting()
 

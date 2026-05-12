@@ -1,5 +1,5 @@
 site_name: Orchid Ranker
-site_description: Adaptive-learning recommender stack with learner-state tracing, progression reward, and safe rollout.
+site_description: Adaptive-learning engine with learner-state tracing, progression reward, and safe rollout.
 site_url: https://mlgorithm.github.io/orchid-ranker/
 repo_url: https://github.com/mlgorithm/orchid-ranker
 repo_name: mlgorithm/orchid-ranker

@@ -4,16 +4,18 @@
 
 ### Snowflake
 ```python
-from orchid_ranker.connectors.snowflake import SnowflakeFetcher
-fetcher = SnowflakeFetcher(conn_str="...", role="ANALYST")
-df = fetcher.query("SELECT user_id, item_id, label FROM interactions")
+from orchid_ranker.connectors.snowflake import SnowflakeConnector
+
+connector = SnowflakeConnector.from_env()
+df = connector.fetch_dataframe("SELECT user_id, item_id, label FROM interactions")
 ```
 
 ### BigQuery
 ```python
-from orchid_ranker.connectors.bigquery import BigQueryFetcher
-fetcher = BigQueryFetcher(project_id="my-proj")
-df = fetcher.query("SELECT * FROM dataset.interactions")
+from orchid_ranker.connectors.bigquery import BigQueryConnector
+
+connector = BigQueryConnector(project="my-proj")
+df = connector.query_dataframe("SELECT * FROM dataset.interactions")
 ```
 
 ### S3 streaming
@@ -22,14 +24,15 @@ Use `orchid_ranker.connectors.s3_stream` to stream interaction logs into the age
 ## 2. Experiment logging to MLflow
 
 ```python
-from orchid_ranker.connectors.mlflow import MLflowLogger
-logger = MLflowLogger(experiment="orchid")
-logger.log_params({...})
+from orchid_ranker.connectors.mlflow import MLflowTracker
+
+tracker = MLflowTracker(experiment="orchid")
+tracker.log_params({...})
 ```
 
 ## 3. Deployment options
 
-- **Docker**: `docker build -t orchid-ranker .` and run `docker run -p 8000:8000 orchid-ranker`.
+- **Docker**: `docker build -t orchid-ranker .` and run `docker run -p 8000:8000 -p 8081:8081 -p 9090:9090 orchid-ranker`.
 - **Helm**: `helm install orchid ./deploy/helm/orchid-ranker` (configure values for secrets, DP flags, connectors).
 - **Terraform**: reference modules under `deploy/terraform/` to provision infrastructure.
 

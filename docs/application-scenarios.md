@@ -46,16 +46,16 @@ outcomes.
 | Track each user's completed categories | KT/BKT outcome tracing per category |
 | Don't assign problems that are too easy or too hard | Stretch-zone scoring (`stretch_fit`) |
 | Enforce prerequisite order (algebra -> calculus) | `DependencyGraph` with topological sorting |
-| Adapt in real-time as the user responds | `AdaptiveLearningRecommender.observe()` -> live learner-state update |
+| Adapt in real-time as the user responds | `AdaptiveLearningEngine.observe()` -> live learner-state update |
 | Measure learning, not just engagement | `progression_gain`, `category_coverage`, `sequence_adherence` |
 | FERPA/COPPA compliance | DP-SGD presets, audit logging |
 
 **What it looks like in code:**
 
 ```python
-from orchid_ranker import AdaptiveLearningRecommender
+from orchid_ranker import AdaptiveLearningEngine
 
-rec = AdaptiveLearningRecommender(policy="auto").fit(
+rec = AdaptiveLearningEngine(policy="auto").fit(
     outcomes,
     correct_col="correct",
     concept_col="concept",
