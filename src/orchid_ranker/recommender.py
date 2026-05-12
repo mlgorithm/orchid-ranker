@@ -324,29 +324,29 @@ class OrchidRecommender:
                 "or a lower-level tower model used directly with StreamingAdaptiveRanker."
             )
         if scaling_config is not None:
-            user_features = torch.zeros(
+            stream_user_features = torch.zeros(
                 (len(self._user2idx), 1),
                 dtype=torch.float32,
                 device=self.device,
             )
             if self._item_features is not None:
-                item_features = torch.as_tensor(self._item_features, dtype=torch.float32, device=self.device)
+                stream_item_features = torch.as_tensor(self._item_features, dtype=torch.float32, device=self.device)
             else:
-                item_features = torch.zeros(
+                stream_item_features = torch.zeros(
                     (len(self._item2idx), 1),
                     dtype=torch.float32,
                     device=self.device,
                 )
         else:
-            user_features = self.user_features
-            item_features = self.item_features
-        if user_features is None or item_features is None:
-            raise RuntimeError("Fitted recommender did not expose user/item feature tensors.")
+            if self.user_features is None or self.item_features is None:
+                raise RuntimeError("Fitted recommender did not expose user/item feature tensors.")
+            stream_user_features = self.user_features
+            stream_item_features = self.item_features
 
         streamer = StreamingAdaptiveRanker(
             tower=tower,
-            user_features=user_features,
-            item_features=item_features,
+            user_features=stream_user_features,
+            item_features=stream_item_features,
             lr=lr,
             l2=l2,
             monitor=monitor,
