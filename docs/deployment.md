@@ -7,7 +7,7 @@ docker build -t orchid-ranker .
 docker run --rm -p 8000:8000 orchid-ranker
 ```
 
-The Dockerfile installs Orchid Ranker with agentic, viz, preprocess, and observability extras and exposes port 8000 by default.
+The Dockerfile installs Orchid Ranker with the project extras declared in `pyproject.toml` and exposes port 8000 by default.
 
 ## Helm
 

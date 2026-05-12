@@ -120,8 +120,8 @@ Understand what makes Orchid different:
 
 | Strategy | Type | Best for |
 |----------|------|----------|
-| `auto` | Selector | Let Orchid choose `als` or `explicit_mf` |
-| `als` | Matrix factorization | Quick start, implicit feedback |
+| `auto` | Selector | Let Orchid choose legacy binary MF or `explicit_mf` |
+| `als` | Legacy binary MF | Backward-compatible quick start; use `implicit_als` for true ALS |
 | `explicit_mf` | Matrix factorization | Explicit rating scales |
 | `neural_mf` | Neural MF | Streaming adaptation through `as_streaming()` |
 | `linucb` | Contextual bandit | Cold-start exploration |
@@ -129,7 +129,7 @@ Understand what makes Orchid different:
 | `popularity` | Non-personalized | Baseline comparison |
 | + 4 more | | See `OrchidRecommender.available_strategies()` |
 
-Install `orchid-ranker[implicit]` to use `implicit_als` or `implicit_bpr`.
+Install `orchid-ranker[implicit]` to use true `implicit_als` or `implicit_bpr`.
 
 For adaptive learning, start with `AdaptiveLearningEngine`. It composes
 AKT/SAKT-style tracing, progression reward, difficulty/prerequisite metadata,

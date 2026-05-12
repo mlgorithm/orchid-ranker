@@ -35,9 +35,12 @@ rec = OrchidRecommender(strategy="als")
 rec.fit(df, user_col="user_id", item_col="item_id", rating_col="rating")
 ```
 
-`"als"` is a good default for implicit or sparse data. Pass `strategy="auto"`
-to let Orchid pick -- it selects `explicit_mf` when it detects a range of
-rating values and `als` for binary signals.
+`"als"` is a backward-compatible binary-MF baseline trained with BCE and
+sampled missing-item negatives when `rating_col` is omitted. Pass
+`strategy="auto"` to let Orchid pick -- it selects `explicit_mf` when it
+detects a range of rating values and `als` for binary signals. Install
+`orchid-ranker[implicit]` and use `strategy="implicit_als"` when you need a
+true alternating-least-squares solver.
 
 ## Recommend and predict
 

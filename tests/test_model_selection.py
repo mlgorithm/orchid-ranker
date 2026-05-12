@@ -2,7 +2,13 @@
 
 import pandas as pd
 
-from orchid_ranker.model_selection import cross_validate, evaluate_on_holdout, train_test_split
+from orchid_ranker.model_selection import (
+    _build_user_stratified_folds,
+    chronological_user_split,
+    cross_validate,
+    evaluate_on_holdout,
+    train_test_split,
+)
 from orchid_ranker.recommender import OrchidRecommender
 
 
@@ -118,6 +124,71 @@ class TestTrainTestSplit:
         # Single-interaction users stay in train to avoid impossible cold-start test users
         assert len(train) == len(df)
         assert test.empty
+
+    def test_chronological_user_split_has_no_future_leakage(self):
+        """Per-user chronological split never trains on a user's future events."""
+        df = pd.DataFrame({
+            "user_id": [1, 1, 1, 1, 2, 2, 2, 2],
+            "item_id": [10, 20, 30, 40, 50, 60, 70, 80],
+            "timestamp": [4, 1, 3, 2, 1, 4, 2, 3],
+        })
+
+        train, test = chronological_user_split(df, test_size=0.25)
+
+        for user_id in test["user_id"].unique():
+            max_train_time = train[train["user_id"] == user_id]["timestamp"].max()
+            min_test_time = test[test["user_id"] == user_id]["timestamp"].min()
+            assert max_train_time < min_test_time
+
+    def test_train_test_split_auto_uses_chronological_when_timestamp_present(self):
+        """Default by-user splitting is chronological when timestamp data exists."""
+        df = pd.DataFrame({
+            "user_id": [1, 1, 1, 2, 2, 2],
+            "item_id": [10, 20, 30, 40, 50, 60],
+            "timestamp": [3, 1, 2, 1, 3, 2],
+        })
+
+        train, test = train_test_split(df, test_size=0.34, by_user=True)
+
+        for user_id in test["user_id"].unique():
+            max_train_time = train[train["user_id"] == user_id]["timestamp"].max()
+            min_test_time = test[test["user_id"] == user_id]["timestamp"].min()
+            assert max_train_time < min_test_time
+
+    def test_cross_validate_chronological_folds_have_no_future_leakage(self):
+        """Chronological CV folds do not include future user events in train."""
+        df = pd.DataFrame({
+            "user_id": [1, 1, 1, 1, 2, 2, 2, 2],
+            "item_id": [10, 20, 30, 40, 50, 60, 70, 80],
+            "timestamp": [1, 2, 3, 4, 1, 2, 3, 4],
+        })
+
+        fold_data = _build_user_stratified_folds(
+            df,
+            k=2,
+            random_state=42,
+            user_col="user_id",
+            time_col="timestamp",
+            chronological=True,
+        )
+
+        assert fold_data
+        for train, test in fold_data:
+            for user_id in test["user_id"].unique():
+                max_train_time = train[train["user_id"] == user_id]["timestamp"].max()
+                min_test_time = test[test["user_id"] == user_id]["timestamp"].min()
+                assert max_train_time < min_test_time
+
+        scores = cross_validate(
+            df,
+            strategy="popularity",
+            k=2,
+            metrics=["precision@5"],
+            time_col="timestamp",
+            chronological=True,
+        )
+
+        assert "precision@5" in scores
 
 
 class TestEvaluateOnHoldout:

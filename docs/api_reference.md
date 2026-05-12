@@ -131,7 +131,7 @@ class OrchidRecommender:
 
 **Parameters:**
 
-- `strategy` — One of: `"auto"`, `"als"`, `"explicit_mf"`, `"neural_mf"`, `"linucb"`, `"user_knn"`, `"popularity"`, `"random"`, `"implicit_als"`, `"implicit_bpr"`. Typos produce a helpful "did you mean?" suggestion.
+- `strategy` — One of: `"auto"`, `"als"`, `"explicit_mf"`, `"neural_mf"`, `"linucb"`, `"user_knn"`, `"popularity"`, `"random"`, `"implicit_als"`, `"implicit_bpr"`. The historical `"als"` strategy is a binary-MF/BCE baseline; use `"implicit_als"` for true alternating least squares. Typos produce a helpful "did you mean?" suggestion.
 - `device` — `"cpu"` or `"cuda"`. Defaults to auto-detect.
 - `validate_inputs` — When `True`, validates DataFrame schema before fitting. Set `False` for legacy pipeline integration.
 - `**strategy_kwargs` — Forwarded to the underlying strategy (e.g., `epochs=10`, `emb_dim=64`, `alpha=1.5`).
@@ -515,10 +515,26 @@ def train_test_split(
     test_size: float = 0.2,
     by_user: bool = True,
     random_state: int = 42,
+    time_col: Optional[str] = "timestamp",
+    chronological: Optional[bool] = None,
 ) -> Tuple[pd.DataFrame, pd.DataFrame]
 ```
 
-Split interactions into train/test. When `by_user=True`, each user's interactions are split proportionally (stratified).
+Split interactions into train/test. When `by_user=True` and a timestamp column is present, each user's future events are held out chronologically. Set `chronological=False` for the legacy random within-user split.
+
+### chronological_user_split
+
+```python
+def chronological_user_split(
+    interactions: pd.DataFrame,
+    *,
+    test_size: float = 0.2,
+    user_col: str = "user_id",
+    time_col: str = "timestamp",
+) -> Tuple[pd.DataFrame, pd.DataFrame]
+```
+
+Leak-free per-user split for sequential KT/adaptive-learning evaluation.
 
 ### cross_validate
 
@@ -530,10 +546,12 @@ def cross_validate(
     metrics: Optional[List[str]] = None,
     strategy_kwargs: Optional[Dict] = None,
     random_state: int = 42,
+    time_col: Optional[str] = "timestamp",
+    chronological: Optional[bool] = None,
 ) -> Dict[str, Dict[str, float]]
 ```
 
-K-fold cross-validation with per-user stratification. Returns dict of `{metric_name: {"mean": float, "std": float}}`.
+K-fold cross-validation with per-user stratification. If timestamp data is present, folds use train-before-test chronological cutoffs per user. Returns dict of `{metric_name: {"mean": float, "std": float}}`.
 
 ### compare_models
 
