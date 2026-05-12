@@ -16,7 +16,6 @@ from __future__ import annotations
 
 import itertools
 import logging
-import math
 import time
 from abc import ABC, abstractmethod
 from collections import defaultdict

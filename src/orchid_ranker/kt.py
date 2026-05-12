@@ -298,8 +298,14 @@ class SAKTTracer:
             raise ValueError("d_model must be divisible by n_heads")
         if not 0.0 <= dropout < 1.0:
             raise ValueError("dropout must be in [0, 1)")
+        if learning_rate <= 0.0:
+            raise ValueError("learning_rate must be > 0")
+        if epochs < 1:
+            raise ValueError("epochs must be >= 1")
         if batch_size < 1:
             raise ValueError("batch_size must be >= 1")
+        if not 0.0 <= correct_threshold <= 1.0:
+            raise ValueError("correct_threshold must be in [0, 1]")
 
         self.max_seq_len = int(max_seq_len)
         self.d_model = int(d_model)

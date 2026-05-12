@@ -92,9 +92,21 @@ def main(argv: Sequence[str] | None = None) -> int:
         name, params = _parse_strategy(spec)
         print(f"\n>>> Strategy: {name} ({params})")
         rec = OrchidRecommender(strategy=name, validate_inputs=True, **params)
-        rec.fit(train_df, rating_col=args.label_col)
+        rec.fit(
+            train_df,
+            user_col=args.user_col,
+            item_col=args.item_col,
+            rating_col=args.label_col,
+        )
         recs = _recommend(rec, users, args.top_k)
-        report: RankingReport = evaluate_recommendations(recs, relevance)
+        report: RankingReport = evaluate_recommendations(
+            recs,
+            relevance,
+            k_prec=args.top_k,
+            k_rec=args.top_k,
+            k_map=args.top_k,
+            k_ndcg=args.top_k,
+        )
         metrics = {
             "precision_at_5": report.precision_at_5,
             "recall_at_5": report.recall_at_5,

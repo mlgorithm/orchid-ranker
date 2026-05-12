@@ -1,6 +1,6 @@
 # Orchid Ranker
 
-**Adaptive-learning recommender stack** for systems that choose the next best
+**Adaptive-learning engine** for systems that choose the next best
 exercise, lesson, task, or review item as learners improve, struggle, recover,
 or move through structured content.
 
@@ -9,7 +9,7 @@ or move through structured content.
 Orchid Ranker is purpose-built for products where progress matters more than
 the next click. Unlike generic recommender systems, it ships with:
 
-- **A single high-level API** for adaptive learning: `AdaptiveLearningRecommender`
+- **A single high-level API** for adaptive learning: `AdaptiveLearningEngine`
 - **Learner-state tracking** through AKT/SAKT-style knowledge tracing
 - **Prerequisite-aware progression** through concept and difficulty metadata
 - **Progression-native metrics** for competence, category coverage, and stretch fit
@@ -30,7 +30,7 @@ Create your first adaptive-learning recommender:
 
 ```python
 import pandas as pd
-from orchid_ranker import AdaptiveLearningRecommender
+from orchid_ranker import AdaptiveLearningEngine
 
 events = pd.DataFrame(
     {
@@ -42,7 +42,7 @@ events = pd.DataFrame(
     }
 )
 
-recommender = AdaptiveLearningRecommender(policy="auto", epochs=1).fit(
+recommender = AdaptiveLearningEngine(policy="auto", epochs=1).fit(
     events,
     correct_col="correct",
     concept_col="concept",
@@ -58,7 +58,7 @@ recommender.observe(user_id=1, item_id=ranked[0].item_id, correct=True)
 - [**Adaptive learning positioning**](adaptive-learning-positioning.md) - what Orchid is for, who it serves, and what it should not claim
 - [**Quickstart**](quickstart.md) - install, fit, recommend, evaluate
 - [**Algorithm roadmap**](algorithm-roadmap.md) - modern KT, semantic exercise recommendation, and policy-learning direction
-- [**Guide 1: Fit offline**](guides/01-fit-offline.md) - batch recommender fallback workflow
+- [**Guide 1: Fit offline**](guides/01-fit-offline.md) - batch fallback workflow
 - [**Offline policy evaluation**](offline-policy-evaluation.md) - evaluate adaptive policies before rollout
 - [**Guide 2: Serve streaming**](guides/02-serve-streaming.md) - generic live adaptation
 - [**Guide 3: Operate safely**](guides/03-operate-safely.md) - guardrails and fallback

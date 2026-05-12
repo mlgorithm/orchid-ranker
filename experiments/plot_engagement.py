@@ -55,8 +55,9 @@ import sys
 from pathlib import Path
 from typing import List, Optional, Sequence, Tuple
 
-import pandas as pd
 import matplotlib.pyplot as plt
+import pandas as pd
+
 try:
     import seaborn as sns  # type: ignore
     HAS_SEABORN = True

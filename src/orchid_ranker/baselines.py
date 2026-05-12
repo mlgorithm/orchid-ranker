@@ -926,13 +926,9 @@ class NeuralMatrixFactorizationBaseline(BaseBaseline):
                     # so uniform sampling is a good approximation and avoids rejection sampling overhead.
                     j_neg = torch.randint(0, self.num_items, (u_pos.size(0),), device=self.device)
                     self.optimizer.zero_grad()
-                    # predicted preference scores (logits before sigmoid)
-                    u_emb = self.user_emb(u_pos)
-                    i_emb = self.item_emb(i_pos)
-                    j_emb = self.item_emb(j_neg)
-                    # Use dot products as scores
-                    s_ui = (u_emb * i_emb).sum(dim=1)
-                    s_uj = (u_emb * j_emb).sum(dim=1)
+                    # Use the same MLP scoring path for training and inference.
+                    s_ui = self._logits(u_pos, i_pos).view(-1)
+                    s_uj = self._logits(u_pos, j_neg).view(-1)
                     # BPR loss: -log sigma(s_ui - s_uj)
                     loss = -torch.nn.functional.logsigmoid(s_ui - s_uj).mean()
                     loss.backward()
@@ -943,6 +939,9 @@ class NeuralMatrixFactorizationBaseline(BaseBaseline):
             pos_mask = (y > 0)
             up = users[pos_mask]
             ip = items[pos_mask]
+            if up.numel() == 0:
+                self.result.train_loss = 0.0
+                return
             bsz = max(256, self.batch_size)
             neg_k = max(1, self.neg_k)
             ce = nn.CrossEntropyLoss()
@@ -957,11 +956,9 @@ class NeuralMatrixFactorizationBaseline(BaseBaseline):
                     j_neg = torch.randint(0, self.num_items, (u_pos.size(0), neg_k), device=self.device)  # [B, K]
 
                     self.optimizer.zero_grad()
-                    u_emb = self.user_emb(u_pos)                      # [B, D]
-                    i_pos_emb = self.item_emb(i_pos)                 # [B, D]
-                    i_neg_emb = self.item_emb(j_neg)                 # [B, K, D]
-                    s_pos = (u_emb * i_pos_emb).sum(dim=1, keepdim=True)      # [B, 1]
-                    s_neg = (u_emb.unsqueeze(1) * i_neg_emb).sum(dim=2)       # [B, K]
+                    s_pos = self._logits(u_pos, i_pos).view(-1, 1)             # [B, 1]
+                    u_neg = u_pos.repeat_interleave(neg_k)
+                    s_neg = self._logits(u_neg, j_neg.reshape(-1)).view(-1, neg_k)  # [B, K]
                     logits = torch.cat([s_pos, s_neg], dim=1)                 # [B, 1+K]
                     target = torch.zeros(logits.size(0), dtype=torch.long, device=self.device)  # pos at index 0
                     loss = ce(logits, target)
@@ -980,6 +977,13 @@ class NeuralMatrixFactorizationBaseline(BaseBaseline):
                     self.optimizer.step()
             self.result.train_loss = float(loss.detach().cpu().item()) if 'loss' in locals() else 0.0
 
+    def _logits(self, user_ids: torch.Tensor, item_ids: torch.Tensor) -> torch.Tensor:
+        """Compute raw MLP scores for user-item pairs."""
+        u = self.user_emb(user_ids)
+        i = self.item_emb(item_ids)
+        x = torch.cat([u, i], dim=1)
+        return self.mlp(x)
+
     def _forward(self, user_ids: torch.Tensor, item_ids: torch.Tensor) -> torch.Tensor:
         """Compute model predictions for user-item pairs.
 
@@ -995,11 +999,7 @@ class NeuralMatrixFactorizationBaseline(BaseBaseline):
         torch.Tensor
             Sigmoid-activated predictions in [0, 1].
         """
-        u = self.user_emb(user_ids)
-        i = self.item_emb(item_ids)
-        x = torch.cat([u, i], dim=1)
-        logits = self.mlp(x)
-        return self.sigmoid(logits)
+        return self.sigmoid(self._logits(user_ids, item_ids))
 
     def infer(self, *, user_ids: torch.Tensor, item_ids: torch.Tensor, **_) -> torch.Tensor:
         """Score all candidate items for a given user.

@@ -23,7 +23,7 @@ jobs:
       - name: Run pip-audit
         run: |
           mkdir -p security-reports
-          pip-audit --format json --output security-reports/pip-audit.json || true
+          pip-audit --format json --output security-reports/pip-audit.json
         working-directory: ${{ github.workspace }}
       - name: Generate SBOM via pip
         run: |

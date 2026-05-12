@@ -1,9 +1,9 @@
-# Guide 1: Fit a batch recommender
+# Guide 1: Fit the batch fallback
 
 `OrchidRecommender` is Orchid's batch fallback for ordinary user-item data. Use
 it when you do not yet have learning concepts, difficulty, prerequisites, or
 live outcome updates. For the primary adaptive-learning workflow, start with
-`AdaptiveLearningRecommender` in the [Quickstart](../quickstart.md). This guide
+`AdaptiveLearningEngine` in the [Quickstart](../quickstart.md). This guide
 walks through the minimal batch path: load interactions, fit, recommend,
 predict, and save.
 
@@ -81,7 +81,7 @@ with one-line descriptions.
 
 ---
 
-You can stop here and have a working batch recommender. For adaptive learning
+You can stop here and have a working fallback model. For adaptive learning
 with learner state and live outcomes, use
 `examples/adaptive_learning_quickstart.py`. For generic real-time adaptation
 without learning metadata, continue to

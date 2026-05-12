@@ -5,9 +5,10 @@ Creates a synthetic educational interaction dataset with known properties:
 - Seed-locked for exact reproducibility
 - Includes both implicit and explicit signals
 """
+import os
+
 import numpy as np
 import pandas as pd
-import os
 
 SEED = 42
 NUM_USERS = 200

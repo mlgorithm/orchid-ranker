@@ -4,7 +4,7 @@
 [![Python](https://img.shields.io/pypi/pyversions/orchid-ranker.svg)](https://pypi.org/project/orchid-ranker/)
 [![License](https://img.shields.io/badge/license-Apache%202.0-blue.svg)](LICENSE)
 
-**A first-class adaptive-learning recommender library for products where user outcomes matter more than short-term clicks.**
+**A first-class adaptive-learning engine for products where user outcomes matter more than short-term clicks.**
 
 Orchid Ranker is built for systems where the user is getting better at
 something over time: adaptive learning, corporate training, tutoring,
@@ -24,12 +24,12 @@ pip install 'orchid-ranker[ml]'
 
 ```python
 import pandas as pd
-from orchid_ranker import AdaptiveLearningRecommender
+from orchid_ranker import AdaptiveLearningEngine
 
 outcomes = pd.read_csv("learner_outcomes.csv")  # user_id, item_id, correct
 catalog = pd.read_csv("exercise_catalog.csv")   # item_id, concept, difficulty
 
-learner_rec = AdaptiveLearningRecommender(
+learner_rec = AdaptiveLearningEngine(
     tracer_model="akt",
     policy="auto",
     epochs=2,
@@ -131,7 +131,7 @@ Understand what makes Orchid different:
 
 Install `orchid-ranker[implicit]` to use `implicit_als` or `implicit_bpr`.
 
-For adaptive learning, start with `AdaptiveLearningRecommender`. It composes
+For adaptive learning, start with `AdaptiveLearningEngine`. It composes
 AKT/SAKT-style tracing, progression reward, difficulty/prerequisite metadata,
 and live `observe()` updates into one fit/rank/observe API. Use lower-level
 pieces such as `BayesianKnowledgeTracing`, `DependencyGraph`,
@@ -164,7 +164,7 @@ See [CONTRIBUTING.md](CONTRIBUTING.md). All contributions welcome.
 
 ```bibtex
 @software{orchid_ranker,
-  title={Orchid Ranker: Adaptive-Learning Recommendation},
+  title={Orchid Ranker: Adaptive-Learning Engine},
   author={Sam Urmian},
   year={2024},
   url={https://github.com/mlgorithm/orchid-ranker}

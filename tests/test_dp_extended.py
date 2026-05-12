@@ -1,18 +1,18 @@
 """Extended tests for differential privacy modules."""
 import sys
+
 sys.path.insert(0, "src")
 
-import math
 import pytest
 import torch
 import torch.nn as nn
 
-from orchid_ranker.dp import DP_PRESETS, get_dp_config
 from orchid_ranker.agents.simple_dp import (
-    SimpleDPConfig,
     SimpleDPAccountant,
+    SimpleDPConfig,
     dp_sgd_step,
 )
+from orchid_ranker.dp import DP_PRESETS, get_dp_config
 
 
 class TestSimpleDPConfig:

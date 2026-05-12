@@ -35,7 +35,13 @@ from orchid_ranker.evaluation import expected_calibration_error
 
 # Torch-dependent imports -- skip the entire module if torch is absent.
 torch = pytest.importorskip("torch")
-from orchid_ranker import OrchidRecommender, load_model, save_model  # noqa: E402
+from orchid_ranker import (  # noqa: E402
+    AdaptiveLearningEngine,
+    AdaptiveLearningRecommender,
+    OrchidRecommender,
+    load_model,
+    save_model,
+)
 
 # ===================================================================
 # Fixtures
@@ -106,6 +112,7 @@ class TestLazyImports:
     def test_torch_dependent_symbols_accessible(self):
         """OrchidRecommender etc. are reachable via lazy import."""
         assert OrchidRecommender is not None
+        assert AdaptiveLearningEngine is AdaptiveLearningRecommender
         assert callable(save_model)
         assert callable(load_model)
 

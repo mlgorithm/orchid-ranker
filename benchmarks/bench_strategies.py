@@ -10,7 +10,6 @@ from __future__ import annotations
 
 import argparse
 import json
-import os
 import sys
 import time
 from pathlib import Path
@@ -22,7 +21,6 @@ import pandas as pd
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
 
 from orchid_ranker import OrchidRecommender
-from orchid_ranker.evaluation import precision_at_k, recall_at_k, ndcg_at_k
 
 FIXTURES_DIR = Path(__file__).resolve().parent / "fixtures"
 GOLDEN_DIR = Path(__file__).resolve().parent / "golden"

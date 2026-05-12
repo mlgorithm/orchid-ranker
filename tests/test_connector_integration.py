@@ -14,14 +14,12 @@ import sys
 sys.path.insert(0, "src")
 
 import logging
-from unittest.mock import MagicMock, Mock, patch
+from unittest.mock import MagicMock, patch
 
 import pytest
 
 from orchid_ranker.connectors.bigquery import BigQueryConnector
 from orchid_ranker.connectors.snowflake import SnowflakeConnector
-from orchid_ranker.connectors.exceptions import RetryExhaustedError
-
 
 # ---------------------------------------------------------------------------
 # BigQuery: client caching
@@ -134,18 +132,18 @@ class TestBigQueryNonTransientError:
 
 
 # ---------------------------------------------------------------------------
-# Snowflake: connection reuse across retries
+# Snowflake: reconnect across retries
 # ---------------------------------------------------------------------------
 
-class TestSnowflakeConnectionReuse:
-    """Verify that fetch_dataframe creates a single connection for all retry attempts."""
+class TestSnowflakeReconnectsAcrossRetries:
+    """Verify that fetch_dataframe opens a fresh connection for retry attempts."""
 
     @patch("orchid_ranker.connectors.snowflake.time.sleep")
     @patch("orchid_ranker.connectors.snowflake.snowflake")
-    def test_single_connection_for_retries(
+    def test_reconnects_for_retries(
         self, mock_sf_module, mock_sleep
     ) -> None:
-        """fetch_dataframe should open one connection and reuse it across retries."""
+        """fetch_dataframe should not reuse a possibly dead connection after failure."""
         mock_conn = MagicMock()
         mock_sf_module.connect.return_value = mock_conn
 
@@ -179,10 +177,8 @@ class TestSnowflakeConnectionReuse:
         with patch.dict("sys.modules", {"pandas": mock_pd}):
             connector.fetch_dataframe("SELECT 1")
 
-        # Only one connection should have been created
-        mock_sf_module.connect.assert_called_once()
-        # Connection should be closed after the operation
-        mock_conn.close.assert_called()
+        assert mock_sf_module.connect.call_count == 2
+        assert mock_conn.close.call_count == 2
 
 
 # ---------------------------------------------------------------------------

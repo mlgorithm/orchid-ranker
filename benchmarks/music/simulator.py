@@ -19,7 +19,7 @@ from __future__ import annotations
 
 import argparse
 import logging
-from typing import Any, Dict, Optional, Protocol, runtime_checkable
+from typing import Any, Dict, Protocol, runtime_checkable
 
 import numpy as np
 import pandas as pd
@@ -133,7 +133,7 @@ def _sample_negatives(
 
     # Build set of observed (user_idx, item_idx) pairs
     all_items = np.array(sorted(item_id_to_idx.values()))
-    num_items = len(all_items)
+    len(all_items)
 
     user_item_set: set[tuple[int, int]] = set()
     pos_users: list[int] = []

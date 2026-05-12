@@ -40,7 +40,15 @@ def precision_at_k(recommended: Sequence[int], relevant: Collection[int], k: int
         return 0.0
     recommended = list(recommended)[:k]
     relevant_set = set(int(r) for r in relevant)
-    hits = sum(1 for item in recommended if item in relevant_set)
+    seen: set[int] = set()
+    hits = 0
+    for item in recommended:
+        item_id = int(item)
+        if item_id in seen:
+            continue
+        seen.add(item_id)
+        if item_id in relevant_set:
+            hits += 1
     return hits / float(k)
 
 
@@ -67,7 +75,7 @@ def recall_at_k(recommended: Sequence[int], relevant: Collection[int], k: int) -
     if not relevant_set:
         return 0.0
     recommended = list(recommended)[:k]
-    hits = sum(1 for item in recommended if item in relevant_set)
+    hits = len({int(item) for item in recommended if int(item) in relevant_set})
     return hits / float(len(relevant_set))
 
 
@@ -94,8 +102,11 @@ def ndcg_at_k(recommended: Sequence[int], relevant: Dict[int, float], k: int) ->
         return 0.0
     recommended = list(recommended)[:k]
     gains = []
+    seen: set[int] = set()
     for rank, item in enumerate(recommended, start=1):
-        rel = float(relevant.get(int(item), 0.0))
+        item_id = int(item)
+        rel = 0.0 if item_id in seen else float(relevant.get(item_id, 0.0))
+        seen.add(item_id)
         gain = (2 ** rel - 1) / np.log2(rank + 1)
         gains.append(gain)
     dcg = float(np.sum(gains))
@@ -134,8 +145,13 @@ def average_precision(recommended: Sequence[int], relevant: Collection[int], k: 
     recommended = list(recommended)[:k]
     score = 0.0
     hits = 0
+    seen: set[int] = set()
     for idx, item in enumerate(recommended, start=1):
-        if item in relevant_set:
+        item_id = int(item)
+        if item_id in seen:
+            continue
+        seen.add(item_id)
+        if item_id in relevant_set:
             hits += 1
             score += hits / idx
     return score / len(relevant_set)

@@ -41,7 +41,6 @@ from typing import (
 from orchid_ranker.evaluation import (
     category_coverage,
     progression_gain,
-    sequence_adherence,
     stretch_fit,
 )
 
@@ -365,16 +364,21 @@ class RollingProgressionMonitor:
             per_user_rates = []
             seen_users = {ev.user_id for ev in events}
             for u in seen_users:
-                recs = [ev.item_id for ev in events if ev.user_id == u]
-                # Each user's "completed" set is taken from *earlier* in the window:
-                # we approximate by using the set of items they got right
-                # before their most recent interaction. Cheap and monotone.
-                rate = sequence_adherence(
-                    recommended_items=recs,
-                    prerequisite_graph=self._prereq,
-                    succeeded=user_succeeded.get(u, set()),
-                )
-                per_user_rates.append(rate)
+                user_events = [ev for ev in events if ev.user_id == u]
+                successes_in_window = {
+                    ev.item_id
+                    for ev in user_events
+                    if ev.correct or ev.post_competence >= self.success_threshold
+                }
+                succeeded_before = set(user_succeeded.get(u, set())) - successes_in_window
+                adherent = 0
+                for ev in user_events:
+                    prereqs = self._prereq.get(ev.item_id, set())
+                    if prereqs.issubset(succeeded_before):
+                        adherent += 1
+                    if ev.correct or ev.post_competence >= self.success_threshold:
+                        succeeded_before.add(ev.item_id)
+                per_user_rates.append(float(adherent) / float(len(user_events)) if user_events else 1.0)
             adherence = float(sum(per_user_rates) / max(1, len(per_user_rates)))
         else:
             adherence = 1.0

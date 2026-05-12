@@ -6,14 +6,15 @@ Complete reference for public classes and functions in Orchid Ranker v0.5.0.
 
 ## Start here: adaptive learning
 
-The primary public workflow is `AdaptiveLearningRecommender`: fit from learner
+The primary public workflow is `AdaptiveLearningEngine`
+(`AdaptiveLearningRecommender` is the existing class name): fit from learner
 outcomes, rank eligible learning items, observe the next outcome, and re-rank
 from updated learner state.
 
 ```python
-from orchid_ranker import AdaptiveLearningRecommender
+from orchid_ranker import AdaptiveLearningEngine
 
-rec = AdaptiveLearningRecommender(policy="auto").fit(
+rec = AdaptiveLearningEngine(policy="auto").fit(
     events,
     correct_col="correct",
     concept_col="skill_id",
@@ -26,6 +27,86 @@ rec.observe("learner-7", ranked[0].item_id, correct=True)
 
 Use `OrchidRecommender` when you only have ordinary user-item interactions and
 need a batch/generic recommender fallback.
+
+---
+
+## orchid_ranker.adaptive_learning
+
+High-level adaptive-learning recommender that composes KT prediction,
+progression reward, delayed-gain priors, support-aware reward modeling, and
+optional prerequisite gating.
+
+```python
+class AdaptiveLearningRecommender:
+    def __init__(self, config: AdaptiveLearningConfig | None = None, **overrides)
+    def fit(
+        self,
+        interactions,
+        *,
+        user_col="user_id",
+        item_col="item_id",
+        correct_col="correct",
+        timestamp_col=None,
+        concept_col=None,
+        item_difficulty_col=None,
+        item_difficulty_map=None,
+        concept_by_item=None,
+        prerequisite_by_concept=None,
+    )
+    def rank(self, user_id, candidate_item_ids, *, top_k=5) -> list[AdaptiveLearningRecommendation]
+    def observe(self, user_id, item_id, correct)
+```
+
+`policy="auto"` resolves to `ProgressionValuePolicy`, the stable default for
+adaptive-learning serving. `DelayedGainValuePolicy` and
+`SupportConstrainedDelayedGainPolicy` remain explicit opt-ins because they need
+stronger logged-support and reward-model calibration evidence. The policy state
+is warm-started from historical outcomes, so prerequisite gating and competence
+estimates reflect the learner's prior history before the first live `observe`.
+
+```python
+from orchid_ranker import AdaptiveLearningEngine
+
+rec = AdaptiveLearningEngine(
+    tracer_model="akt",
+    policy="auto",
+    epochs=2,
+    d_model=32,
+).fit(
+    events,
+    timestamp_col="timestamp",
+    concept_col="skill_id",
+    item_difficulty_col="difficulty",
+)
+
+ranked = rec.rank("learner-7", [10, 20, 30], top_k=3)
+rec.observe("learner-7", ranked[0].item_id, correct=True)
+```
+
+### AdaptiveLearningRecommendation
+
+```python
+@dataclass
+class AdaptiveLearningRecommendation:
+    item_id: Any
+    score: float
+    p_correct: float
+    policy: str
+    difficulty: float | None = None
+    concept_id: Any | None = None
+    competence: float | None = None
+    expected_reward: float | None = None
+    delayed_gain_prior: float | None = None
+    model_prediction: float | None = None
+    support_penalty: float = 0.0
+    prerequisites_met: bool = True
+```
+
+Use `diagnostics()` to log the resolved tracer/policy, concept and item counts,
+delayed-gain prior coverage, and reward-model report.
+
+`AdaptiveLearningEngine` is a top-level alias for
+`AdaptiveLearningRecommender`; use whichever name is clearer in your codebase.
 
 ---
 
@@ -88,83 +169,6 @@ class Recommendation:
 STRATEGY_GUIDE: Dict[str, str]
 # Maps strategy name to human-readable description
 ```
-
----
-
-## orchid_ranker.adaptive_learning
-
-High-level adaptive-learning recommender that composes KT prediction,
-progression reward, delayed-gain priors, support-aware reward modeling, and
-optional prerequisite gating.
-
-```python
-class AdaptiveLearningRecommender:
-    def __init__(self, config: AdaptiveLearningConfig | None = None, **overrides)
-    def fit(
-        self,
-        interactions,
-        *,
-        user_col="user_id",
-        item_col="item_id",
-        correct_col="correct",
-        timestamp_col=None,
-        concept_col=None,
-        item_difficulty_col=None,
-        item_difficulty_map=None,
-        concept_by_item=None,
-        prerequisite_by_concept=None,
-    )
-    def rank(self, user_id, candidate_item_ids, *, top_k=5) -> list[AdaptiveLearningRecommendation]
-    def observe(self, user_id, item_id, correct)
-```
-
-`policy="auto"` resolves to `ProgressionValuePolicy`, the stable default for
-adaptive-learning serving. `DelayedGainValuePolicy` and
-`SupportConstrainedDelayedGainPolicy` remain explicit opt-ins because they need
-stronger logged-support and reward-model calibration evidence. The policy state
-is warm-started from historical outcomes, so prerequisite gating and competence
-estimates reflect the learner's prior history before the first live `observe`.
-
-```python
-from orchid_ranker import AdaptiveLearningRecommender
-
-rec = AdaptiveLearningRecommender(
-    tracer_model="akt",
-    policy="auto",
-    epochs=2,
-    d_model=32,
-).fit(
-    events,
-    timestamp_col="timestamp",
-    concept_col="skill_id",
-    item_difficulty_col="difficulty",
-)
-
-ranked = rec.rank("learner-7", [10, 20, 30], top_k=3)
-rec.observe("learner-7", ranked[0].item_id, correct=True)
-```
-
-### AdaptiveLearningRecommendation
-
-```python
-@dataclass
-class AdaptiveLearningRecommendation:
-    item_id: Any
-    score: float
-    p_correct: float
-    policy: str
-    difficulty: float | None = None
-    concept_id: Any | None = None
-    competence: float | None = None
-    expected_reward: float | None = None
-    delayed_gain_prior: float | None = None
-    model_prediction: float | None = None
-    support_penalty: float = 0.0
-    prerequisites_met: bool = True
-```
-
-Use `diagnostics()` to log the resolved tracer/policy, concept and item counts,
-delayed-gain prior coverage, and reward-model report.
 
 ---
 

@@ -12,9 +12,11 @@ Tests focus on exact formula verification:
 - Boundary behavior
 """
 import sys
+
 sys.path.insert(0, "src")
 
 import math
+
 import pytest
 
 from orchid_ranker.safety.dr_cs import DRConfidenceSequence, DRCSConfig
@@ -329,17 +331,13 @@ class TestClippingLogic:
         expected_z = (0.5 - 1.0) + (0.8 - 0.5) / 0.5
         assert pytest.approx(dr.mean, rel=1e-10) == expected_z
 
-    def test_p_uses_actual_boundary_probability(self):
-        """The DR update should use the actual logged boundary probability."""
+    def test_rejects_propensity_below_configured_floor(self):
+        """The DR update rejects logged propensities outside the configured bound."""
         cfg = DRCSConfig(p_min=0.05, u_max=1.0)
         dr = DRConfidenceSequence(cfg)
 
-        # Feed p_used < p_min
-        dr.update(True, 0.8, 0.5, 0.3, 0.01)
-
-        # The estimator should use the actual logged propensity (0.01)
-        expected_z = (0.5 - 0.3) + (0.8 - 0.5) / 0.01
-        assert pytest.approx(dr.mean, rel=1e-10) == expected_z
+        with pytest.raises(ValueError, match="p_min"):
+            dr.update(True, 0.8, 0.5, 0.3, 0.01)
 
 
 class TestAcceptanceGuardrail:

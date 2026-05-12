@@ -174,13 +174,13 @@ def _auc(labels: np.ndarray, preds: np.ndarray) -> float:
     return float(wins / total) if total else float("nan")
 
 
-def _report(labels: np.ndarray, preds: np.ndarray, *, threshold: float = 0.5) -> KTEvaluationReport:
+def _report(labels: np.ndarray, preds: np.ndarray, *, decision_threshold: float = 0.5) -> KTEvaluationReport:
     if labels.size == 0:
         raise ValueError("cannot evaluate an empty replay")
     preds = np.asarray(preds, dtype=np.float64)
     labels = np.asarray(labels, dtype=np.float64)
     clipped = np.clip(preds, 1e-7, 1.0 - 1e-7)
-    accuracy = float(np.mean((preds >= threshold) == labels))
+    accuracy = float(np.mean((preds >= decision_threshold) == labels))
     brier = float(np.mean((preds - labels) ** 2))
     log_loss = float(-np.mean(labels * np.log(clipped) + (1.0 - labels) * np.log(1.0 - clipped)))
     return KTEvaluationReport(
@@ -216,7 +216,7 @@ def evaluate_tracer_replay(
         preds.append(tracer.predict_correct(user_id, item_id))
         labels.append(label)
         tracer.observe(user_id, item_id, label)
-    return _report(np.asarray(labels, dtype=np.float32), np.asarray(preds, dtype=np.float32), threshold=threshold)
+    return _report(np.asarray(labels, dtype=np.float32), np.asarray(preds, dtype=np.float32))
 
 
 def evaluate_sakt_replay(
@@ -258,7 +258,7 @@ def evaluate_item_mean_baseline(
     test = _ordered(split.test, user_col=split.user_col, timestamp_col=split.timestamp_col)
     preds = [item_mean.get(item_id, global_mean) for item_id in test[split.item_col].tolist()]
     labels = _binary_labels(test[split.correct_col].tolist(), threshold=threshold)
-    return _report(labels, np.asarray(preds, dtype=np.float32), threshold=threshold)
+    return _report(labels, np.asarray(preds, dtype=np.float32))
 
 
 def run_kt_benchmark(

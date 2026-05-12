@@ -2,17 +2,17 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Dict, Iterable, Mapping, Set
+from typing import FrozenSet, Iterable, Mapping, Set
 
 Action = str
 Role = str
 
 
-DEFAULT_POLICY: Dict[Role, Set[Action]] = {
-    "admin": {"preprocess", "experiment", "dp_sensitive", "read_logs"},
-    "ml_engineer": {"preprocess", "experiment", "read_logs"},
-    "analyst": {"experiment", "read_logs"},
-    "viewer": {"read_logs"},
+DEFAULT_POLICY: Mapping[Role, FrozenSet[Action]] = {
+    "admin": frozenset({"preprocess", "experiment", "dp_sensitive", "read_logs"}),
+    "ml_engineer": frozenset({"preprocess", "experiment", "read_logs"}),
+    "analyst": frozenset({"experiment", "read_logs"}),
+    "viewer": frozenset({"read_logs"}),
 }
 
 
@@ -20,7 +20,9 @@ DEFAULT_POLICY: Dict[Role, Set[Action]] = {
 class AccessControl:
     """Role-based access guard with immutable policy."""
 
-    policy: Mapping[Role, Iterable[Action]] = field(default_factory=lambda: DEFAULT_POLICY)
+    policy: Mapping[Role, Iterable[Action]] = field(
+        default_factory=lambda: {role: set(actions) for role, actions in DEFAULT_POLICY.items()}
+    )
 
     def _to_set(self, role: Role) -> Set[Action]:
         actions = self.policy.get(role) or set()

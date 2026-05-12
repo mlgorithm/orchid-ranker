@@ -664,6 +664,8 @@ class StreamingAdaptiveRanker:
         State and residual are pulled fresh on every call. There is no cache
         — by design — so this call reflects the most recent ``observe``.
         """
+        if top_k <= 0:
+            return []
         t0 = time.perf_counter()
         user_idx = self._user_index(user_id)
         pairs = self._candidate_pairs(candidate_item_ids)

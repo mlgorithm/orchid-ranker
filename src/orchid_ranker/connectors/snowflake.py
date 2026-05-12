@@ -436,10 +436,9 @@ class SnowflakeConnector:
         self._require_lib()
         self._check_sql_injection(query)
 
-        # Create connection once outside retry to avoid connection leak per attempt
-        conn = self._connect()
-        try:
-            def _fetch():
+        def _fetch():
+            conn = self._connect()
+            try:
                 cur = conn.cursor()
                 try:
                     cur.execute(query)
@@ -448,13 +447,13 @@ class SnowflakeConnector:
                     return pd.DataFrame(data, columns=columns)
                 finally:
                     cur.close()
+            finally:
+                try:
+                    conn.close()
+                except Exception:
+                    pass
 
-            return self._retry_with_backoff(_fetch)
-        finally:
-            try:
-                conn.close()
-            except Exception:
-                pass
+        return self._retry_with_backoff(_fetch)
 
     def execute(self, query: str, params: Optional[Dict[str, Any]] = None) -> None:
         """Execute a query without returning results with retry support.
@@ -478,22 +477,21 @@ class SnowflakeConnector:
         self._require_lib()
         self._check_sql_injection(query)
 
-        # Create connection once outside retry to avoid connection leak per attempt
-        conn = self._connect()
-        try:
-            def _execute():
+        def _execute():
+            conn = self._connect()
+            try:
                 cur = conn.cursor()
                 try:
                     cur.execute(query, params or {})
                 finally:
                     cur.close()
+            finally:
+                try:
+                    conn.close()
+                except Exception:
+                    pass
 
-            self._retry_with_backoff(_execute)
-        finally:
-            try:
-                conn.close()
-            except Exception:
-                pass
+        self._retry_with_backoff(_execute)
 
 
 __all__ = ["SnowflakeConnector"]

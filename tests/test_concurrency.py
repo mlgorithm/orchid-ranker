@@ -9,20 +9,17 @@ import sys
 
 sys.path.insert(0, "src")
 
-import os
 import threading
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
 import pandas as pd
-import pytest
 
+from orchid_ranker.agents.config import MultiConfig
 from orchid_ranker.connectors.bigquery import BigQueryConnector
 from orchid_ranker.recommender import OrchidRecommender
 from orchid_ranker.safety.safeswitch_dr import SafeSwitchDR, SafeSwitchDRConfig
 from orchid_ranker.security.audit import AuditEvent, AuditLogger, verify_log_integrity
-from orchid_ranker.agents.config import MultiConfig
-
 
 # ---------------------------------------------------------------------------
 # SafeSwitchDR thread safety

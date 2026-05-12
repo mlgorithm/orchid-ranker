@@ -173,6 +173,9 @@ class TestColdStartBridge:
         assert len(recs) == 5
         assert all(isinstance(r, tuple) and len(r) == 2 for r in recs)
 
+    def test_top_k_zero_returns_empty(self, bridge) -> None:
+        assert bridge.recommend(user_id=999, top_k=0) == []
+
     def test_warmth_zero_for_new_user(self, bridge) -> None:
         assert bridge.warmth(999) == 0.0
 
@@ -206,9 +209,10 @@ class TestColdStartBridge:
     def test_warm_user_uses_orchid(self, bridge) -> None:
         """After enough interactions, Orchid scores dominate."""
         for i in range(15):
-            bridge.observe(user_id=1, item_id=i % 10, outcome=1.0)
+            bridge.observe(user_id=1, item_id=i % 5, outcome=1.0)
         recs = bridge.recommend(user_id=1, top_k=5, candidate_item_ids=list(range(10)))
         assert len(recs) == 5
+        assert not set(range(5)).intersection(item_id for item_id, _score in recs)
 
     def test_seed_items_influence_content_scores(self, feats) -> None:
         bridge = ColdStartBridge(

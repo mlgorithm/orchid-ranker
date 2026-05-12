@@ -18,8 +18,7 @@ from __future__ import annotations
 
 import argparse
 import logging
-import sys
-from typing import Any, Dict, Optional, Protocol, runtime_checkable
+from typing import Any, Dict, Protocol, runtime_checkable
 
 import numpy as np
 import pandas as pd

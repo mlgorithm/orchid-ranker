@@ -1,18 +1,19 @@
 """Extended tests for evaluation metrics."""
 import sys
+
 sys.path.insert(0, "src")
 
 import numpy as np
 import pytest
 
 from orchid_ranker.evaluation import (
+    RankingReport,
+    average_precision,
+    evaluate_recommendations,
+    expected_calibration_error,
+    ndcg_at_k,
     precision_at_k,
     recall_at_k,
-    ndcg_at_k,
-    average_precision,
-    expected_calibration_error,
-    evaluate_recommendations,
-    RankingReport,
 )
 
 
@@ -62,6 +63,9 @@ class TestPrecisionAtK:
         p = precision_at_k(recommended, relevant, k=-1)
         assert p == 0.0
 
+    def test_duplicate_recommendations_count_once(self):
+        assert precision_at_k([1, 1, 1], [1], k=3) == pytest.approx(1 / 3)
+
 
 class TestRecallAtK:
     """Test recall_at_k metric."""
@@ -93,6 +97,9 @@ class TestRecallAtK:
         relevant = [4, 5, 6]
         r = recall_at_k(recommended, relevant, k=3)
         assert r == 0.0
+
+    def test_duplicate_recommendations_do_not_overcount(self):
+        assert recall_at_k([1, 1, 1], [1], k=3) == 1.0
 
 
 class TestNDCGAtK:
@@ -136,6 +143,9 @@ class TestNDCGAtK:
         ndcg_best = 1.0
         assert ndcg_worst < ndcg_best
 
+    def test_duplicate_recommendations_do_not_exceed_one(self):
+        assert ndcg_at_k([1, 1, 1], {1: 1.0}, k=3) <= 1.0
+
 
 class TestAveragePrecision:
     """Test average_precision metric."""
@@ -172,6 +182,9 @@ class TestAveragePrecision:
         # Precisions: 1/1, 2/3, 3/5
         expected = (1.0 + 2/3 + 3/5) / 3
         assert ap == pytest.approx(expected)
+
+    def test_duplicate_recommendations_do_not_overcount(self):
+        assert average_precision([1, 1, 1], [1], k=3) == 1.0
 
 
 class TestExpectedCalibrationError:

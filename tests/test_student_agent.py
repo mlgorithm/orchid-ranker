@@ -1,14 +1,15 @@
 """Comprehensive tests for StudentAgent and StudentAgentFactory."""
 import sys
+
 sys.path.insert(0, "src")
 
 import numpy as np
 import pytest
 
 from orchid_ranker.agents.student_agent import (
+    ItemMeta,
     StudentAgent,
     StudentAgentFactory,
-    ItemMeta,
 )
 
 
@@ -235,7 +236,7 @@ class TestPositionBias:
     def test_exponential_decay(self):
         """Test that position bias decays exponentially."""
         agent = StudentAgent(user_id=1, pos_eta=0.5)
-        bias_0 = agent._position_bias(0)
+        agent._position_bias(0)
         bias_1 = agent._position_bias(1)
         bias_2 = agent._position_bias(2)
 
@@ -347,7 +348,7 @@ class TestLearningDynamics:
             1: ItemMeta(difficulty=0.3),
             2: ItemMeta(difficulty=0.4),
         }
-        result = agent.interact([1, 2], items_meta=items_meta)
+        agent.interact([1, 2], items_meta=items_meta)
 
         # Knowledge should have changed (with high probability)
         assert agent.knowledge != initial_k
@@ -365,11 +366,11 @@ class TestLearningDynamics:
         items_meta = {
             1: ItemMeta(difficulty=0.3, skills=[True, False]),
         }
-        result = agent.interact([1], items_meta=items_meta)
+        agent.interact([1], items_meta=items_meta)
 
         # First skill should have changed more than second
         diff_0 = abs(agent.knowledge[0] - initial_k[0])
-        diff_1 = abs(agent.knowledge[1] - initial_k[1])
+        abs(agent.knowledge[1] - initial_k[1])
         assert diff_0 > 0.0  # first skill got updated
 
 
@@ -382,7 +383,7 @@ class TestFatigueAndEngagement:
         initial_fatigue = agent.fatigue
 
         items_meta = {i: ItemMeta(difficulty=0.5) for i in range(5)}
-        result = agent.interact([1, 2, 3, 4, 5], items_meta=items_meta)
+        agent.interact([1, 2, 3, 4, 5], items_meta=items_meta)
 
         # Fatigue should increase with workload
         assert agent.fatigue > initial_fatigue or agent.fatigue >= 0.0
@@ -390,10 +391,9 @@ class TestFatigueAndEngagement:
     def test_engagement_updates(self):
         """Test that engagement is updated based on feedback."""
         agent = StudentAgent(user_id=1, trust_influence=True)
-        initial_engagement = agent.engagement
 
         items_meta = {i: ItemMeta(difficulty=0.3) for i in range(2)}
-        result = agent.interact([1, 2], items_meta=items_meta)
+        agent.interact([1, 2], items_meta=items_meta)
 
         # Engagement should be updated (changes based on accuracy)
         assert isinstance(agent.engagement, float)

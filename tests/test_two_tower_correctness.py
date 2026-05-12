@@ -11,13 +11,10 @@ Tests focus on exact formula verification:
 - Score ordering preservation
 """
 import sys
+
 sys.path.insert(0, "src")
 
-import math
-import pytest
 import torch
-import torch.nn as nn
-import numpy as np
 
 from orchid_ranker.agents.recommender_agent import TwoTowerRecommender
 
@@ -246,7 +243,7 @@ class TestPerUserCalibration:
 
             # Logits should be softened (divided by 2)
             tau = 2.0
-            expected = (u @ I.t()) / tau
+            (u @ I.t()) / tau
             # Account for any bias terms, but core division by tau should hold
             assert logits.shape == (1, 5)
 
@@ -313,7 +310,6 @@ class TestInferBatchVsInferConsistency:
 
         # Create batch data
         N = 3
-        K = 5
         user_vecs = torch.randn((N, 4), dtype=torch.float32)
         item_matrix = torch.randn((10, 4), dtype=torch.float32)
         user_ids = torch.tensor([0, 1, 2], dtype=torch.long)

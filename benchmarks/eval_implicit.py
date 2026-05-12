@@ -14,12 +14,11 @@ from __future__ import annotations
 import argparse
 import math
 from collections import defaultdict
-from typing import Dict, Iterable, List
+from typing import Dict, List
 
 import numpy as np
 import pandas as pd
-
-from surprise import Dataset, Reader, SVD
+from surprise import SVD, Dataset, Reader
 
 from orchid_ranker import OrchidRecommender
 

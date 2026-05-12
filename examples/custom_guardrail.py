@@ -6,9 +6,12 @@ Requires: pip install orchid-ranker[ml]
 """
 import numpy as np
 import pandas as pd
+
 from orchid_ranker import OrchidRecommender
 from orchid_ranker.live_metrics import (
-    GuardrailConfig, ProgressionGuardrail, RollingProgressionMonitor,
+    GuardrailConfig,
+    ProgressionGuardrail,
+    RollingProgressionMonitor,
 )
 
 # --- Fit a baseline recommender ---

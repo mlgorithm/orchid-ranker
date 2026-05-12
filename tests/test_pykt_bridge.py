@@ -66,6 +66,14 @@ def test_export_pykt_sequences_filters_short_sequences(tmp_path):
     assert path.read_text() == ""
 
 
+def test_export_pykt_sequences_rejects_nan_labels(tmp_path):
+    data = _interactions()
+    data.loc[0, "correct"] = float("nan")
+
+    with pytest.raises(ValueError, match="finite"):
+        export_pykt_sequences(data, tmp_path / "pykt_sequences.txt")
+
+
 def test_pykt_prediction_adapter_feeds_kt_value_policy():
     predictions = pd.DataFrame(
         {

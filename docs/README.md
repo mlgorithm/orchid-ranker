@@ -1,7 +1,7 @@
 # Documentation Index
 
 - `quickstart.md` – step-by-step install and usage tutorial.
-- `guides/01-fit-offline.md` – batch recommender fallback workflow.
+- `guides/01-fit-offline.md` – batch fallback workflow for ordinary interaction data.
 - `guides/02-serve-streaming.md` – generic live adaptation with `as_streaming()`.
 - `guides/03-operate-safely.md` – adaptive-learning guardrails and fallback.
 - `scenarios.md` – practical recipes for common Orchid deployments.

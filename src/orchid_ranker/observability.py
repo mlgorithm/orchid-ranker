@@ -316,7 +316,7 @@ def setup_opentelemetry(service_name: str = "orchid-ranker") -> None:
     """Initialize OpenTelemetry tracing and metrics exporters.
 
     Requires the optional OTEL dependencies:
-        pip install 'orchid-ranker[otel]'
+        pip install 'orchid-ranker[observability]'
 
     Uses OTLP exporter by default. Configure endpoint via:
         OTEL_EXPORTER_OTLP_ENDPOINT environment variable
@@ -334,10 +334,11 @@ def setup_opentelemetry(service_name: str = "orchid-ranker") -> None:
     if not _HAS_OTEL:
         raise ImportError(
             "OpenTelemetry not installed. "
-            "Install with: pip install 'orchid-ranker[otel]'"
+            "Install with: pip install 'orchid-ranker[observability]'"
         )
 
     from opentelemetry.sdk.metrics import MeterProvider
+    from opentelemetry.sdk.metrics.export import PeriodicExportingMetricReader
     from opentelemetry.sdk.resources import Resource
     from opentelemetry.sdk.trace import TracerProvider
     from opentelemetry.sdk.trace.export import BatchSpanProcessor
@@ -351,7 +352,7 @@ def setup_opentelemetry(service_name: str = "orchid-ranker") -> None:
         )
 
         trace_exporter = GrpcTraceExporter()
-        GrpcMetricExporter()
+        metric_exporter = GrpcMetricExporter()
     except ImportError:
         try:
             from opentelemetry.exporter.otlp.proto.http.metric_exporter import (
@@ -362,11 +363,11 @@ def setup_opentelemetry(service_name: str = "orchid-ranker") -> None:
             )
 
             trace_exporter = HttpTraceExporter()
-            HttpMetricExporter()
+            metric_exporter = HttpMetricExporter()
         except ImportError as e:
             raise ImportError(
                 "OpenTelemetry OTLP exporters not installed. "
-                "Install with: pip install 'orchid-ranker[otel]'"
+                "Install with: pip install 'orchid-ranker[observability]'"
             ) from e
 
     resource = Resource.create({"service.name": service_name})
@@ -377,7 +378,10 @@ def setup_opentelemetry(service_name: str = "orchid-ranker") -> None:
     trace.set_tracer_provider(tp)
 
     # Setup metrics
-    mp = MeterProvider(resource=resource)
+    mp = MeterProvider(
+        resource=resource,
+        metric_readers=[PeriodicExportingMetricReader(metric_exporter)],
+    )
     otel_metrics.set_meter_provider(mp)
 
 

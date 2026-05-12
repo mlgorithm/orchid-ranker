@@ -37,6 +37,12 @@ class DRConfidenceSequence:
     """
 
     def __init__(self, cfg: DRCSConfig):
+        if not 0.0 < cfg.delta < 1.0:
+            raise ValueError("delta must be in (0, 1)")
+        if cfg.u_max <= 0.0:
+            raise ValueError("u_max must be > 0")
+        if not 0.0 < cfg.p_min < 1.0:
+            raise ValueError("p_min must be in (0, 1)")
         self.cfg = cfg
         self.t = 0
         self.mean = 0.0
@@ -95,6 +101,10 @@ class DRConfidenceSequence:
             raise ValueError("served_adaptive=True is impossible when p_used=0.0")
         if (not served_adaptive) and p == 1.0:
             raise ValueError("served_adaptive=False is impossible when p_used=1.0")
+        if served_adaptive and p < self.cfg.p_min:
+            raise ValueError(f"p_used={p} is below configured p_min={self.cfg.p_min}")
+        if (not served_adaptive) and (1.0 - p) < self.cfg.p_min:
+            raise ValueError(f"1 - p_used={1.0 - p} is below configured p_min={self.cfg.p_min}")
 
         if served_adaptive:
             if p == 1.0:

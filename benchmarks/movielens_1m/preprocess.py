@@ -249,7 +249,7 @@ def build_item_features(
     num_items = len(all_item_ids)
 
     genre_to_col = {g: i for i, g in enumerate(ALL_GENRES)}
-    num_genres = len(ALL_GENRES)
+    len(ALL_GENRES)
 
     # Pre-compute average rating from training data
     avg_rating_map = train.groupby("item_id")["rating"].mean().to_dict()

@@ -453,6 +453,19 @@ class TestRandomSearchCVFit:
         assert "other" in rsearch.best_params_
         assert len(rsearch.results_) == 5
 
+    def test_randomsearchcv_samples_tuple_valued_params(self):
+        """Tuple-valued hyperparameters should be sampled as whole choices."""
+        rsearch = RandomSearchCV(
+            strategy="neural_mf",
+            param_distributions={"hidden": [(16,), (32, 16)]},
+            n_iter=5,
+            cv=2,
+        )
+
+        sampled = rsearch._sample_params()
+
+        assert all(params["hidden"] in [(16,), (32, 16)] for params in sampled)
+
     def test_randomsearchcv_folds_keep_test_users_in_train(self, small_interactions, monkeypatch):
         """Random search should use per-user validation folds."""
         rsearch = RandomSearchCV(

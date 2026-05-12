@@ -3,7 +3,7 @@ import math
 import pytest
 
 from orchid_ranker.safety import SafeSwitchDR, SafeSwitchDRConfig
-from orchid_ranker.safety.dr_cs import DRCSConfig, DRConfidenceSequence
+from orchid_ranker.safety.dr_cs import DRConfidenceSequence, DRCSConfig
 
 
 def _simulate_rounds(gate, n, *, reward, accepts, qa, qf):

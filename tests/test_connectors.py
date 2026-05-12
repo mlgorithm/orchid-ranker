@@ -1,10 +1,10 @@
 import pytest
 
 from orchid_ranker import (
-    SnowflakeConnector,
     BigQueryConnector,
-    S3StreamConnector,
     MLflowTracker,
+    S3StreamConnector,
+    SnowflakeConnector,
 )
 
 
@@ -45,6 +45,50 @@ def test_s3_transient_classifier_uses_exception_type_name():
     EndpointConnectionError = type("EndpointConnectionError", (Exception,), {})
     exc = EndpointConnectionError("connection lost")
     assert S3StreamConnector._is_transient_error(exc) is True
+
+
+def test_s3_list_retries_iteration_failures(monkeypatch):
+    connector = S3StreamConnector(bucket="demo", max_retries=2)
+    calls = {"paginate": 0}
+
+    class FakePaginator:
+        def paginate(self, **kwargs):
+            calls["paginate"] += 1
+            if calls["paginate"] == 1:
+                raise TimeoutError("timeout")
+            return [{"Contents": [{"Key": "a.jsonl"}]}]
+
+    class FakeClient:
+        def get_paginator(self, name):
+            assert name == "list_objects_v2"
+            return FakePaginator()
+
+    monkeypatch.setattr(connector, "_client", lambda: FakeClient())
+    monkeypatch.setattr("orchid_ranker.connectors.s3_stream.time.sleep", lambda _delay: None)
+
+    assert list(connector.list_objects()) == ["a.jsonl"]
+    assert calls["paginate"] == 2
+
+
+def test_s3_stream_closes_body(monkeypatch):
+    connector = S3StreamConnector(bucket="demo", max_retries=1)
+    closed = {"value": False}
+
+    class FakeBody:
+        def iter_lines(self):
+            return iter([b"one", b"two"])
+
+        def close(self):
+            closed["value"] = True
+
+    class FakeClient:
+        def get_object(self, **kwargs):
+            return {"Body": FakeBody()}
+
+    monkeypatch.setattr(connector, "_client", lambda: FakeClient())
+
+    assert list(connector.stream_object("key")) == [b"one", b"two"]
+    assert closed["value"] is True
 
 
 def test_mlflow_tracker_applies_tracking_context(monkeypatch):

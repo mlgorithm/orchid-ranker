@@ -1,6 +1,6 @@
 """Tests for curriculum modules: PrerequisiteGraph and CurriculumRecommender."""
 
-from orchid_ranker.curriculum import PrerequisiteGraph, CurriculumRecommender
+from orchid_ranker.curriculum import CurriculumRecommender, PrerequisiteGraph
 
 
 class TestPrerequisiteGraph:

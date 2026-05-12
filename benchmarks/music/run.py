@@ -21,9 +21,8 @@ import argparse
 import json
 import logging
 import time
-from collections import defaultdict
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Set
+from typing import Any, Dict, Optional, Set
 
 import numpy as np
 import pandas as pd
@@ -32,34 +31,24 @@ import pandas as pd
 # Sibling imports (works both as a package and standalone script)
 # ---------------------------------------------------------------------------
 try:
-    from .download import download_and_extract
-    from .preprocess import MusicData, preprocess
     from .baselines import (
         ALL_BASELINES,
         BaselineRecommender,
-        PopularityBaseline,
-        OrchidFrozenBaseline,
-        OrchidAdaptiveBaseline,
-        ImplicitALSBenchmarkBaseline,
-        ImplicitBPRBenchmarkBaseline,
         compute_ndcg_at_k,
         grid_search,
     )
+    from .download import download_and_extract
+    from .preprocess import MusicData, preprocess
     from .simulator import ClickSimulator, replay_sessions
 except ImportError:
-    from download import download_and_extract  # type: ignore[no-redef]
-    from preprocess import MusicData, preprocess  # type: ignore[no-redef]
     from baselines import (  # type: ignore[no-redef]
         ALL_BASELINES,
         BaselineRecommender,
-        PopularityBaseline,
-        OrchidFrozenBaseline,
-        OrchidAdaptiveBaseline,
-        ImplicitALSBenchmarkBaseline,
-        ImplicitBPRBenchmarkBaseline,
         compute_ndcg_at_k,
         grid_search,
     )
+    from download import download_and_extract  # type: ignore[no-redef]
+    from preprocess import MusicData, preprocess  # type: ignore[no-redef]
     from simulator import ClickSimulator, replay_sessions  # type: ignore[no-redef]
 
 logger = logging.getLogger(__name__)

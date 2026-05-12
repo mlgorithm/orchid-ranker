@@ -42,7 +42,6 @@ import torch
 from orchid_ranker.agents.two_tower import TwoTowerRecommender
 from orchid_ranker.streaming import StreamingAdaptiveRanker
 
-
 FIXTURE_DIR = Path(__file__).resolve().parent / "fixtures"
 
 

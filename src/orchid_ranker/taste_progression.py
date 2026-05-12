@@ -259,8 +259,9 @@ class TasteProfile:
         self._global_tracker.update(positive)
         self._interaction_count += 1
 
-        # Update EMA of consumed sophistication when available
-        if sophistication is not None:
+        # Update EMA only for positive outcomes. Negative high-sophistication
+        # interactions mean "not ready for this tier", not successful taste growth.
+        if positive and sophistication is not None:
             alpha = self._ema_alpha
             # Category EMA
             if category in self._cat_ema:
@@ -534,12 +535,14 @@ class TasteProgressionRanker:
                 "candidate_item_ids is required when no recommender is set"
             )
 
+        if top_k <= 0:
+            return []
+
         candidates: List[int]
         if candidate_item_ids is not None:
             candidates = [int(c) for c in candidate_item_ids]
         else:
-            # Use a large candidate set from the recommender
-            candidates = list(range(1000))  # placeholder
+            candidates = self._candidate_ids_from_recommender(user_id, top_k)
 
         if category is not None:
             # Filter to items in the requested category
@@ -576,13 +579,30 @@ class TasteProgressionRanker:
 
         # Top-k
 
-        k = min(top_k, len(candidates))
+        k = min(int(top_k), len(candidates))
         top_idx = np.argpartition(blended, -k)[-k:]
         top_idx = top_idx[np.argsort(blended[top_idx])[::-1]]
 
         return [(candidates[i], float(blended[i])) for i in top_idx]
 
     # --- scoring components ---
+
+    def _candidate_ids_from_recommender(self, user_id: int, top_k: int) -> List[int]:
+        if self._rec is None:
+            return []
+        try:
+            recs = self._rec.recommend(user_id=user_id, top_k=max(1, int(top_k)))
+        except TypeError:
+            recs = self._rec.recommend(user_id, max(1, int(top_k)))
+        candidates = []
+        seen = set()
+        for rec in recs:
+            item_id = rec.item_id if hasattr(rec, "item_id") else rec[0]
+            item_id = int(item_id)
+            if item_id not in seen:
+                candidates.append(item_id)
+                seen.add(item_id)
+        return candidates
 
     def _relevance_scores(
         self, user_id: int, candidates: List[int], top_k: int,

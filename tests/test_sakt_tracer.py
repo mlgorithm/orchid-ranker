@@ -69,6 +69,19 @@ def test_sakt_tracer_fit_predict_and_state_vector_shape():
     assert tracer.result_["num_examples"] > 0
 
 
+@pytest.mark.parametrize(
+    "kwargs, message",
+    [
+        ({"epochs": 0}, "epochs"),
+        ({"learning_rate": 0.0}, "learning_rate"),
+        ({"correct_threshold": 1.5}, "correct_threshold"),
+    ],
+)
+def test_sakt_tracer_rejects_invalid_training_config(kwargs, message):
+    with pytest.raises(ValueError, match=message):
+        SAKTTracer(max_seq_len=3, d_model=16, n_heads=2, device="cpu", **kwargs)
+
+
 def test_sakt_tracer_unknown_user_gets_cold_state():
     tracer = SAKTTracer(
         max_seq_len=3,

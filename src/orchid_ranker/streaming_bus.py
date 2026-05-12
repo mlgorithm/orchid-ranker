@@ -39,7 +39,7 @@ import time
 from abc import ABC, abstractmethod
 from collections import deque
 from dataclasses import dataclass
-from typing import Any, Callable, Deque, Iterable, List, Mapping, Optional
+from typing import Any, Callable, Deque, Dict, Iterable, List, Mapping, Optional
 
 from orchid_ranker.streaming import StreamingAdaptiveRanker
 
@@ -53,6 +53,25 @@ __all__ = [
     "StreamingIngestor",
     "IngestorMetrics",
 ]
+
+
+def _parse_correct(value: Any) -> bool:
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, str):
+        normalized = value.strip().lower()
+        if normalized in {"true", "t"}:
+            return True
+        if normalized in {"false", "f"}:
+            return False
+        numeric = float(normalized)
+    else:
+        numeric = float(value)
+    if numeric == 0.0:
+        return False
+    if numeric == 1.0:
+        return True
+    raise ValueError("correct must be a strict boolean or 0/1 value")
 
 
 # ---------------------------------------------------------------------------
@@ -82,9 +101,9 @@ class InteractionEvent:
         try:
             user_id = int(payload["user_id"])
             item_id = int(payload["item_id"])
-            correct = bool(int(payload["correct"]))
+            correct = _parse_correct(payload["correct"])
         except (KeyError, TypeError, ValueError) as exc:
-            raise ValueError(f"invalid interaction event: {payload!r} ({exc})") from exc
+            raise ValueError(f"invalid interaction event ({exc})") from exc
         skill_raw = payload.get("skill")
         skill = str(skill_raw) if skill_raw is not None else None
         ts_raw = payload.get("timestamp")
@@ -115,6 +134,9 @@ class InteractionEventBus(ABC):
 
     def close(self) -> None:  # pragma: no cover - trivial default
         """Release any underlying resources. Safe to call multiple times."""
+
+    def ack(self, event: InteractionEvent) -> None:  # pragma: no cover - trivial default
+        """Acknowledge successful application of an event, if the bus supports it."""
 
 
 class InMemoryEventBus(InteractionEventBus):
@@ -207,7 +229,7 @@ class KafkaEventBus(InteractionEventBus):
         cfg = {
             "bootstrap.servers": brokers,
             "group.id": group_id,
-            "enable.auto.commit": True,
+            "enable.auto.commit": False,
             "auto.offset.reset": "latest",
         }
         if config:
@@ -216,6 +238,7 @@ class KafkaEventBus(InteractionEventBus):
         self._consumer.subscribe([topic])
         self._topic = topic
         self._closed = False
+        self._pending: Dict[int, Any] = {}
 
     def poll(self, max_events: int = 100, timeout_s: float = 0.5) -> List[InteractionEvent]:  # pragma: no cover - requires broker
         if self._closed:
@@ -233,10 +256,18 @@ class KafkaEventBus(InteractionEventBus):
                 logger.warning("kafka error: %s", msg.error())
                 continue
             try:
-                out.append(InteractionEvent.from_json(msg.value()))
+                event = InteractionEvent.from_json(msg.value())
+                self._pending[id(event)] = msg
+                out.append(event)
             except ValueError as exc:
                 logger.warning("dropping malformed event: %s", exc)
         return out
+
+    def ack(self, event: InteractionEvent) -> None:  # pragma: no cover - requires broker
+        msg = self._pending.pop(id(event), None)
+        if msg is None or self._closed:
+            return
+        self._consumer.commit(message=msg, asynchronous=False)
 
     def close(self) -> None:  # pragma: no cover - requires broker
         if not self._closed:
@@ -319,7 +350,7 @@ class StreamingIngestor:
         self._thread: Optional[threading.Thread] = None
 
     # ---- internal ----
-    def _apply(self, event: InteractionEvent) -> None:
+    def _apply(self, event: InteractionEvent) -> bool:
         try:
             self.ranker.observe(
                 user_id=event.user_id,
@@ -335,9 +366,15 @@ class StreamingIngestor:
                     self._on_event(event)
                 except Exception:  # noqa: BLE001
                     logger.exception("on_event hook raised")
+            try:
+                self.bus.ack(event)
+            except Exception:  # noqa: BLE001
+                logger.exception("failed to acknowledge event: %r", event)
+            return True
         except Exception:  # noqa: BLE001
             self.metrics.apply_errors += 1
             logger.exception("failed to apply event: %r", event)
+            return False
 
     def _drain_once(self) -> int:
         """Poll once and apply whatever arrived. Returns events applied."""
@@ -346,8 +383,8 @@ class StreamingIngestor:
         self.metrics.events_consumed += len(batch)
         applied = 0
         for ev in batch:
-            self._apply(ev)
-            applied += 1
+            if self._apply(ev):
+                applied += 1
         return applied
 
     # ---- public API ----

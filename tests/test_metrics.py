@@ -4,8 +4,8 @@ import pytest
 from orchid_ranker.evaluation import (
     RankingReport,
     average_precision,
-    expected_calibration_error,
     evaluate_recommendations,
+    expected_calibration_error,
     ndcg_at_k,
     precision_at_k,
     recall_at_k,

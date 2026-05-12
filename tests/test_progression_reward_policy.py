@@ -78,3 +78,15 @@ def test_progression_value_policy_prefers_stretch_over_easy_correct():
     assert recs[0].expected_reward == recs[0].score
     assert length == 1
     assert after_observe[0].recent_repetition >= 1
+
+
+def test_progression_value_policy_uses_configured_correct_threshold():
+    policy = ProgressionValuePolicy(
+        _FakeTracer(),
+        concept_by_item={20: "fractions"},
+        correct_threshold=0.8,
+    )
+
+    policy.record_outcome("u1", 20, 0.7)
+
+    assert policy.competence_for("u1", "fractions") == 0.0

@@ -25,7 +25,6 @@ from orchid_ranker.streaming_bus import (
     StreamingIngestor,
 )
 
-
 # ---------------------------------------------------------------------------
 # Fixtures
 # ---------------------------------------------------------------------------
@@ -82,6 +81,12 @@ class TestInteractionEvent:
         with pytest.raises(ValueError):
             InteractionEvent.from_mapping(
                 {"user_id": "not-an-int", "item_id": 2, "correct": 1}
+            )
+
+    def test_rejects_non_binary_correct_value(self):
+        with pytest.raises(ValueError, match="correct"):
+            InteractionEvent.from_mapping(
+                {"user_id": 1, "item_id": 2, "correct": 2}
             )
 
 
@@ -159,7 +164,7 @@ class TestStreamingIngestor:
         bus.publish(InteractionEvent(user_id=999, item_id=0, correct=True))
         bus.publish(InteractionEvent(user_id=1, item_id=0, correct=True))
         applied = ingestor.drain(max_batches=1)
-        assert applied == 2  # we tried both
+        assert applied == 1
         assert ingestor.metrics.apply_errors == 1
         assert ingestor.metrics.events_applied == 1
         assert ranker.updates_for(1) == 1
@@ -201,6 +206,7 @@ class TestKafkaEventBus:
     def test_missing_driver_message(self, monkeypatch):
         """If confluent-kafka is not importable, we fail fast with guidance."""
         import builtins
+
         from orchid_ranker import streaming_bus as sb
 
         real_import = builtins.__import__

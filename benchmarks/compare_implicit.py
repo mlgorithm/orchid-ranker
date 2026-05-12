@@ -97,8 +97,8 @@ def evaluate(
     inv_user = maps["user"]
     inv_item = maps["item"]
 
-    rev_user = {v: k for k, v in inv_user.items()}
-    rev_item = {v: k for k, v in inv_item.items()}
+    {v: k for k, v in inv_user.items()}
+    {v: k for k, v in inv_item.items()}
 
     imp_preds = []
     for row in test_df.itertuples(index=False):

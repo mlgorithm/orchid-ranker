@@ -12,15 +12,15 @@ item, evaluate safely, and explain why.
 |------|---------------|---------------------------|
 | Learner state | `BayesianKnowledgeTracing`, `AKTTracer`, `SAKTTracer` | Online competence and correctness estimates per learner and item |
 | Catalog constraints | `DependencyGraph`, `ProgressionRecommender` | Prerequisite-aware eligibility and path ordering |
-| Adaptive ranking | `AdaptiveLearningRecommender`, `ProgressionValuePolicy` | Next-item ranking from KT, difficulty, prerequisites, and progression reward |
+| Adaptive ranking | `AdaptiveLearningEngine`, `ProgressionValuePolicy` | Next-item ranking from KT, difficulty, prerequisites, and progression reward |
 | Base recommender fallback | MF, neural MF, ALS, BPR, user-kNN, LinUCB | Generic ranking when learning metadata is missing |
-| Live adaptation | `AdaptiveLearningRecommender.observe`, `StreamingAdaptiveRanker` | Per-outcome updates without full retraining |
+| Live adaptation | `AdaptiveLearningEngine.observe`, `StreamingAdaptiveRanker` | Per-outcome updates without full retraining |
 | Offline policy evaluation | `orchid_ranker.ope` | IPS/SNIPS/direct-method/doubly robust checks before adaptive rollout |
 | Safety | progression monitors, guardrails, safe fallback | Stops harmful adaptive behavior before broad rollout |
 
 This is a strong product foundation, and the next modeling layer should keep
 moving beyond the generic recommender fallback so Orchid is evaluated as an
-adaptive-learning library.
+adaptive-learning engine.
 
 ## Research direction
 
@@ -47,7 +47,7 @@ Add adaptive-learning algorithms under explicit, boring names:
 | `orchid_ranker.semantic` | `SemanticExerciseEncoder`, `SemanticExerciseRanker` | Score new exercises using text/metadata embeddings |
 | `orchid_ranker.ope` | `evaluate_logged_policy`, `compare_logged_policies` | Evaluate adaptive policies before serving them |
 
-Keep `AdaptiveLearningRecommender` as the beginner API for the primary
+Keep `AdaptiveLearningEngine` as the beginner API for the primary
 adaptive-learning workflow. Keep `OrchidRecommender` as the generic
 fit/recommend fallback for users who do not yet have concepts, difficulty, or
 prerequisite metadata.

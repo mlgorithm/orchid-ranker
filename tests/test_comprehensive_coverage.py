@@ -12,7 +12,6 @@ Covers:
 - agents/config.py: dataclass defaults and OnlineState
 """
 
-import math
 import tempfile
 from pathlib import Path
 
@@ -23,36 +22,36 @@ import pytest
 # ───────────────────────────────────────────────────────────────────
 # Torch-free imports (always available)
 # ───────────────────────────────────────────────────────────────────
-from orchid_ranker._compat import torch_available, require_torch, get_torch
+from orchid_ranker._compat import get_torch, require_torch, torch_available
+from orchid_ranker.curriculum import CurriculumRecommender, PrerequisiteGraph
 from orchid_ranker.evaluation import (
-    precision_at_k,
-    recall_at_k,
-    ndcg_at_k,
-    average_precision,
-    expected_calibration_error,
-    evaluate_recommendations,
     RankingReport,
-    learning_gain,
-    knowledge_coverage,
+    average_precision,
     curriculum_adherence,
     difficulty_appropriateness,
     engagement_score,
-    EducationalReport,
+    evaluate_recommendations,
+    expected_calibration_error,
+    knowledge_coverage,
+    learning_gain,
+    ndcg_at_k,
+    precision_at_k,
+    recall_at_k,
 )
-from orchid_ranker.curriculum import PrerequisiteGraph, CurriculumRecommender
 from orchid_ranker.knowledge_tracing import (
     BayesianKnowledgeTracing,
-    MasteryTracker,
     ForgettingCurve,
+    MasteryTracker,
 )
 from orchid_ranker.model_selection import train_test_split
 
 # Torch-dependent imports; skip entire module if not available
 torch = pytest.importorskip("torch")
-from orchid_ranker import OrchidRecommender, Recommendation  # noqa: E402
-from orchid_ranker import save_model, load_model  # noqa: E402
+from orchid_ranker import OrchidRecommender, Recommendation, load_model, save_model  # noqa: E402  # noqa: E402
 from orchid_ranker.agents.config import (  # noqa: E402
-    MultiConfig, PolicyState, OnlineState,
+    MultiConfig,
+    OnlineState,
+    PolicyState,
 )
 
 
@@ -390,7 +389,7 @@ class TestSerializationRoundtrip:
     def test_random_roundtrip(self, small_df):
         rec = OrchidRecommender(strategy="random")
         rec.fit(small_df, rating_col="rating")
-        uid = int(small_df.iloc[0]["user_id"])
+        int(small_df.iloc[0]["user_id"])
         with tempfile.NamedTemporaryFile(suffix=".pt", delete=False) as f:
             path = Path(f.name)
         try:
