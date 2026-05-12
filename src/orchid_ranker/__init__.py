@@ -6,8 +6,7 @@ learner state, catalog structure, progression reward, and live outcome updates.
 Public API is organized into three stability tiers:
 
 **Tier 1 -- Stable** (semver-guaranteed, safe for production):
-    AdaptiveLearningEngine, AdaptiveLearningRecommender,
-    OrchidRecommender, Recommendation,
+    AdaptiveRanker, AdaptiveLearningEngine, AdaptiveLearningRecommender,
     BayesianKnowledgeTracing,
     ProficiencyTracker, ForgettingCurve, DependencyGraph,
     ProgressionRecommender, save_model, load_model, cross_validate,
@@ -22,11 +21,13 @@ Public API is organized into three stability tiers:
     DelayedGainRewardModel, build_delayed_gain_training_frame,
     diagnose_delayed_gain_predictions, fit_delayed_gain_reward_model,
     fit_delayed_gain_reward_model_from_frame,
+    LearnerEvent, LoggedDecision, CQLDiscretePolicy, SketchCandidateGenerator,
     ScenarioFit, ScenarioRecipe, available_scenarios, recommend_scenarios
 
 **Tier 2 -- Advanced** (stable but may evolve between minor versions):
     AdaptiveAgent, AdaptiveAgentFactory, MultiUserOrchestrator,
-    TwoTowerRecommender, DualRecommender, MultiConfig, UserCtx
+    TwoTowerRecommender, DualRecommender, MultiConfig, UserCtx,
+    legacy.OrchidRecommender
 
 **Tier 3 -- Internal / Experimental** (not in ``__all__``; import from submodule):
     LinUCBPolicy, BootTS, JSONLLogger, PolicyState, OnlineState,
@@ -36,7 +37,8 @@ Public API is organized into three stability tiers:
 Installation extras
 -------------------
 ``pip install orchid-ranker``          -- core progression toolkit (BKT, dependency graph, evaluation)
-``pip install orchid-ranker[ml]``      -- adds PyTorch for AdaptiveLearningEngine and ML strategies
+``pip install orchid-ranker[adaptive]`` -- adds PyTorch for AdaptiveRanker and AdaptiveLearningEngine
+``pip install orchid-ranker[legacy]``   -- adds historical generic recommender extras
 ``pip install orchid-ranker[implicit]`` -- adds implicit ALS/BPR strategies
 ``pip install orchid-ranker[all]``     -- everything (ML, viz, agentic, observability, connectors)
 """
@@ -45,6 +47,16 @@ __version__ = "0.5.0"
 
 # ── Tier 1: Torch-free core toolkit (always available) ────────────────────
 
+from .adaptive_schema import (
+    LearnerEvent,
+    LoggedDecision,
+    hash_identifier,
+    learner_events_to_frame,
+    logged_decisions_to_frame,
+    stable_context_hash,
+    validate_learner_events,
+    validate_logged_decisions,
+)
 from .curriculum import (
     DependencyGraph,
     ProgressionRecommender,
@@ -74,6 +86,7 @@ from .learning_policy import (
     ProgressionValuePolicy,
     SupportConstrainedDelayedGainPolicy,
 )
+from .offline_policy import CQLDiscretePolicy, CQLTrainingReport
 from .ope import (
     LoggedPolicyReport,
     PolicyComparisonReport,
@@ -104,6 +117,8 @@ from .scenarios import (
 
 _TORCH_LAZY = {
     # Tier 1 -- requires torch
+    "AdaptiveRanker": (".adaptive_ranker", "AdaptiveRanker"),
+    "AdaptiveRankerConfig": (".adaptive_ranker", "AdaptiveRankerConfig"),
     "AdaptiveLearningConfig": (".adaptive_learning", "AdaptiveLearningConfig"),
     "AdaptiveLearningEngine": (".adaptive_learning", "AdaptiveLearningRecommender"),
     "AdaptiveLearningRecommendation": (".adaptive_learning", "AdaptiveLearningRecommendation"),
@@ -158,6 +173,11 @@ _OPTIONAL_LAZY = {
     "metrics_content_type": (".observability", "metrics_content_type"),
     "GridSearchCV": (".tuning", "GridSearchCV"),
     "RandomSearchCV": (".tuning", "RandomSearchCV"),
+    "BloomFilter": (".sketch", "BloomFilter"),
+    "CountMinSketch": (".sketch", "CountMinSketch"),
+    "ExactEmbeddingIndex": (".sketch", "ExactEmbeddingIndex"),
+    "ReservoirSampler": (".sketch", "ReservoirSampler"),
+    "SketchCandidateGenerator": (".sketch", "SketchCandidateGenerator"),
 }
 
 _ALL_LAZY = {**_TORCH_LAZY, **_OPTIONAL_LAZY}
@@ -224,14 +244,12 @@ def __getattr__(name: str):
 __all__ = [
     # Tier 1 -- Stable (generic names)
     "__version__",
+    "AdaptiveRanker",
+    "AdaptiveRankerConfig",
     "AdaptiveLearningConfig",
     "AdaptiveLearningEngine",
     "AdaptiveLearningRecommendation",
     "AdaptiveLearningRecommender",
-    "OrchidRecommender",
-    "Recommendation",
-    "SUPPORTED_STRATEGIES",
-    "STRATEGY_GUIDE",
     "BayesianKnowledgeTracing",
     "ProficiencyTracker",
     "ForgettingCurve",
@@ -248,6 +266,21 @@ __all__ = [
     "evaluate_logged_policy",
     "compare_logged_policies",
     "deterministic_policy_probabilities",
+    "LearnerEvent",
+    "LoggedDecision",
+    "hash_identifier",
+    "learner_events_to_frame",
+    "logged_decisions_to_frame",
+    "stable_context_hash",
+    "validate_learner_events",
+    "validate_logged_decisions",
+    "CQLDiscretePolicy",
+    "CQLTrainingReport",
+    "BloomFilter",
+    "CountMinSketch",
+    "ExactEmbeddingIndex",
+    "ReservoirSampler",
+    "SketchCandidateGenerator",
     "PyKTSequence",
     "PyKTPredictionAdapter",
     "export_pykt_sequences",

@@ -19,31 +19,30 @@ measurable progress?**
 ## Quickstart
 
 ```bash
-pip install 'orchid-ranker[ml]'
+pip install 'orchid-ranker[adaptive]'
 ```
 
 ```python
 import pandas as pd
-from orchid_ranker import AdaptiveLearningEngine
+from orchid_ranker import AdaptiveRanker
 
-outcomes = pd.read_csv("learner_outcomes.csv")  # user_id, item_id, correct
-catalog = pd.read_csv("exercise_catalog.csv")   # item_id, concept, difficulty
+outcomes = pd.read_csv("learner_outcomes.csv")  # learner_id, item_id, correct, ts
+catalog = pd.read_csv("exercise_catalog.csv")   # item_id, concept_id, difficulty
 
-learner_rec = AdaptiveLearningEngine(
-    tracer_model="akt",
+ranker = AdaptiveRanker(
+    kt_backbone="akt",
     policy="auto",
     epochs=2,
     d_model=32,
-).fit(
+).fit_kt(
     outcomes.merge(catalog, on="item_id"),
     correct_col="correct",
-    concept_col="concept",
+    concept_col="concept_id",
     item_difficulty_col="difficulty",
-    prerequisite_by_concept={"fractions": ["number-sense"]},
 )
 
-ranked = learner_rec.rank(user_id=7, candidate_item_ids=[101, 102, 201, 202], top_k=3)
-learner_rec.observe(user_id=7, item_id=ranked[0].item_id, correct=True)
+ranked = ranker.recommend(learner_id="7", candidate_item_ids=[101, 102, 201, 202], top_k=3)
+ranker.observe(learner_id="7", ts=123, item_id=ranked[0].item_id, concept_id=None, correct=1)
 ```
 
 `policy="auto"` uses the progression-value policy: the most stable default for
@@ -51,13 +50,14 @@ adaptive learning today. Delayed-gain and support-constrained delayed-gain
 policies are available as explicit opt-ins when you have the logged support and
 reward-model diagnostics to justify them.
 
-### Generic recommender fallback
+### Legacy recommender fallback
 
-Use `OrchidRecommender` when you need ordinary batch recommendations or live
-adaptation without learning concepts, difficulty, or prerequisites:
+Use `orchid_ranker.legacy.OrchidRecommender` when you need ordinary batch
+recommendations or old experiments without learning concepts, difficulty, or
+prerequisites:
 
 ```python
-from orchid_ranker import OrchidRecommender
+from orchid_ranker.legacy import OrchidRecommender
 
 rec = OrchidRecommender.from_interactions(interactions, strategy="neural_mf")
 streamer = rec.as_streaming(lr=0.05)
@@ -111,10 +111,11 @@ Understand what makes Orchid different:
 1. **Learner state.** AKT/SAKT and Bayesian tracing estimate competence from learner outcomes.
 2. **Catalog structure.** Dependency graphs and difficulty metadata keep recommendations in the valid next-step set.
 3. **Adaptive ranking.** Per-user online updates let the next recommendation change after each response.
-4. **Progression metrics.** Evaluate learning gain, category coverage, stretch fit, and sequence adherence.
-5. **Offline policy evaluation.** IPS, SNIPS, direct-method, and doubly robust estimates test adaptive policies before rollout.
-6. **Safe operation.** Guardrails and frozen fallback rankings keep adaptive rollouts reviewable.
-7. **Privacy hooks.** DP-SGD presets, RBAC, and HMAC audit chains support regulated deployments.
+4. **Logged policy learning.** `AdaptiveRanker.fit_policy(..., algo="cql")` trains a conservative discrete policy from candidate sets, propensities, and rewards.
+5. **Sketch mode.** Count-Min, Bloom-filter, reservoir, and exact-vector utilities shrink candidate generation before final reranking.
+6. **Offline policy evaluation.** IPS, SNIPS, direct-method, and doubly robust estimates test adaptive policies before rollout.
+7. **Safe operation.** Guardrails and frozen fallback rankings keep adaptive rollouts reviewable.
+8. **Privacy hooks.** DP-SGD presets, RBAC, HMAC audit chains, and hashed event IDs support regulated deployments.
 
 ## Supported strategies
 
@@ -131,7 +132,9 @@ Understand what makes Orchid different:
 
 Install `orchid-ranker[implicit]` to use true `implicit_als` or `implicit_bpr`.
 
-For adaptive learning, start with `AdaptiveLearningEngine`. It composes
+For adaptive learning, start with `AdaptiveRanker` when you want staged
+KT/reward/policy/OPE workflows, or `AdaptiveLearningEngine` when you only need
+fit/rank/observe. They compose
 AKT/SAKT-style tracing, progression reward, difficulty/prerequisite metadata,
 and live `observe()` updates into one fit/rank/observe API. Use lower-level
 pieces such as `BayesianKnowledgeTracing`, `DependencyGraph`,
@@ -141,7 +144,7 @@ pieces such as `BayesianKnowledgeTracing`, `DependencyGraph`,
 traffic before serving it. Modern KT and policy-learning algorithms are
 tracked in the [algorithm roadmap](docs/algorithm-roadmap.md).
 
-For the high-level `OrchidRecommender` API, use `neural_mf` when you want to
+For the legacy `OrchidRecommender` API, use `neural_mf` when you want to
 promote a fitted model into `StreamingAdaptiveRanker` with `as_streaming()`.
 `TwoTowerRecommender` remains available as a lower-level advanced model API, but
 it is not a `strategy=` value.

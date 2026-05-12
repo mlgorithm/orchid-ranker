@@ -1,0 +1,275 @@
+"""Adaptive-first facade for learner-state, policy learning, OPE, and sketch mode."""
+from __future__ import annotations
+
+from dataclasses import dataclass, fields, replace
+from typing import Any, Optional, Sequence
+
+import pandas as pd
+
+from .adaptive_learning import (
+    AdaptiveLearningConfig,
+    AdaptiveLearningRecommendation,
+    AdaptiveLearningRecommender,
+)
+from .adaptive_schema import (
+    LearnerEvent,
+    parse_candidate_list,
+    stable_context_hash,
+    validate_learner_events,
+    validate_logged_decisions,
+)
+from .offline_policy import CQLDiscretePolicy, CQLTrainingReport
+from .ope import LoggedPolicyReport, evaluate_logged_policy
+
+__all__ = [
+    "AdaptiveRanker",
+    "AdaptiveRankerConfig",
+]
+
+
+@dataclass(frozen=True)
+class AdaptiveRankerConfig:
+    """Configuration for the adaptive-first Orchid product facade."""
+
+    kt_backbone: str = "akt"
+    mode: str = "full"
+    policy: str = "auto"
+    target_correct: float = 0.70
+    max_seq_len: int = 50
+    d_model: int = 64
+    n_heads: int = 4
+    dropout: float = 0.1
+    learning_rate: float = 1e-3
+    epochs: int = 5
+    batch_size: int = 128
+    correct_threshold: float = 0.5
+    device: Optional[str] = None
+    random_state: Optional[int] = 42
+    offline_policy_weight: float = 1.0
+
+
+class AdaptiveRanker:
+    """Narrow adaptive-learning interface for Orchid's roadmap target.
+
+    The facade stages the system explicitly: fit KT, optionally fit a
+    delayed-gain reward model, fit a conservative logged policy, serve
+    recommendations, observe outcomes, and run OPE.
+    """
+
+    def __init__(self, config: Optional[AdaptiveRankerConfig] = None, **overrides: Any) -> None:
+        valid = {field.name for field in fields(AdaptiveRankerConfig)}
+        unknown = sorted(set(overrides) - valid)
+        if unknown:
+            raise TypeError(f"Unknown AdaptiveRankerConfig fields: {unknown}")
+        self.config = replace(config or AdaptiveRankerConfig(), **overrides)
+        self.recommender_: Optional[AdaptiveLearningRecommender] = None
+        self.offline_policy_: Optional[CQLDiscretePolicy] = None
+        self.sketch_generator_: Optional[Any] = None
+        self._events: Optional[pd.DataFrame] = None
+        self._fit_kwargs: dict[str, Any] = {}
+
+    @property
+    def is_fitted(self) -> bool:
+        return self.recommender_ is not None and self.recommender_.is_fitted
+
+    def fit_kt(
+        self,
+        events: pd.DataFrame,
+        *,
+        learner_col: str = "learner_id",
+        item_col: str = "item_id",
+        correct_col: str = "correct",
+        timestamp_col: str = "ts",
+        concept_col: Optional[str] = "concept_id",
+        item_difficulty_col: Optional[str] = None,
+        **fit_kwargs: Any,
+    ) -> "AdaptiveRanker":
+        """Fit learner-state tracing and the default adaptive policy."""
+        backbone = self.config.kt_backbone.lower().replace("_", "-")
+        if backbone in {"saint", "saint+"}:
+            raise NotImplementedError("SAINT/SAINT+ are roadmap backbones; current shipped backbones are 'akt' and 'sakt'")
+        if backbone not in {"akt", "sakt", "akt-inspired"}:
+            raise ValueError("kt_backbone must be one of 'akt', 'sakt', 'saint', or 'saint+'")
+        work = validate_learner_events(
+            events,
+            learner_col=learner_col,
+            ts_col=timestamp_col,
+            item_col=item_col,
+            correct_col=correct_col,
+        )
+        adaptive_config = self._adaptive_config(policy=self.config.policy)
+        concept_arg = concept_col if concept_col is not None and concept_col in work.columns else None
+        self.recommender_ = AdaptiveLearningRecommender(adaptive_config).fit(
+            work,
+            user_col=learner_col,
+            item_col=item_col,
+            correct_col=correct_col,
+            timestamp_col=timestamp_col,
+            concept_col=concept_arg,
+            item_difficulty_col=item_difficulty_col,
+            **fit_kwargs,
+        )
+        self._events = work.copy()
+        self._fit_kwargs = {
+            "user_col": learner_col,
+            "item_col": item_col,
+            "correct_col": correct_col,
+            "timestamp_col": timestamp_col,
+            "concept_col": concept_arg,
+            "item_difficulty_col": item_difficulty_col,
+            **fit_kwargs,
+        }
+        return self
+
+    def fit_reward_model(self) -> "AdaptiveRanker":
+        """Refit the adaptive stack with support-constrained delayed-gain modeling."""
+        if self._events is None:
+            raise RuntimeError("fit_kt must be called before fit_reward_model")
+        if self._fit_kwargs.get("concept_col") is None:
+            raise ValueError("fit_reward_model requires concept_id/concept_col data")
+        adaptive_config = self._adaptive_config(policy="support_delayed_gain")
+        self.recommender_ = AdaptiveLearningRecommender(adaptive_config).fit(self._events, **self._fit_kwargs)
+        return self
+
+    def fit_policy(
+        self,
+        logged_decisions: pd.DataFrame,
+        *,
+        algo: str = "cql",
+        reward_col: str = "reward",
+        **policy_kwargs: Any,
+    ) -> CQLTrainingReport:
+        """Fit a conservative offline policy from logged decisions."""
+        normalized = algo.lower()
+        if normalized not in {"cql", "conservative", "tabular_cql"}:
+            raise NotImplementedError("Only the tabular CQL policy learner is implemented in this roadmap slice")
+        validate_logged_decisions(logged_decisions, reward_col=reward_col)
+        self.offline_policy_ = CQLDiscretePolicy(
+            random_state=self.config.random_state,
+            **policy_kwargs,
+        ).fit(logged_decisions, reward_col=reward_col)
+        assert self.offline_policy_.report_ is not None
+        return self.offline_policy_.report_
+
+    def attach_sketch_generator(self, generator: Any) -> "AdaptiveRanker":
+        """Attach a sketch-mode candidate generator with a ``candidates`` method."""
+        if not hasattr(generator, "candidates"):
+            raise TypeError("generator must expose a candidates(...) method")
+        self.sketch_generator_ = generator
+        return self
+
+    def recommend(
+        self,
+        learner_id: Any,
+        candidate_item_ids: Optional[Sequence[Any]] = None,
+        *,
+        top_k: int = 10,
+        mode: Optional[str] = None,
+        context_hash: Optional[str] = None,
+        concept_goal: Optional[Any] = None,
+        item_query_vec: Optional[Sequence[float]] = None,
+    ) -> list[AdaptiveLearningRecommendation]:
+        """Recommend next items using exact or sketch-mode candidates."""
+        self._require_fitted()
+        assert self.recommender_ is not None
+        active_mode = self.config.mode if mode is None else mode
+        candidates = list(candidate_item_ids or [])
+        if not candidates and active_mode == "sketch":
+            if self.sketch_generator_ is None:
+                raise RuntimeError("sketch mode requires an attached SketchCandidateGenerator")
+            candidates = self.sketch_generator_.candidates(
+                learner_id,
+                concept_goal,
+                item_query_vec=item_query_vec,
+                top_m=max(top_k, 50),
+            )
+        if not candidates:
+            candidates = list(self.recommender_.item_ids_)
+        recs = self.recommender_.rank(learner_id, candidates, top_k=max(top_k, len(candidates)))
+        if self.offline_policy_ is not None:
+            ctx = context_hash or stable_context_hash(learner_id, concept_goal)
+            q_scores = self.offline_policy_.score(ctx, [rec.item_id for rec in recs])
+            recs = sorted(
+                recs,
+                key=lambda rec: (
+                    self.config.offline_policy_weight * q_scores.get(rec.item_id, 0.0),
+                    rec.score,
+                    str(rec.item_id),
+                ),
+                reverse=True,
+            )
+        return recs[: min(int(top_k), len(recs))]
+
+    def observe(self, event: LearnerEvent | None = None, **kwargs: Any) -> Any:
+        """Observe one learner event and update live state."""
+        self._require_fitted()
+        assert self.recommender_ is not None
+        learner_event = event or LearnerEvent(**kwargs)
+        return self.recommender_.observe(learner_event.learner_id, learner_event.item_id, learner_event.correct)
+
+    def ope_report(
+        self,
+        logged_decisions: pd.DataFrame,
+        *,
+        reward_col: str = "reward",
+        propensity_col: str = "propensity",
+        target_probability_col: str = "target_probability",
+        max_weight: Optional[float] = None,
+    ) -> LoggedPolicyReport:
+        """Evaluate the fitted conservative policy from logged decisions."""
+        work = validate_logged_decisions(logged_decisions, reward_col=reward_col).copy()
+        if target_probability_col not in work.columns:
+            if self.offline_policy_ is None:
+                raise RuntimeError("fit_policy or target_probability_col is required before ope_report")
+            work[target_probability_col] = [
+                self._target_probability(row)
+                for _, row in work.iterrows()
+            ]
+        return evaluate_logged_policy(
+            work,
+            reward_col=reward_col,
+            propensity_col=propensity_col,
+            target_probability_col=target_probability_col,
+            max_weight=max_weight,
+        )
+
+    def diagnostics(self) -> dict[str, Any]:
+        """Return adaptive, reward-model, policy, and sketch diagnostics."""
+        self._require_fitted()
+        assert self.recommender_ is not None
+        data = self.recommender_.diagnostics()
+        data["adaptive_ranker"] = {
+            "mode": self.config.mode,
+            "kt_backbone": self.config.kt_backbone,
+            "offline_policy": None if self.offline_policy_ is None else self.offline_policy_.to_dict(),
+            "has_sketch_generator": self.sketch_generator_ is not None,
+        }
+        return data
+
+    def _adaptive_config(self, *, policy: str) -> AdaptiveLearningConfig:
+        return AdaptiveLearningConfig(
+            tracer_model=self.config.kt_backbone,
+            policy=policy,
+            target_correct=self.config.target_correct,
+            max_seq_len=self.config.max_seq_len,
+            d_model=self.config.d_model,
+            n_heads=self.config.n_heads,
+            dropout=self.config.dropout,
+            learning_rate=self.config.learning_rate,
+            epochs=self.config.epochs,
+            batch_size=self.config.batch_size,
+            correct_threshold=self.config.correct_threshold,
+            device=self.config.device,
+            random_state=self.config.random_state,
+        )
+
+    def _target_probability(self, row: pd.Series) -> float:
+        assert self.offline_policy_ is not None
+        candidates = parse_candidate_list(row["candidate_item_ids"])
+        chosen = row["chosen_item_id"]
+        selected = self.offline_policy_.recommend(row["context_hash"], candidates, top_k=1)
+        return float(bool(selected and selected[0] == chosen))
+
+    def _require_fitted(self) -> None:
+        if not self.is_fitted:
+            raise RuntimeError("AdaptiveRanker.fit_kt must be called before serving")

@@ -6,27 +6,50 @@ Complete reference for public classes and functions in Orchid Ranker v0.5.0.
 
 ## Start here: adaptive learning
 
-The primary public workflow is `AdaptiveLearningEngine`
-(`AdaptiveLearningRecommender` is the existing class name): fit from learner
-outcomes, rank eligible learning items, observe the next outcome, and re-rank
-from updated learner state.
+The primary public workflow is `AdaptiveRanker`: fit learner-state tracing,
+optionally fit a reward model and conservative logged policy, serve next-item
+recommendations, observe outcomes, and run OPE from logged decisions.
 
 ```python
-from orchid_ranker import AdaptiveLearningEngine
+from orchid_ranker import AdaptiveRanker
 
-rec = AdaptiveLearningEngine(policy="auto").fit(
+ranker = AdaptiveRanker(policy="auto", epochs=1).fit_kt(
     events,
+    learner_col="learner_id",
     correct_col="correct",
-    concept_col="skill_id",
+    concept_col="concept_id",
     item_difficulty_col="difficulty",
-    prerequisite_by_concept={"fractions": ["number-sense"]},
 )
-ranked = rec.rank("learner-7", [10, 20, 30], top_k=3)
-rec.observe("learner-7", ranked[0].item_id, correct=True)
+ranked = ranker.recommend("learner-7", [10, 20, 30], top_k=3)
+ranker.observe(learner_id="learner-7", ts=10, item_id=ranked[0].item_id, concept_id=None, correct=1)
 ```
 
-Use `OrchidRecommender` when you only have ordinary user-item interactions and
-need a batch/generic recommender fallback.
+Use `orchid_ranker.legacy.OrchidRecommender` when you only have ordinary
+user-item interactions and need a batch/generic recommender fallback.
+
+---
+
+## orchid_ranker.adaptive_ranker
+
+Staged adaptive-learning product facade.
+
+```python
+class AdaptiveRanker:
+    def fit_kt(self, events, *, learner_col="learner_id", item_col="item_id", correct_col="correct", timestamp_col="ts")
+    def fit_reward_model(self)
+    def fit_policy(self, logged_decisions, *, algo="cql", reward_col="reward")
+    def recommend(self, learner_id, candidate_item_ids=None, *, top_k=10, mode=None)
+    def observe(self, event=None, **kwargs)
+    def ope_report(self, logged_decisions, *, reward_col="reward", propensity_col="propensity")
+```
+
+`fit_policy(..., algo="cql")` implements a dependency-light tabular
+CQL-style learner over logged candidate sets. It is the first conservative
+offline policy path; deeper CQL/IQL/CRR implementations can slot behind the
+same facade later.
+
+`mode="sketch"` uses an attached `SketchCandidateGenerator` to produce a
+bounded candidate set before final reranking.
 
 ---
 
@@ -110,13 +133,13 @@ delayed-gain prior coverage, and reward-model report.
 
 ---
 
-## orchid_ranker.recommender
+## orchid_ranker.legacy.recommender
 
 ### OrchidRecommender
 
-Batch/generic recommender supporting all built-in strategies. This is the
-fallback path for ordinary user-item interactions without learning concepts,
-difficulty, prerequisites, or live outcome state.
+Batch/generic recommender supporting all built-in historical strategies. This
+is a legacy fallback path for ordinary user-item interactions without learning
+concepts, difficulty, prerequisites, or live outcome state.
 
 ```python
 class OrchidRecommender:
