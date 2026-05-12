@@ -6,6 +6,8 @@ import pandas as pd
 import pytest
 
 from orchid_ranker.ope import (
+    bootstrap_compare_logged_policies,
+    bootstrap_logged_policy,
     compare_logged_policies,
     deterministic_policy_probabilities,
     evaluate_logged_policy,
@@ -76,6 +78,38 @@ def test_compare_logged_policies_reports_paired_uplift():
     assert comparison.uplift == 0.5
     assert comparison.ci_low <= comparison.uplift <= comparison.ci_high
     assert comparison.to_dict()["uplift"] == 0.5
+
+
+def test_bootstrap_logged_policy_reports_percentile_interval():
+    report = bootstrap_logged_policy(
+        _paired_uniform_log(),
+        reward_col="reward",
+        propensity_col="propensity",
+        target_probability_col="target_prob",
+        n_bootstrap=25,
+        random_state=7,
+    )
+
+    assert report.base.value == 1.0
+    assert report.n_bootstrap == 25
+    assert report.bootstrap_ci_low <= report.base.value <= report.bootstrap_ci_high
+    assert report.to_dict()["base"]["value"] == 1.0
+
+
+def test_bootstrap_compare_logged_policies_reports_uplift_interval():
+    report = bootstrap_compare_logged_policies(
+        _paired_uniform_log(),
+        reward_col="reward",
+        propensity_col="propensity",
+        target_probability_col="target_prob",
+        baseline_probability_col="baseline_prob",
+        n_bootstrap=25,
+        random_state=11,
+    )
+
+    assert report.base.uplift > 0.0
+    assert report.bootstrap_ci_low <= report.base.uplift <= report.bootstrap_ci_high
+    assert report.to_dict()["base"]["uplift"] == report.base.uplift
 
 
 def test_snips_is_preferred_without_value_model():

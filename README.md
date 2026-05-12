@@ -27,10 +27,10 @@ import pandas as pd
 from orchid_ranker import AdaptiveRanker
 
 outcomes = pd.read_csv("learner_outcomes.csv")  # learner_id, item_id, correct, ts
-catalog = pd.read_csv("exercise_catalog.csv")   # item_id, concept_id, difficulty
+catalog = pd.read_csv("exercise_catalog.csv")   # item_id, concept_id, difficulty, item_text
 
 ranker = AdaptiveRanker(
-    kt_backbone="akt",
+    kt_backbone="saint+",
     policy="auto",
     epochs=2,
     d_model=32,
@@ -41,6 +41,7 @@ ranker = AdaptiveRanker(
     item_difficulty_col="difficulty",
 )
 
+ranker.fit_semantic_items(catalog, text_col="item_text", metadata_cols=["concept_id"])
 ranked = ranker.recommend(learner_id="7", candidate_item_ids=[101, 102, 201, 202], top_k=3)
 ranker.observe(learner_id="7", ts=123, item_id=ranked[0].item_id, concept_id=None, correct=1)
 ```
@@ -108,14 +109,15 @@ Understand what makes Orchid different:
 
 ## Adaptive-learning capabilities
 
-1. **Learner state.** AKT/SAKT and Bayesian tracing estimate competence from learner outcomes.
+1. **Learner state.** SAINT+/SAINT, AKT/SAKT, and Bayesian tracing estimate competence from learner outcomes.
 2. **Catalog structure.** Dependency graphs and difficulty metadata keep recommendations in the valid next-step set.
-3. **Adaptive ranking.** Per-user online updates let the next recommendation change after each response.
-4. **Logged policy learning.** `AdaptiveRanker.fit_policy(..., algo="cql")` trains a conservative discrete policy from candidate sets, propensities, and rewards.
-5. **Sketch mode.** Count-Min, Bloom-filter, reservoir, and exact-vector utilities shrink candidate generation before final reranking.
-6. **Offline policy evaluation.** IPS, SNIPS, direct-method, and doubly robust estimates test adaptive policies before rollout.
-7. **Safe operation.** Guardrails and frozen fallback rankings keep adaptive rollouts reviewable.
-8. **Privacy hooks.** DP-SGD presets, RBAC, HMAC audit chains, and hashed event IDs support regulated deployments.
+3. **Semantic cold start.** `SemanticItemEncoder` retrieves new exercises from text and metadata before interaction support exists.
+4. **Adaptive ranking.** Per-user online updates let the next recommendation change after each response.
+5. **Logged policy learning.** `AdaptiveRanker.fit_policy(..., algo="cql")` trains a conservative discrete policy from candidate sets, propensities, and rewards.
+6. **Sketch mode.** Count-Min, Bloom-filter, reservoir, and exact-vector utilities shrink candidate generation before final reranking.
+7. **Offline policy evaluation.** IPS, SNIPS, direct-method, doubly robust, and bootstrap reports test adaptive policies before rollout.
+8. **Safe operation.** Guardrails and frozen fallback rankings keep adaptive rollouts reviewable.
+9. **Privacy hooks.** DP-SGD presets, RBAC, HMAC audit chains, and hashed event IDs support regulated deployments.
 
 ## Supported strategies
 
@@ -135,14 +137,16 @@ Install `orchid-ranker[implicit]` to use true `implicit_als` or `implicit_bpr`.
 For adaptive learning, start with `AdaptiveRanker` when you want staged
 KT/reward/policy/OPE workflows, or `AdaptiveLearningEngine` when you only need
 fit/rank/observe. They compose
-AKT/SAKT-style tracing, progression reward, difficulty/prerequisite metadata,
-and live `observe()` updates into one fit/rank/observe API. Use lower-level
+SAINT+/SAINT, AKT/SAKT-style tracing, progression reward,
+difficulty/prerequisite metadata, semantic item retrieval, and live
+`observe()` updates into one fit/rank/observe API. Use lower-level
 pieces such as `BayesianKnowledgeTracing`, `DependencyGraph`,
 `ProgressionRecommender`, `orchid_ranker.kt.SAKTTracer`, and
-`orchid_ranker.kt.AKTTracer` only when you need a custom policy. Use
+`orchid_ranker.kt.SAINTPlusTracer` only when you need a custom policy. Use
 `orchid_ranker.ope` to evaluate a new learning policy from logged randomized
-traffic before serving it. Modern KT and policy-learning algorithms are
-tracked in the [algorithm roadmap](docs/algorithm-roadmap.md).
+traffic before serving it, and `bootstrap_logged_policy` when rollout decisions
+need row-resampled confidence intervals. Modern KT and policy-learning
+algorithms are tracked in the [algorithm roadmap](docs/algorithm-roadmap.md).
 
 For the legacy `OrchidRecommender` API, use `neural_mf` when you want to
 promote a fitted model into `StreamingAdaptiveRanker` with `as_streaming()`.

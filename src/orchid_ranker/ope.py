@@ -9,14 +9,18 @@ from __future__ import annotations
 
 from dataclasses import asdict, dataclass
 from statistics import NormalDist
-from typing import Any, Iterable, Optional, Sequence
+from typing import Any, Iterable, Optional, Sequence, cast
 
 import numpy as np
 import pandas as pd
 
 __all__ = [
+    "BootstrapLoggedPolicyReport",
+    "BootstrapPolicyComparisonReport",
     "LoggedPolicyReport",
     "PolicyComparisonReport",
+    "bootstrap_compare_logged_policies",
+    "bootstrap_logged_policy",
     "compare_logged_policies",
     "deterministic_policy_probabilities",
     "evaluate_logged_policy",
@@ -77,7 +81,7 @@ class LoggedPolicyReport:
     clipped_fraction: float
 
     def to_dict(self) -> dict[str, Any]:
-        return _jsonable(asdict(self))
+        return cast(dict[str, Any], _jsonable(asdict(self)))
 
 
 @dataclass(frozen=True)
@@ -96,7 +100,65 @@ class PolicyComparisonReport:
         data = asdict(self)
         data["target"] = self.target.to_dict()
         data["baseline"] = self.baseline.to_dict()
-        return _jsonable(data)
+        return cast(dict[str, Any], _jsonable(data))
+
+
+@dataclass(frozen=True)
+class BootstrapLoggedPolicyReport:
+    """Logged-policy report with row-bootstrap confidence interval."""
+
+    base: LoggedPolicyReport
+    estimator: str
+    n_bootstrap: int
+    ci: float
+    bootstrap_standard_error: float
+    bootstrap_ci_low: float
+    bootstrap_ci_high: float
+
+    def to_dict(self) -> dict[str, Any]:
+        return cast(
+            dict[str, Any],
+            _jsonable(
+                {
+                    "base": self.base.to_dict(),
+                    "estimator": self.estimator,
+                    "n_bootstrap": self.n_bootstrap,
+                    "ci": self.ci,
+                    "bootstrap_standard_error": self.bootstrap_standard_error,
+                    "bootstrap_ci_low": self.bootstrap_ci_low,
+                    "bootstrap_ci_high": self.bootstrap_ci_high,
+                }
+            ),
+        )
+
+
+@dataclass(frozen=True)
+class BootstrapPolicyComparisonReport:
+    """Paired policy comparison with row-bootstrap uplift interval."""
+
+    base: PolicyComparisonReport
+    estimator: str
+    n_bootstrap: int
+    ci: float
+    bootstrap_standard_error: float
+    bootstrap_ci_low: float
+    bootstrap_ci_high: float
+
+    def to_dict(self) -> dict[str, Any]:
+        return cast(
+            dict[str, Any],
+            _jsonable(
+                {
+                    "base": self.base.to_dict(),
+                    "estimator": self.estimator,
+                    "n_bootstrap": self.n_bootstrap,
+                    "ci": self.ci,
+                    "bootstrap_standard_error": self.bootstrap_standard_error,
+                    "bootstrap_ci_low": self.bootstrap_ci_low,
+                    "bootstrap_ci_high": self.bootstrap_ci_high,
+                }
+            ),
+        )
 
 
 @dataclass(frozen=True)
@@ -215,6 +277,134 @@ def compare_logged_policies(
         standard_error=se,
         ci_low=low,
         ci_high=high,
+    )
+
+
+def bootstrap_logged_policy(
+    events: pd.DataFrame,
+    *,
+    reward_col: str,
+    propensity_col: str,
+    target_probability_col: str,
+    target_value_col: Optional[str] = None,
+    logged_action_value_col: Optional[str] = None,
+    reward_min: Optional[float] = 0.0,
+    reward_max: Optional[float] = 1.0,
+    min_propensity: float = 1e-6,
+    max_weight: Optional[float] = None,
+    ci: float = 0.95,
+    n_bootstrap: int = 500,
+    random_state: Optional[int] = 42,
+) -> BootstrapLoggedPolicyReport:
+    """Evaluate a logged policy with percentile bootstrap confidence bounds."""
+    if n_bootstrap < 1:
+        raise ValueError("n_bootstrap must be >= 1")
+    base = evaluate_logged_policy(
+        events,
+        reward_col=reward_col,
+        propensity_col=propensity_col,
+        target_probability_col=target_probability_col,
+        target_value_col=target_value_col,
+        logged_action_value_col=logged_action_value_col,
+        reward_min=reward_min,
+        reward_max=reward_max,
+        min_propensity=min_propensity,
+        max_weight=max_weight,
+        ci=ci,
+    )
+    rng = np.random.RandomState(random_state)
+    values = np.zeros((int(n_bootstrap),), dtype=float)
+    for idx in range(int(n_bootstrap)):
+        sample = events.iloc[rng.randint(0, len(events), size=len(events))].reset_index(drop=True)
+        values[idx] = evaluate_logged_policy(
+            sample,
+            reward_col=reward_col,
+            propensity_col=propensity_col,
+            target_probability_col=target_probability_col,
+            target_value_col=target_value_col,
+            logged_action_value_col=logged_action_value_col,
+            reward_min=reward_min,
+            reward_max=reward_max,
+            min_propensity=min_propensity,
+            max_weight=max_weight,
+            ci=ci,
+        ).value
+    low, high = _percentile_ci(values, ci)
+    return BootstrapLoggedPolicyReport(
+        base=base,
+        estimator=base.estimator,
+        n_bootstrap=int(n_bootstrap),
+        ci=float(ci),
+        bootstrap_standard_error=float(np.std(values, ddof=1)) if values.size > 1 else 0.0,
+        bootstrap_ci_low=low,
+        bootstrap_ci_high=high,
+    )
+
+
+def bootstrap_compare_logged_policies(
+    events: pd.DataFrame,
+    *,
+    reward_col: str,
+    propensity_col: str,
+    target_probability_col: str,
+    baseline_probability_col: str,
+    target_value_col: Optional[str] = None,
+    baseline_value_col: Optional[str] = None,
+    logged_action_value_col: Optional[str] = None,
+    reward_min: Optional[float] = 0.0,
+    reward_max: Optional[float] = 1.0,
+    min_propensity: float = 1e-6,
+    max_weight: Optional[float] = None,
+    ci: float = 0.95,
+    n_bootstrap: int = 500,
+    random_state: Optional[int] = 42,
+) -> BootstrapPolicyComparisonReport:
+    """Compare two logged policies with a paired row-bootstrap uplift interval."""
+    if n_bootstrap < 1:
+        raise ValueError("n_bootstrap must be >= 1")
+    base = compare_logged_policies(
+        events,
+        reward_col=reward_col,
+        propensity_col=propensity_col,
+        target_probability_col=target_probability_col,
+        baseline_probability_col=baseline_probability_col,
+        target_value_col=target_value_col,
+        baseline_value_col=baseline_value_col,
+        logged_action_value_col=logged_action_value_col,
+        reward_min=reward_min,
+        reward_max=reward_max,
+        min_propensity=min_propensity,
+        max_weight=max_weight,
+        ci=ci,
+    )
+    rng = np.random.RandomState(random_state)
+    uplifts = np.zeros((int(n_bootstrap),), dtype=float)
+    for idx in range(int(n_bootstrap)):
+        sample = events.iloc[rng.randint(0, len(events), size=len(events))].reset_index(drop=True)
+        uplifts[idx] = compare_logged_policies(
+            sample,
+            reward_col=reward_col,
+            propensity_col=propensity_col,
+            target_probability_col=target_probability_col,
+            baseline_probability_col=baseline_probability_col,
+            target_value_col=target_value_col,
+            baseline_value_col=baseline_value_col,
+            logged_action_value_col=logged_action_value_col,
+            reward_min=reward_min,
+            reward_max=reward_max,
+            min_propensity=min_propensity,
+            max_weight=max_weight,
+            ci=ci,
+        ).uplift
+    low, high = _percentile_ci(uplifts, ci)
+    return BootstrapPolicyComparisonReport(
+        base=base,
+        estimator=base.estimator,
+        n_bootstrap=int(n_bootstrap),
+        ci=float(ci),
+        bootstrap_standard_error=float(np.std(uplifts, ddof=1)) if uplifts.size > 1 else 0.0,
+        bootstrap_ci_low=low,
+        bootstrap_ci_high=high,
     )
 
 
@@ -357,6 +547,13 @@ def _normal_ci(terms: np.ndarray, ci: float) -> tuple[float, float, float]:
     se = float(np.std(terms, ddof=1) / np.sqrt(terms.size))
     z = NormalDist().inv_cdf(0.5 + ci / 2.0)
     return se, float(mean - z * se), float(mean + z * se)
+
+
+def _percentile_ci(values: np.ndarray, ci: float) -> tuple[float, float]:
+    lower = 100.0 * (1.0 - ci) / 2.0
+    upper = 100.0 * (1.0 + ci) / 2.0
+    bounds = np.percentile(np.asarray(values, dtype=float), [lower, upper])
+    return float(bounds[0]), float(bounds[1])
 
 
 def _jsonable(value: Any) -> Any:

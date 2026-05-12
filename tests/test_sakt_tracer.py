@@ -5,7 +5,7 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from orchid_ranker.kt import AKTTracer, SAKTTracer, build_sakt_examples
+from orchid_ranker.kt import AKTTracer, SAINTPlusTracer, SAINTTracer, SAKTTracer, build_sakt_examples
 
 
 def _small_learning_events() -> pd.DataFrame:
@@ -46,6 +46,23 @@ def test_build_sakt_examples_uses_only_prior_events():
     assert examples[2].query_item_id == 40
     assert examples[2].history_item_ids == (20, 30)
     assert 40 not in examples[2].history_item_ids
+
+
+def test_build_sakt_examples_includes_temporal_features_when_timestamped():
+    events = pd.DataFrame(
+        {
+            "user_id": [7, 7, 7],
+            "item_id": [10, 20, 30],
+            "correct": [1, 0, 1],
+            "timestamp": [10, 15, 30],
+        }
+    )
+
+    examples = build_sakt_examples(events, timestamp_col="timestamp", max_seq_len=3)
+
+    assert examples[1].query_item_id == 30
+    assert examples[1].history_elapsed == (0.0, 5.0)
+    assert examples[1].history_lag == (20.0, 15.0)
 
 
 def test_sakt_tracer_fit_predict_and_state_vector_shape():
@@ -178,3 +195,26 @@ def test_akt_tracer_rejects_invalid_difficulty():
 
     with pytest.raises(ValueError):
         tracer.fit(events, timestamp_col="timestamp", item_difficulty_col="difficulty")
+
+
+@pytest.mark.parametrize("tracer_cls", [SAINTTracer, SAINTPlusTracer])
+def test_saint_tracers_fit_predict_and_update(tracer_cls):
+    tracer = tracer_cls(
+        max_seq_len=3,
+        d_model=16,
+        n_heads=2,
+        epochs=1,
+        batch_size=4,
+        random_state=31,
+        device="cpu",
+    ).fit(_small_learning_events(), timestamp_col="timestamp")
+
+    before = tracer.state_vector("live-saint", [20, 30])
+    length = tracer.observe("live-saint", 10, correct=True)
+    after = tracer.state_vector("live-saint", [20, 30])
+
+    assert tracer.is_fitted
+    assert 0.0 <= tracer.predict_correct(1, 30) <= 1.0
+    assert length == 1
+    assert before.shape == after.shape == (2,)
+    assert not np.allclose(before, after)

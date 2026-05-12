@@ -430,7 +430,49 @@ class AdaptiveLearningRecommender:
                 item_difficulty_col=item_difficulty_col,
                 item_difficulty_map=dict(item_difficulty_map or {}),
             )
-        raise ValueError("tracer_model must be 'akt' or 'sakt'")
+        if normalized == "saint":
+            from .kt import SAINTTracer
+
+            return SAINTTracer(
+                max_seq_len=self.config.max_seq_len,
+                d_model=self.config.d_model,
+                n_heads=self.config.n_heads,
+                dropout=self.config.dropout,
+                learning_rate=self.config.learning_rate,
+                epochs=self.config.epochs,
+                batch_size=self.config.batch_size,
+                correct_threshold=self.config.correct_threshold,
+                device=self.config.device,
+                random_state=self.config.random_state,
+            ).fit(
+                interactions,
+                user_col=user_col,
+                item_col=item_col,
+                correct_col=correct_col,
+                timestamp_col=timestamp_col,
+            )
+        if normalized in {"saint+", "saint-plus"}:
+            from .kt import SAINTPlusTracer
+
+            return SAINTPlusTracer(
+                max_seq_len=self.config.max_seq_len,
+                d_model=self.config.d_model,
+                n_heads=self.config.n_heads,
+                dropout=self.config.dropout,
+                learning_rate=self.config.learning_rate,
+                epochs=self.config.epochs,
+                batch_size=self.config.batch_size,
+                correct_threshold=self.config.correct_threshold,
+                device=self.config.device,
+                random_state=self.config.random_state,
+            ).fit(
+                interactions,
+                user_col=user_col,
+                item_col=item_col,
+                correct_col=correct_col,
+                timestamp_col=timestamp_col,
+            )
+        raise ValueError("tracer_model must be 'akt', 'sakt', 'saint', or 'saint+'")
 
     def _resolve_policy(self, *, has_concept_signal: bool) -> str:
         policy = self.config.policy.lower()

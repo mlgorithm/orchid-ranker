@@ -38,15 +38,24 @@ class AdaptiveRanker:
     def fit_kt(self, events, *, learner_col="learner_id", item_col="item_id", correct_col="correct", timestamp_col="ts")
     def fit_reward_model(self)
     def fit_policy(self, logged_decisions, *, algo="cql", reward_col="reward")
-    def recommend(self, learner_id, candidate_item_ids=None, *, top_k=10, mode=None)
+    def fit_semantic_items(self, catalog, *, item_col="item_id", text_col="item_text", metadata_cols=None)
+    def recommend(self, learner_id, candidate_item_ids=None, *, top_k=10, mode=None, item_query_text=None)
     def observe(self, event=None, **kwargs)
     def ope_report(self, logged_decisions, *, reward_col="reward", propensity_col="propensity")
 ```
+
+`kt_backbone` accepts `"akt"`, `"sakt"`, `"saint"`, and `"saint+"`.
+`"saint+"` uses elapsed-time and lag-time features when timestamped events are
+available, and falls back to zero temporal features otherwise.
 
 `fit_policy(..., algo="cql")` implements a dependency-light tabular
 CQL-style learner over logged candidate sets. It is the first conservative
 offline policy path; deeper CQL/IQL/CRR implementations can slot behind the
 same facade later.
+
+`fit_semantic_items(...)` fits the built-in hashing-vectorizer semantic encoder
+for text/metadata cold start. Passing `item_query_text` to `recommend(...)`
+uses semantic retrieval to build the candidate set before KT/policy reranking.
 
 `mode="sketch"` uses an attached `SketchCandidateGenerator` to produce a
 bounded candidate set before final reranking.
@@ -276,9 +285,39 @@ def compare_logged_policies(
 ) -> PolicyComparisonReport
 ```
 
+```python
+def bootstrap_logged_policy(..., n_bootstrap=500) -> BootstrapLoggedPolicyReport
+def bootstrap_compare_logged_policies(..., n_bootstrap=500) -> BootstrapPolicyComparisonReport
+```
+
 Reports include IPS, SNIPS, direct-method and doubly robust estimates when the
 required columns are supplied, plus coverage, effective sample size, weight
-diagnostics, and confidence intervals.
+diagnostics, and confidence intervals. Bootstrap reports add row-resampled
+percentile intervals for rollout gates where normal approximation is too weak.
+
+---
+
+## orchid_ranker.semantic
+
+Semantic item retrieval for new exercises or sparse catalogs.
+
+```python
+from orchid_ranker import SemanticItemEncoder
+
+encoder = SemanticItemEncoder(n_features=2**14).fit(
+    catalog,
+    item_col="item_id",
+    text_col="item_text",
+    metadata_cols=["concept_id", "difficulty_bin"],
+)
+
+candidate_ids = encoder.similar_items("add fractions with common denominators", top_k=50)
+```
+
+`SemanticItemEncoder` uses deterministic hashed text/metadata features, so it
+does not require model downloads or external embedding services. Use it for
+candidate generation and cold start, then let the KT/policy layer perform final
+adaptive reranking.
 
 ---
 

@@ -10,12 +10,13 @@ item, evaluate safely, and explain why.
 
 | Area | Shipped today | Role in adaptive learning |
 |------|---------------|---------------------------|
-| Learner state | `BayesianKnowledgeTracing`, `AKTTracer`, `SAKTTracer` | Online competence and correctness estimates per learner and item |
+| Learner state | `BayesianKnowledgeTracing`, `SAINTPlusTracer`, `SAINTTracer`, `AKTTracer`, `SAKTTracer` | Online competence and correctness estimates per learner and item |
 | Catalog constraints | `DependencyGraph`, `ProgressionRecommender` | Prerequisite-aware eligibility and path ordering |
 | Adaptive ranking | `AdaptiveLearningEngine`, `ProgressionValuePolicy` | Next-item ranking from KT, difficulty, prerequisites, and progression reward |
 | Base recommender fallback | MF, neural MF, ALS, BPR, user-kNN, LinUCB | Generic ranking when learning metadata is missing |
 | Live adaptation | `AdaptiveLearningEngine.observe`, `StreamingAdaptiveRanker` | Per-outcome updates without full retraining |
-| Offline policy evaluation | `orchid_ranker.ope` | IPS/SNIPS/direct-method/doubly robust checks before adaptive rollout |
+| Offline policy evaluation | `orchid_ranker.ope` | IPS/SNIPS/direct-method/doubly robust and bootstrap checks before adaptive rollout |
+| Semantic retrieval | `orchid_ranker.semantic` | Text/metadata candidate generation for sparse or new exercises |
 | Safety | progression monitors, guardrails, safe fallback | Stops harmful adaptive behavior before broad rollout |
 
 This is a strong product foundation, and the next modeling layer should keep
@@ -41,11 +42,11 @@ Add adaptive-learning algorithms under explicit, boring names:
 
 | Module | Proposed API | Purpose |
 |--------|--------------|---------|
-| `orchid_ranker.kt` | `SAKTTracer`, `AKTTracer`, future `DKTTracer` | Predict next correctness and expose learner-state vectors |
+| `orchid_ranker.kt` | `SAKTTracer`, `AKTTracer`, `SAINTTracer`, `SAINTPlusTracer`, future `DKTTracer` | Predict next correctness and expose learner-state vectors |
 | `orchid_ranker.learning_policy` | `KTValuePolicy`, future `StretchBanditPolicy` | Choose next item from eligible candidates using expected progress |
 | `orchid_ranker.pykt_bridge` | `export_pykt_sequences`, `PyKTPredictionAdapter` | Interoperate with pyKT research models and bring predictions back into Orchid policy/OPE |
-| `orchid_ranker.semantic` | `SemanticExerciseEncoder`, `SemanticExerciseRanker` | Score new exercises using text/metadata embeddings |
-| `orchid_ranker.ope` | `evaluate_logged_policy`, `compare_logged_policies` | Evaluate adaptive policies before serving them |
+| `orchid_ranker.semantic` | `SemanticItemEncoder`, `SemanticExerciseRanker` | Score new exercises using text/metadata embeddings |
+| `orchid_ranker.ope` | `evaluate_logged_policy`, `compare_logged_policies`, bootstrap variants | Evaluate adaptive policies before serving them |
 
 Keep `AdaptiveLearningEngine` as the beginner API for the primary
 adaptive-learning workflow. Keep `OrchidRecommender` as the generic
@@ -88,8 +89,16 @@ prerequisite metadata.
    pyKT's six-line learner-sequence format and wrap pyKT prediction tables for
    `KTValuePolicy` and OPE. This makes Orchid the production/evaluation layer
    around external KT model-zoo outputs.
-10. **Semantic cold start.** Add content embeddings for new exercises and
-   concepts, then benchmark on unseen-item splits.
+10. **Adaptive-first facade.** Added `AdaptiveRanker` with staged KT,
+    reward-model, logged-policy, sketch-mode, OPE, and observe workflows.
+11. **SAINT and SAINT+.** Added `SAINTTracer` and `SAINTPlusTracer` to the
+    in-repo KT registry. SAINT+ uses elapsed-time and lag-time history features
+    when timestamped events are available.
+12. **Semantic cold start.** Added `SemanticItemEncoder` and
+    `SemanticExerciseRanker` for deterministic text/metadata candidate
+    retrieval before final adaptive reranking.
+13. **Bootstrap OPE intervals.** Added row-bootstrap OPE reports for single
+    policies and paired comparisons.
 
 ## Claim discipline
 
