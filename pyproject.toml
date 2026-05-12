@@ -48,6 +48,26 @@ classifiers = [
 ]
 
 [project.optional-dependencies]
+adaptive = [
+  "torch>=2.0,<3",
+]
+offline_rl = [
+  "torch>=2.0,<3",
+]
+bandits = [
+  "torch>=2.0,<3",
+]
+sketch = [
+  "numpy>=1.23.5",
+]
+privacy = [
+  "opacus>=1.5,<2",
+  "PyJWT[crypto]>=2.8,<3",
+]
+legacy = [
+  "torch>=2.0,<3",
+  "implicit>=0.7,<1",
+]
 ml = [
   "torch>=2.0,<3",
 ]
