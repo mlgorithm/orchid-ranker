@@ -22,6 +22,7 @@ Public API is organized into three stability tiers:
     diagnose_delayed_gain_predictions, fit_delayed_gain_reward_model,
     fit_delayed_gain_reward_model_from_frame,
     LearnerEvent, LoggedDecision, CQLDiscretePolicy, SketchCandidateGenerator,
+    SemanticItemEncoder, SemanticExerciseRanker,
     ScenarioFit, ScenarioRecipe, available_scenarios, recommend_scenarios
 
 **Tier 2 -- Advanced** (stable but may evolve between minor versions):
@@ -88,8 +89,12 @@ from .learning_policy import (
 )
 from .offline_policy import CQLDiscretePolicy, CQLTrainingReport
 from .ope import (
+    BootstrapLoggedPolicyReport,
+    BootstrapPolicyComparisonReport,
     LoggedPolicyReport,
     PolicyComparisonReport,
+    bootstrap_compare_logged_policies,
+    bootstrap_logged_policy,
     compare_logged_policies,
     deterministic_policy_probabilities,
     evaluate_logged_policy,
@@ -108,6 +113,7 @@ from .scenarios import (
     available_scenarios,
     recommend_scenarios,
 )
+from .semantic import SemanticExerciseRanker, SemanticItemEncoder, SemanticRecommendation
 
 # ── Lazy imports for torch-dependent and optional-dependency modules ──────
 #
@@ -263,8 +269,12 @@ __all__ = [
     "ProgressionReport",
     "LoggedPolicyReport",
     "PolicyComparisonReport",
+    "BootstrapLoggedPolicyReport",
+    "BootstrapPolicyComparisonReport",
     "evaluate_logged_policy",
     "compare_logged_policies",
+    "bootstrap_logged_policy",
+    "bootstrap_compare_logged_policies",
     "deterministic_policy_probabilities",
     "LearnerEvent",
     "LoggedDecision",
@@ -281,6 +291,9 @@ __all__ = [
     "ExactEmbeddingIndex",
     "ReservoirSampler",
     "SketchCandidateGenerator",
+    "SemanticItemEncoder",
+    "SemanticRecommendation",
+    "SemanticExerciseRanker",
     "PyKTSequence",
     "PyKTPredictionAdapter",
     "export_pykt_sequences",

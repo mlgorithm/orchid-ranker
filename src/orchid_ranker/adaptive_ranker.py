@@ -65,6 +65,7 @@ class AdaptiveRanker:
         self.recommender_: Optional[AdaptiveLearningRecommender] = None
         self.offline_policy_: Optional[CQLDiscretePolicy] = None
         self.sketch_generator_: Optional[Any] = None
+        self.semantic_encoder_: Optional[Any] = None
         self._events: Optional[pd.DataFrame] = None
         self._fit_kwargs: dict[str, Any] = {}
 
@@ -86,9 +87,7 @@ class AdaptiveRanker:
     ) -> "AdaptiveRanker":
         """Fit learner-state tracing and the default adaptive policy."""
         backbone = self.config.kt_backbone.lower().replace("_", "-")
-        if backbone in {"saint", "saint+"}:
-            raise NotImplementedError("SAINT/SAINT+ are roadmap backbones; current shipped backbones are 'akt' and 'sakt'")
-        if backbone not in {"akt", "sakt", "akt-inspired"}:
+        if backbone not in {"akt", "sakt", "akt-inspired", "saint", "saint+", "saint-plus"}:
             raise ValueError("kt_backbone must be one of 'akt', 'sakt', 'saint', or 'saint+'")
         work = validate_learner_events(
             events,
@@ -158,6 +157,35 @@ class AdaptiveRanker:
         self.sketch_generator_ = generator
         return self
 
+    def fit_semantic_items(
+        self,
+        catalog: pd.DataFrame,
+        *,
+        item_col: str = "item_id",
+        text_col: str = "item_text",
+        metadata_cols: Optional[Sequence[str]] = None,
+        **encoder_kwargs: Any,
+    ) -> "AdaptiveRanker":
+        """Fit the lightweight semantic item encoder used for cold-start retrieval."""
+        from .semantic import SemanticItemEncoder
+
+        self.semantic_encoder_ = SemanticItemEncoder(**encoder_kwargs).fit(
+            catalog,
+            item_col=item_col,
+            text_col=text_col,
+            metadata_cols=metadata_cols,
+        )
+        return self
+
+    def attach_semantic_encoder(self, encoder: Any) -> "AdaptiveRanker":
+        """Attach a pre-fitted semantic encoder exposing ``similar_items``."""
+        if not getattr(encoder, "is_fitted", False):
+            raise RuntimeError("semantic encoder must be fitted before attachment")
+        if not hasattr(encoder, "similar_items"):
+            raise TypeError("semantic encoder must expose similar_items(...)")
+        self.semantic_encoder_ = encoder
+        return self
+
     def recommend(
         self,
         learner_id: Any,
@@ -168,12 +196,18 @@ class AdaptiveRanker:
         context_hash: Optional[str] = None,
         concept_goal: Optional[Any] = None,
         item_query_vec: Optional[Sequence[float]] = None,
+        item_query_text: Optional[str] = None,
     ) -> list[AdaptiveLearningRecommendation]:
         """Recommend next items using exact or sketch-mode candidates."""
         self._require_fitted()
         assert self.recommender_ is not None
         active_mode = self.config.mode if mode is None else mode
         candidates = list(candidate_item_ids or [])
+        if not candidates and item_query_text is not None and self.semantic_encoder_ is not None:
+            candidates = self.semantic_encoder_.similar_items(
+                item_query_text,
+                top_k=max(top_k, 50),
+            )
         if not candidates and active_mode == "sketch":
             if self.sketch_generator_ is None:
                 raise RuntimeError("sketch mode requires an attached SketchCandidateGenerator")
@@ -243,6 +277,7 @@ class AdaptiveRanker:
             "kt_backbone": self.config.kt_backbone,
             "offline_policy": None if self.offline_policy_ is None else self.offline_policy_.to_dict(),
             "has_sketch_generator": self.sketch_generator_ is not None,
+            "semantic_encoder": None if self.semantic_encoder_ is None else self.semantic_encoder_.diagnostics(),
         }
         return data
 

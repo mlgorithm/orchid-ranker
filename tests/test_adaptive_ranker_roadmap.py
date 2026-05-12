@@ -9,6 +9,7 @@ from orchid_ranker import (
     ExactEmbeddingIndex,
     LearnerEvent,
     LoggedDecision,
+    SemanticItemEncoder,
     SketchCandidateGenerator,
     logged_decisions_to_frame,
     stable_context_hash,
@@ -138,3 +139,73 @@ def test_adaptive_ranker_facade_trains_policy_runs_ope_and_observes():
     assert 0.0 <= ope.value <= 1.0
     assert length >= 1
     assert diagnostics["adaptive_ranker"]["offline_policy"]["n_events"] == len(_decisions())
+
+
+def test_adaptive_ranker_accepts_saint_plus_and_semantic_candidates():
+    catalog = pd.DataFrame(
+        {
+            "item_id": ["i1", "i2", "i3", "i4"],
+            "item_text": [
+                "warm up with whole numbers",
+                "compare fractions with like denominators",
+                "add fractions and simplify answers",
+                "solve ratio tables",
+            ],
+            "concept": ["basics", "fractions", "fractions", "ratios"],
+        }
+    )
+    ranker = AdaptiveRanker(
+        kt_backbone="saint+",
+        epochs=1,
+        d_model=16,
+        n_heads=2,
+        batch_size=4,
+        device="cpu",
+    ).fit_kt(_events(), item_difficulty_col="difficulty")
+    ranker.fit_semantic_items(catalog, metadata_cols=["concept"], n_features=256)
+
+    ranked = ranker.recommend("learner-a", top_k=2, item_query_text="fraction addition practice")
+    diagnostics = ranker.diagnostics()
+
+    assert len(ranked) == 2
+    assert {rec.item_id for rec in ranked}.issubset(set(catalog["item_id"]))
+    assert diagnostics["adaptive_ranker"]["kt_backbone"] == "saint+"
+    assert diagnostics["adaptive_ranker"]["semantic_encoder"]["n_items"] == 4
+
+
+def test_semantic_item_encoder_ranks_matching_exercises():
+    catalog = pd.DataFrame(
+        {
+            "item_id": ["fractions", "ratios", "geometry"],
+            "item_text": [
+                "add fractions with common denominators",
+                "solve ratio and proportion word problems",
+                "identify acute and obtuse angles",
+            ],
+        }
+    )
+    encoder = SemanticItemEncoder(n_features=256).fit(catalog)
+
+    ranked = encoder.similar_items("add fractions common denominators", top_k=2)
+
+    assert ranked[0] == "fractions"
+    assert encoder.scores("ratio table", candidate_item_ids=["ratios"])["ratios"] > 0.0
+
+
+def test_semantic_item_encoder_profiles_from_known_items():
+    catalog = pd.DataFrame(
+        {
+            "item_id": ["linear", "quadratic", "biology"],
+            "item_text": [
+                "solve linear equations in algebra",
+                "solve quadratic equations in algebra",
+                "describe photosynthesis in plants",
+            ],
+        }
+    )
+    encoder = SemanticItemEncoder(n_features=256).fit(catalog)
+
+    ranked = encoder.similar_to_items(["linear"], top_k=2)
+
+    assert ranked[0] == "quadratic"
+    assert "linear" not in ranked
