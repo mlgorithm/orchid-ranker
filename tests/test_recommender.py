@@ -35,6 +35,31 @@ def test_als_predicts_known_pair():
     assert 0.0 <= score <= 1.0
 
 
+def test_als_implicit_feedback_samples_missing_negatives():
+    data = _dataset()[["user_id", "item_id"]]
+    rec = OrchidRecommender(strategy="als", epochs=1, num_negative_samples=2, random_state=7)
+    rec.fit(data)
+
+    assert rec._baseline._last_num_training_examples > len(data)
+    assert rec._baseline._last_num_negative_examples > 0
+
+
+def test_neural_mf_bce_implicit_feedback_samples_missing_negatives():
+    data = _dataset()[["user_id", "item_id"]]
+    rec = OrchidRecommender(
+        strategy="neural_mf",
+        epochs=1,
+        emb_dim=8,
+        hidden=(16,),
+        loss="bce",
+        num_negative_samples=2,
+    )
+    rec.fit(data)
+
+    assert rec._baseline._last_num_training_examples > len(data)
+    assert rec._baseline._last_num_negative_examples > 0
+
+
 def test_linucb_requires_item_features():
     data = _dataset()
     rec = OrchidRecommender(strategy="linucb")

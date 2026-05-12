@@ -157,6 +157,54 @@ class BaseBaseline:
         raise NotImplementedError
 
 
+def _with_sampled_missing_negatives(
+    user_ids: np.ndarray,
+    item_ids: np.ndarray,
+    labels: np.ndarray,
+    *,
+    num_items: int,
+    num_negative_samples: int,
+    random_state: Optional[int],
+) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """Append sampled unobserved items as negatives for implicit-positive logs."""
+    if num_negative_samples <= 0 or user_ids.size == 0 or num_items <= 1:
+        return user_ids, item_ids, labels
+
+    positive_by_user: dict[int, set[int]] = {}
+    for user_id, item_id, label in zip(user_ids, item_ids, labels):
+        if float(label) > 0.0:
+            positive_by_user.setdefault(int(user_id), set()).add(int(item_id))
+
+    rng = np.random.RandomState(random_state)
+    all_items = np.arange(num_items, dtype=np.int64)
+    neg_users: list[int] = []
+    neg_items: list[int] = []
+    for user_id, _item_id, label in zip(user_ids, item_ids, labels):
+        if float(label) <= 0.0:
+            continue
+        positives = positive_by_user.get(int(user_id), set())
+        if len(positives) >= num_items:
+            continue
+        candidates = np.array([int(i) for i in all_items if int(i) not in positives], dtype=np.int64)
+        if candidates.size == 0:
+            continue
+        sampled = rng.choice(
+            candidates,
+            size=int(num_negative_samples),
+            replace=candidates.size < int(num_negative_samples),
+        )
+        neg_users.extend([int(user_id)] * int(num_negative_samples))
+        neg_items.extend(int(i) for i in sampled)
+
+    if not neg_users:
+        return user_ids, item_ids, labels
+
+    user_out = np.concatenate([user_ids, np.asarray(neg_users, dtype=np.int64)])
+    item_out = np.concatenate([item_ids, np.asarray(neg_items, dtype=np.int64)])
+    label_out = np.concatenate([labels, np.zeros(len(neg_users), dtype=np.float32)])
+    return user_out, item_out, label_out
+
+
 class PopularityBaseline(BaseBaseline):
     """Recommends items based on historical popularity (item frequency/rating average).
 
@@ -285,10 +333,13 @@ class RandomBaseline(BaseBaseline):
 
 
 class ALSBaseline(BaseBaseline):
-    """Alternating Least Squares matrix factorization for binary feedback.
+    """Legacy binary matrix factorization strategy exposed as ``als``.
 
-    Trains embeddings to predict user-item interaction probabilities using
-    binary cross-entropy loss.
+    This class is kept for backwards compatibility with the historical
+    ``strategy="als"`` API. It is not a true alternating-least-squares solver:
+    it trains a matrix-factorization model with Adam and binary cross-entropy.
+    Prefer ``implicit_als`` when you need a true ALS implementation from the
+    optional ``implicit`` dependency.
 
     Parameters
     ----------
@@ -308,6 +359,7 @@ class ALSBaseline(BaseBaseline):
 
     def __init__(self, num_users: int, num_items: int, device: torch.device,
                  embedding_dim: int = 32, learning_rate: float = 1e-2, epochs: int = 5,
+                 num_negative_samples: int = 4, random_state: Optional[int] = 42,
                  *, emb_dim: Optional[int] = None, lr: Optional[float] = None):
         super().__init__(device)
         # Support abbreviated aliases for backward compatibility
@@ -317,8 +369,21 @@ class ALSBaseline(BaseBaseline):
         self.learning_rate = learning_rate
         self.lr = learning_rate  # alias
         self.epochs = epochs
+        self.num_users = int(num_users)
+        self.num_items = int(num_items)
+        self.num_negative_samples = int(num_negative_samples)
+        self.random_state = random_state
+        self._last_num_training_examples = 0
+        self._last_num_negative_examples = 0
 
-    def fit(self, user_ids: Iterable[int], item_ids: Iterable[int], labels: Iterable[int]) -> None:
+    def fit(
+        self,
+        user_ids: Iterable[int],
+        item_ids: Iterable[int],
+        labels: Iterable[int],
+        *,
+        sample_missing_negatives: bool = False,
+    ) -> None:
         """Train the matrix factorization model.
 
         Parameters
@@ -330,9 +395,24 @@ class ALSBaseline(BaseBaseline):
         labels : Iterable[int]
             Binary labels (0 or 1) indicating interaction.
         """
-        user_tensor = torch.tensor(list(user_ids), dtype=torch.long, device=self.device)
-        item_tensor = torch.tensor(list(item_ids), dtype=torch.long, device=self.device)
-        label_tensor = torch.tensor(list(labels), dtype=torch.float32, device=self.device)
+        user_arr = np.asarray(list(user_ids), dtype=np.int64)
+        item_arr = np.asarray(list(item_ids), dtype=np.int64)
+        label_arr = np.asarray(list(labels), dtype=np.float32)
+        if sample_missing_negatives:
+            user_arr, item_arr, label_arr = _with_sampled_missing_negatives(
+                user_arr,
+                item_arr,
+                label_arr,
+                num_items=self.num_items,
+                num_negative_samples=self.num_negative_samples,
+                random_state=self.random_state,
+            )
+        self._last_num_training_examples = int(label_arr.size)
+        self._last_num_negative_examples = int(np.count_nonzero(label_arr <= 0.0))
+
+        user_tensor = torch.tensor(user_arr, dtype=torch.long, device=self.device)
+        item_tensor = torch.tensor(item_arr, dtype=torch.long, device=self.device)
+        label_tensor = torch.tensor(label_arr, dtype=torch.float32, device=self.device)
         # ALS uses BCE loss which requires labels in [0, 1]; clamp to handle explicit ratings
         label_tensor = torch.clamp(label_tensor, 0.0, 1.0)
         optimizer = torch.optim.Adam(self.model.parameters(), lr=self.lr)
@@ -886,6 +966,8 @@ class NeuralMatrixFactorizationBaseline(BaseBaseline):
         self.sigmoid = nn.Sigmoid()
         self.optimizer = torch.optim.Adam(self.parameters(), lr=self.lr)
         self.loss_fn = nn.BCELoss()
+        self._last_num_training_examples = 0
+        self._last_num_negative_examples = 0
 
     def parameters(self):
         """Return trainable model parameters.
@@ -897,7 +979,14 @@ class NeuralMatrixFactorizationBaseline(BaseBaseline):
         """
         return list(self.mlp.parameters()) + list(self.user_emb.parameters()) + list(self.item_emb.parameters())
 
-    def fit(self, user_ids: Iterable[int], item_ids: Iterable[int], labels: Iterable[float]) -> None:
+    def fit(
+        self,
+        user_ids: Iterable[int],
+        item_ids: Iterable[int],
+        labels: Iterable[float],
+        *,
+        sample_missing_negatives: bool = False,
+    ) -> None:
         """Train the neural matrix factorization model.
 
         Parameters
@@ -909,11 +998,32 @@ class NeuralMatrixFactorizationBaseline(BaseBaseline):
         labels : Iterable[float]
             Target labels (0/1 for binary feedback, or real-valued ratings).
         """
-        users = torch.tensor(list(user_ids), dtype=torch.long, device=self.device)
-        items = torch.tensor(list(item_ids), dtype=torch.long, device=self.device)
-        y = torch.tensor(list(labels), dtype=torch.float32, device=self.device)
+        user_arr = np.asarray(list(user_ids), dtype=np.int64)
+        item_arr = np.asarray(list(item_ids), dtype=np.int64)
+        label_arr = np.asarray(list(labels), dtype=np.float32)
+        if sample_missing_negatives and self.loss_type == "bce":
+            user_arr, item_arr, label_arr = _with_sampled_missing_negatives(
+                user_arr,
+                item_arr,
+                label_arr,
+                num_items=self.num_items,
+                num_negative_samples=max(1, self.neg_k),
+                random_state=None,
+            )
+        self._last_num_training_examples = int(label_arr.size)
+        self._last_num_negative_examples = int(np.count_nonzero(label_arr <= 0.0))
+
+        users = torch.tensor(user_arr, dtype=torch.long, device=self.device)
+        items = torch.tensor(item_arr, dtype=torch.long, device=self.device)
+        y = torch.tensor(label_arr, dtype=torch.float32, device=self.device)
         if self.loss_type == "bpr":
             # BPR: Bayesian Personalized Ranking
+            pos_mask = y > 0
+            users = users[pos_mask]
+            items = items[pos_mask]
+            if users.numel() == 0:
+                self.result.train_loss = 0.0
+                return
             bsz = max(256, self.batch_size)
             for _ in range(self.epochs):
                 perm = torch.randperm(users.size(0), device=self.device)

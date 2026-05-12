@@ -1,4 +1,4 @@
-# Developer conveniences mirroring `pip install orchid-ranker[dev,agentic,viz,preprocess]`
+# Developer conveniences mirroring `pip install orchid-ranker[dev,agentic,viz]`
 numpy>=1.23.5
 pandas>=1.5.3
 scikit-learn>=1.2

@@ -38,10 +38,13 @@ def train_test_split(
     random_state: Optional[int] = 42,
     user_col: str = "user_id",
     item_col: str = "item_id",
+    time_col: Optional[str] = "timestamp",
+    chronological: Optional[bool] = None,
 ) -> Tuple[pd.DataFrame, pd.DataFrame]:
     """Split interactions into train and test sets.
 
-    Supports both per-user stratified splits and global random splits.
+    Supports per-user stratified splits, chronological per-user splits when
+    timestamp data is present, and global random splits.
 
     Parameters
     ----------
@@ -60,6 +63,12 @@ def train_test_split(
         Column name for user IDs (default: "user_id").
     item_col : str, optional
         Column name for item IDs (default: "item_id").
+    time_col : str, optional
+        Timestamp column used for chronological splits. If left as the default
+        and a ``timestamp`` column exists, by-user splits are chronological.
+    chronological : bool, optional
+        Force or disable chronological splitting. ``None`` auto-enables it for
+        by-user splits when ``time_col`` exists.
 
     Returns
     -------
@@ -97,9 +106,26 @@ def train_test_split(
         )
 
     interactions = interactions.copy()
+    if chronological is None:
+        chronological = bool(by_user and time_col is not None and time_col in interactions.columns)
+    if chronological and time_col is None:
+        raise ValueError("chronological split requires time_col")
+    if chronological and time_col not in interactions.columns:
+        raise ValueError(
+            f"time_col '{time_col}' not found in interactions DataFrame. "
+            f"Available columns: {list(interactions.columns)}"
+        )
+
     rng = np.random.RandomState(random_state)
 
     if by_user:
+        if chronological:
+            return chronological_user_split(
+                interactions,
+                test_size=test_size,
+                user_col=user_col,
+                time_col=str(time_col),
+            )
         # Hold out test_size fraction per user
         train_idx: List[int] = []
         test_idx: List[int] = []
@@ -118,6 +144,13 @@ def train_test_split(
         train_df = interactions.loc[train_idx].reset_index(drop=True)
         test_df = interactions.loc[test_idx].reset_index(drop=True)
     else:
+        if chronological:
+            ordered = interactions.sort_values(str(time_col), kind="mergesort")
+            n_test = max(1, int(len(ordered) * test_size))
+            split_at = max(1, len(ordered) - n_test)
+            train_df = ordered.iloc[:split_at].reset_index(drop=True)
+            test_df = ordered.iloc[split_at:].reset_index(drop=True)
+            return train_df, test_df
         # Global random split
         n_test = int(len(interactions) * test_size)
         test_idx_arr = rng.choice(
@@ -129,6 +162,48 @@ def train_test_split(
         train_df = interactions.iloc[train_idx_arr].reset_index(drop=True)
         test_df = interactions.iloc[test_idx_arr].reset_index(drop=True)
 
+    return train_df, test_df
+
+
+def chronological_user_split(
+    interactions: pd.DataFrame,
+    *,
+    test_size: float = 0.2,
+    user_col: str = "user_id",
+    time_col: str = "timestamp",
+) -> Tuple[pd.DataFrame, pd.DataFrame]:
+    """Split each user's history by time, holding out only future events.
+
+    Unlike a random within-user split, this guarantees that no training event
+    for a user occurs after that user's test events. Single-interaction users
+    remain in train so downstream recommenders do not face impossible cold
+    starts by default.
+    """
+    if test_size <= 0 or test_size >= 1:
+        raise ValueError("test_size must be in (0, 1)")
+    if interactions.empty:
+        raise ValueError("interactions DataFrame is empty")
+    missing_cols = [col for col in (user_col, time_col) if col not in interactions.columns]
+    if missing_cols:
+        raise ValueError(
+            f"Column(s) {missing_cols} not found in interactions DataFrame. "
+            f"Available columns: {list(interactions.columns)}"
+        )
+
+    ordered = interactions.sort_values([user_col, time_col], kind="mergesort")
+    train_parts: list[pd.DataFrame] = []
+    test_parts: list[pd.DataFrame] = []
+    for _, group in ordered.groupby(user_col, sort=False):
+        if len(group) <= 1:
+            train_parts.append(group)
+            continue
+        n_test = min(len(group) - 1, max(1, int(len(group) * test_size)))
+        split_at = len(group) - n_test
+        train_parts.append(group.iloc[:split_at])
+        test_parts.append(group.iloc[split_at:])
+
+    train_df = pd.concat(train_parts, ignore_index=True) if train_parts else ordered.iloc[0:0].copy()
+    test_df = pd.concat(test_parts, ignore_index=True) if test_parts else ordered.iloc[0:0].copy()
     return train_df, test_df
 
 
@@ -153,6 +228,8 @@ def _build_user_stratified_folds(
     k: int,
     random_state: Optional[int],
     user_col: str,
+    time_col: Optional[str] = "timestamp",
+    chronological: Optional[bool] = None,
 ) -> List[Tuple[pd.DataFrame, pd.DataFrame]]:
     """Build CV folds by holding out interactions within each user.
 
@@ -160,6 +237,21 @@ def _build_user_stratified_folds(
     impossible cold-start folds for recommenders that cannot score unseen users.
     Users with fewer than two interactions are retained in train for every fold.
     """
+    if chronological is None:
+        chronological = bool(time_col is not None and time_col in interactions.columns)
+    if chronological:
+        if time_col is None or time_col not in interactions.columns:
+            raise ValueError(
+                f"time_col '{time_col}' not found in interactions DataFrame. "
+                f"Available columns: {list(interactions.columns)}"
+            )
+        return _build_chronological_user_folds(
+            interactions,
+            k=k,
+            user_col=user_col,
+            time_col=str(time_col),
+        )
+
     rng = np.random.RandomState(random_state)
     fold_test_idx: List[List[int]] = [[] for _ in range(k)]
 
@@ -188,6 +280,48 @@ def _build_user_stratified_folds(
     return fold_data
 
 
+def _build_chronological_user_folds(
+    interactions: pd.DataFrame,
+    *,
+    k: int,
+    user_col: str,
+    time_col: str,
+) -> List[Tuple[pd.DataFrame, pd.DataFrame]]:
+    """Build leak-free sequential folds with per-user train-before-test cutoffs."""
+    ordered = interactions.sort_values([user_col, time_col], kind="mergesort")
+    all_train: list[list[int]] = [[] for _ in range(k)]
+    all_test: list[list[int]] = [[] for _ in range(k)]
+
+    for _, group in ordered.groupby(user_col, sort=False):
+        user_indices = group.index.to_numpy(dtype=np.int64, copy=True)
+        n = user_indices.size
+        if n <= 1:
+            for train_idx in all_train:
+                train_idx.extend(int(i) for i in user_indices)
+            continue
+        n_user_folds = min(k, n - 1)
+        cutoffs = np.linspace(1, n, num=n_user_folds + 1, dtype=int)
+        for fold_id in range(n_user_folds):
+            start = int(cutoffs[fold_id])
+            end = int(cutoffs[fold_id + 1])
+            if end <= start:
+                end = min(n, start + 1)
+            train_part = user_indices[:start]
+            test_part = user_indices[start:end]
+            all_train[fold_id].extend(int(i) for i in train_part)
+            all_test[fold_id].extend(int(i) for i in test_part)
+
+    fold_data: List[Tuple[pd.DataFrame, pd.DataFrame]] = []
+    for train_idx, test_idx in zip(all_train, all_test):
+        if not train_idx or not test_idx:
+            continue
+        train_df = interactions.loc[sorted(set(train_idx))].reset_index(drop=True)
+        test_df = interactions.loc[sorted(set(test_idx))].reset_index(drop=True)
+        if not train_df.empty and not test_df.empty:
+            fold_data.append((train_df, test_df))
+    return fold_data
+
+
 # ---------------------------------------------------------------------------
 # Cross-validation
 # ---------------------------------------------------------------------------
@@ -203,6 +337,8 @@ def cross_validate(
     user_col: str = "user_id",
     item_col: str = "item_id",
     rating_col: Optional[str] = None,
+    time_col: Optional[str] = "timestamp",
+    chronological: Optional[bool] = None,
 ) -> Dict[str, Dict[str, float]]:
     """Perform k-fold cross-validation for a recommender strategy.
 
@@ -231,6 +367,13 @@ def cross_validate(
     rating_col : str, optional
         Column name for explicit ratings/feedback. If None and a ``rating``
         column exists, it is used automatically.
+    time_col : str, optional
+        Timestamp column used for chronological folds. If left as the default
+        and a ``timestamp`` column exists, folds are chronological and
+        train-before-test per user.
+    chronological : bool, optional
+        Force or disable chronological folds. ``None`` auto-enables them when
+        ``time_col`` exists.
 
     Returns
     -------
@@ -284,6 +427,8 @@ def cross_validate(
         k=k,
         random_state=random_state,
         user_col=user_col,
+        time_col=time_col,
+        chronological=chronological,
     )
     if not fold_data:
         raise ValueError("Unable to build non-empty cross-validation folds from the provided interactions")
@@ -567,6 +712,7 @@ def compare_models(
 
 __all__ = [
     "EVALUATION_METRICS",
+    "chronological_user_split",
     "train_test_split",
     "cross_validate",
     "evaluate_on_holdout",

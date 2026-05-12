@@ -68,7 +68,7 @@ SUPPORTED_STRATEGIES: Tuple[str, ...] = (
 )
 
 STRATEGY_GUIDE: Dict[str, str] = {
-    "als": "Fast alternating least squares. Best for implicit feedback with sparse data.",
+    "als": "Legacy binary MF alias trained with BCE; use implicit_als for true alternating least squares.",
     "auto": "Automatic strategy selection. Picks explicit_mf for ratings, als for binary data.",
     "explicit_mf": "SVD-style matrix factorization. Best for explicit ratings (e.g., 1-5 scale).",
     "linucb": "Contextual bandit algorithm. Requires item features. Balances exploration/exploitation.",
@@ -134,8 +134,8 @@ class OrchidRecommender:
     ----------
     strategy:
         One of ``SUPPORTED_STRATEGIES``. Use ``"auto"`` when you want Orchid
-        to choose ``"als"`` for binary feedback or ``"explicit_mf"`` for
-        explicit rating ranges.
+        to choose the legacy binary-MF ``"als"`` path for binary feedback or
+        ``"explicit_mf"`` for explicit rating ranges.
     device:
         Torch device string. Defaults to CPU.
     strategy_kwargs:
@@ -509,7 +509,7 @@ class OrchidRecommender:
         >>> print(OrchidRecommender.available_strategies())
         Available Recommendation Strategies
         ====================================
-        als         | Fast alternating least squares. ...
+        als         | Legacy binary MF alias trained with BCE. ...
         """
         lines = ["Available Recommendation Strategies", "=" * 60]
         max_name_len = max(len(s) for s in SUPPORTED_STRATEGIES)
@@ -560,7 +560,8 @@ class OrchidRecommender:
             Column name for item IDs (default: "item_id").
         rating_col : str, optional
             Column name for explicit ratings/feedback. If None, treats all
-            interactions as implicit feedback with uniform weight 1.0 (default: None).
+            interactions as implicit positives and samples missing items as
+            negatives for BCE-based implicit strategies (default: None).
         item_features : np.ndarray, optional
             Feature matrix of shape (num_items, feature_dim) for linucb strategy.
             Required if strategy=="linucb", ignored otherwise (default: None).
@@ -600,6 +601,7 @@ class OrchidRecommender:
             interactions[user_col] = interactions[user_col].astype(int)
             interactions[item_col] = interactions[item_col].astype(int)
 
+            implicit_feedback = rating_col is None
             if rating_col is None:
                 interactions["__label__"] = 1.0
                 rating_col = "__label__"
@@ -645,6 +647,7 @@ class OrchidRecommender:
                 self._fit_baseline(
                     interactions, labels, user_idx, item_idx,
                     num_users, num_items, item_features, item_col, rating_col,
+                    implicit_feedback=implicit_feedback,
                 )
             except Exception:
                 # Roll back mappings so the recommender stays in a clean "not fitted" state
@@ -671,6 +674,7 @@ class OrchidRecommender:
         item_features: Optional[np.ndarray],
         item_col: str,
         rating_col: str,
+        implicit_feedback: bool = False,
     ) -> str:
         """Create and fit the baseline model. Separated for atomic fit()."""
         strategy = self.strategy
@@ -680,7 +684,7 @@ class OrchidRecommender:
             is_binary = len(unique_vals) <= 2 and set(unique_vals).issubset({0.0, 1.0})
             if is_binary:
                 strategy = "als"
-                self._logger.info("auto: detected binary feedback -> als")
+                self._logger.info("auto: detected binary feedback -> als legacy binary MF")
             else:
                 strategy = "explicit_mf"
                 self._logger.info("auto: detected explicit ratings (range %.1f-%.1f) -> explicit_mf",
@@ -688,7 +692,7 @@ class OrchidRecommender:
             self._resolved_strategy = strategy
         if strategy == "als":
             self._baseline = ALSBaseline(num_users, num_items, device=self.device, **self.strategy_kwargs)
-            self._baseline.fit(user_idx, item_idx, labels)
+            self._baseline.fit(user_idx, item_idx, labels, sample_missing_negatives=implicit_feedback)
         elif strategy == "explicit_mf":
             # Treat provided labels as explicit 1–5 (or real) ratings and optimise MSE
             self._baseline = ExplicitMFBaseline(
@@ -750,7 +754,7 @@ class OrchidRecommender:
                 device=self.device,
                 **self.strategy_kwargs,
             )
-            self._baseline.fit(user_idx, item_idx, labels)
+            self._baseline.fit(user_idx, item_idx, labels, sample_missing_negatives=implicit_feedback)
         elif strategy == "user_knn":
             matrix = np.zeros((num_users, num_items), dtype=np.float32)
             counts = np.zeros((num_users, num_items), dtype=np.float32)
