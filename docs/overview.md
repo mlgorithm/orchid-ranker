@@ -30,7 +30,8 @@ engineers can locate entry points quickly.
 ## Ranking Machinery and Fallbacks
 
 - `orchid_ranker.OrchidRecommender`: Surprise-style API with strategies such as
-  `explicit_mf` (FunkSVD-style explicit MF), `als`, `neural_mf` (with `loss="bce"|"bpr"|"softmax"`),
+  `explicit_mf` (FunkSVD-style explicit MF), `legacy_binary_mf` (`als` alias),
+  `neural_mf` (with `loss="bce"|"bpr"|"softmax"`),
   `implicit_als`, `implicit_bpr`, `linucb`, `user_knn`, `popularity`, and `random`.
   This is supporting machinery for non-learning metadata, baseline comparison,
   and fallback paths rather than the main product surface.
@@ -39,7 +40,7 @@ engineers can locate entry points quickly.
 - `recommend(..., candidate_item_ids=[...])`: rank a caller-provided candidate
   pool using the original item IDs from the fitted interaction data.
 - `OrchidRecommender.from_interactions(...)`: one-call fit path. The default
-  `strategy="auto"` chooses `als` for binary feedback and `explicit_mf` for
+  `strategy="auto"` chooses `legacy_binary_mf` for binary feedback and `explicit_mf` for
   explicit rating ranges.
 
 ## Streaming and Safety

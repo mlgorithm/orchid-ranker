@@ -27,7 +27,7 @@ artist-name, musicbrainz-track-id, track-name. Purely implicit feedback
 | System | Description |
 |--------|-------------|
 | **Popularity** | Tracks ranked by training-set interaction count. No personalisation. |
-| **Orchid Frozen (binary MF)** | `OrchidRecommender(strategy="als")`, fit once on training data. The historical `als` name is a binary-MF/BCE baseline, not true ALS. |
+| **Orchid Frozen (binary MF)** | `OrchidRecommender(strategy="legacy_binary_mf")`, fit once on training data. The deprecated `als` alias remains for compatibility only; use `implicit_als` for true ALS. |
 | **Orchid Adaptive** | `OrchidRecommender(strategy="neural_mf")` + `.as_streaming()` for per-user online adaptation. Grid-searched over `lr` and `l2`. |
 | **Implicit ALS** | `OrchidRecommender(strategy="implicit_als")`. Grid-searched over `factors`, `regularization`, `iterations`. |
 | **Implicit BPR** | `OrchidRecommender(strategy="implicit_bpr")`. Grid-searched over `factors`, `learning_rate`. |

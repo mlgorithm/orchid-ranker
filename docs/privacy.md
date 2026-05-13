@@ -1,10 +1,12 @@
 # Differential Privacy Notes
 
-Orchid Ranker ships with a configurable DP-SGD training pathway. When
-`dp_cfg` includes `"engine": "per_sample"` (the default), updates to the
-`TwoTowerRecommender` perform per-example gradient clipping and add Gaussian
-noise before stepping the optimiser. Privacy loss is tracked via an RDP-based
-accountant and exposed through the metrics returned from `update()`.
+Orchid Ranker ships with an opt-in DP-SGD training pathway. DP is disabled by
+default; pass `dp_cfg={"enabled": True, ...}` when you want private updates.
+When `dp_cfg` includes `"engine": "per_sample"` (the default after opt-in),
+updates to the `TwoTowerRecommender` perform per-example gradient clipping and
+add Gaussian noise before stepping the optimiser. Privacy loss is tracked via
+an RDP-based accountant and exposed through the metrics returned from
+`update()`.
 
 From 0.2.0 the library also supports an Opacus-backed engine:
 
@@ -37,12 +39,10 @@ dp_cfg = {
 model = TwoTowerRecommender(..., dp_cfg=dp_cfg)
 ```
 
-The legacy aggregated-noise pathway is still available via
-`"engine": "legacy"`, but delivers weaker guarantees and is kept only for
-backwards compatibility.
-
 **Important caveats**
 
+- Accounting is not a substitute for privatization. Confirm that `enabled=True`
+  and that `epsilon_cum` increases during private updates.
 - The legacy per-sample engine loops over each example in the feedback slate
   and is therefore intended for small candidate sets (as used in the agentic
   simulator). Select the Opacus engine for large-batch production training.

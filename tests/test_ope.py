@@ -11,6 +11,7 @@ from orchid_ranker.ope import (
     compare_logged_policies,
     deterministic_policy_probabilities,
     evaluate_logged_policy,
+    evaluate_rollout_gate,
 )
 
 
@@ -110,6 +111,49 @@ def test_bootstrap_compare_logged_policies_reports_uplift_interval():
     assert report.base.uplift > 0.0
     assert report.bootstrap_ci_low <= report.base.uplift <= report.bootstrap_ci_high
     assert report.to_dict()["base"]["uplift"] == report.base.uplift
+
+
+def test_rollout_gate_allows_strong_bootstrap_comparison():
+    report = bootstrap_compare_logged_policies(
+        _paired_uniform_log(),
+        reward_col="reward",
+        propensity_col="propensity",
+        target_probability_col="target_prob",
+        baseline_probability_col="baseline_prob",
+        target_value_col="target_value",
+        baseline_value_col="baseline_value",
+        logged_action_value_col="logged_action_value",
+        n_bootstrap=25,
+        random_state=13,
+    )
+
+    gate = evaluate_rollout_gate(report, min_effect=0.1, min_ess_fraction=0.2, min_coverage=0.4)
+
+    assert gate.allowed is True
+    assert gate.effect == report.base.uplift
+    assert gate.to_dict()["allowed"] is True
+
+
+def test_rollout_gate_blocks_weak_support_or_ci():
+    report = evaluate_logged_policy(
+        pd.DataFrame(
+            {
+                "reward": [1.0, 0.0, 1.0, 0.0],
+                "propensity": [0.01, 0.5, 0.5, 0.5],
+                "target_prob": [1.0, 0.0, 0.0, 0.0],
+            }
+        ),
+        reward_col="reward",
+        propensity_col="propensity",
+        target_probability_col="target_prob",
+        min_propensity=0.01,
+        max_weight=10.0,
+    )
+
+    gate = evaluate_rollout_gate(report, min_effect=0.5, min_ess_fraction=0.5, max_clipped_fraction=0.1)
+
+    assert gate.allowed is False
+    assert gate.reasons
 
 
 def test_snips_is_preferred_without_value_model():

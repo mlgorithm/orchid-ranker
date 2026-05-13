@@ -16,6 +16,7 @@ def small_interactions():
     return pd.DataFrame({
         "user_id": [1, 1, 1, 2, 2, 2, 3, 3, 3, 4, 4, 4, 5, 5, 5],
         "item_id": [10, 20, 30, 10, 20, 40, 20, 30, 50, 10, 40, 50, 30, 40, 50],
+        "timestamp": list(range(15)),
     })
 
 

@@ -11,6 +11,7 @@ __all__ = [
 import difflib
 import logging
 import threading
+import warnings
 from dataclasses import dataclass
 from typing import Any, Dict, List, Optional, Sequence, Tuple, cast
 
@@ -23,10 +24,10 @@ require_torch("OrchidRecommender")
 import torch  # noqa: E402
 
 from .baselines import (
-    ALSBaseline,
     ExplicitMFBaseline,
     ImplicitALSBaseline,
     ImplicitBPRBaseline,
+    LegacyImplicitMFBCE,
     LinUCBBaseline,
     NeuralMatrixFactorizationBaseline,
     PopularityBaseline,
@@ -58,6 +59,7 @@ SUPPORTED_STRATEGIES: Tuple[str, ...] = (
     "als",
     "auto",
     "explicit_mf",
+    "legacy_binary_mf",
     "linucb",
     "popularity",
     "random",
@@ -68,9 +70,10 @@ SUPPORTED_STRATEGIES: Tuple[str, ...] = (
 )
 
 STRATEGY_GUIDE: Dict[str, str] = {
-    "als": "Legacy binary MF alias trained with BCE; use implicit_als for true alternating least squares.",
-    "auto": "Automatic strategy selection. Picks explicit_mf for ratings, als for binary data.",
+    "als": "Deprecated alias for legacy_binary_mf; use implicit_als for true alternating least squares.",
+    "auto": "Automatic strategy selection. Picks explicit_mf for ratings, legacy_binary_mf for binary data.",
     "explicit_mf": "SVD-style matrix factorization. Best for explicit ratings (e.g., 1-5 scale).",
+    "legacy_binary_mf": "Backward-compatible binary MF trained with Adam+BCE. Not alternating least squares.",
     "linucb": "Contextual bandit algorithm. Requires item features. Balances exploration/exploitation.",
     "popularity": "Returns items sorted by popularity. No personalization; good baseline.",
     "random": "Random recommendation. Useful as a sanity-check baseline.",
@@ -134,8 +137,8 @@ class OrchidRecommender:
     ----------
     strategy:
         One of ``SUPPORTED_STRATEGIES``. Use ``"auto"`` when you want Orchid
-        to choose the legacy binary-MF ``"als"`` path for binary feedback or
-        ``"explicit_mf"`` for explicit rating ranges.
+        to choose ``"legacy_binary_mf"`` for binary feedback or ``"explicit_mf"``
+        for explicit rating ranges.
     device:
         Torch device string. Defaults to CPU.
     strategy_kwargs:
@@ -155,9 +158,10 @@ class OrchidRecommender:
         Parameters
         ----------
         strategy : str, optional
-            Recommendation strategy. One of "auto", "als", "explicit_mf",
-            "linucb", "popularity", "random", "implicit_als",
-            "implicit_bpr", "neural_mf", or "user_knn" (default: "als").
+            Recommendation strategy. One of "auto", "legacy_binary_mf", "als",
+            "explicit_mf", "linucb", "popularity", "random", "implicit_als",
+            "implicit_bpr", "neural_mf", or "user_knn" (default: "als" for
+            backward compatibility).
         device : str, optional
             Torch device string (e.g., "cpu", "cuda", "cuda:0").
             If None, automatically selects CUDA if available, else CPU.
@@ -174,7 +178,7 @@ class OrchidRecommender:
 
         Examples
         --------
-        >>> rec = OrchidRecommender(strategy="als")
+        >>> rec = OrchidRecommender(strategy="legacy_binary_mf")
         >>> rec_knn = OrchidRecommender(strategy="user_knn", k=20)
         >>> rec_linucb = OrchidRecommender(strategy="linucb", alpha=1.5)
         """
@@ -195,6 +199,14 @@ class OrchidRecommender:
                 f"Supported strategies:\n{strategies_help}"
             )
         self.strategy = normalised
+        if self.strategy == "als":
+            warnings.warn(
+                "strategy='als' is a deprecated alias for Orchid's legacy Adam+BCE binary MF. "
+                "Use strategy='legacy_binary_mf' for the compatibility model or "
+                "strategy='implicit_als' for true alternating least squares.",
+                UserWarning,
+                stacklevel=2,
+            )
         self.device = torch.device(device or ("cuda" if torch.cuda.is_available() else "cpu"))
         self.strategy_kwargs = strategy_kwargs
         self._validate_inputs = bool(validate_inputs)
@@ -463,7 +475,7 @@ class OrchidRecommender:
         interactions : pd.DataFrame
             DataFrame with user_col, item_col, and optionally rating_col.
         strategy : str, default="auto"
-            Recommender strategy. ``"auto"`` selects ``"als"`` for binary
+            Recommender strategy. ``"auto"`` selects ``"legacy_binary_mf"`` for binary
             feedback and ``"explicit_mf"`` for explicit rating ranges.
         user_col : str, default="user_id"
             Column name for user IDs.
@@ -509,7 +521,7 @@ class OrchidRecommender:
         >>> print(OrchidRecommender.available_strategies())
         Available Recommendation Strategies
         ====================================
-        als         | Legacy binary MF alias trained with BCE. ...
+        legacy_binary_mf | Backward-compatible binary MF trained with Adam+BCE. ...
         """
         lines = ["Available Recommendation Strategies", "=" * 60]
         max_name_len = max(len(s) for s in SUPPORTED_STRATEGIES)
@@ -580,7 +592,7 @@ class OrchidRecommender:
 
         Examples
         --------
-        >>> rec = OrchidRecommender(strategy="als")
+        >>> rec = OrchidRecommender(strategy="legacy_binary_mf")
         >>> rec.fit(interactions_df)
         >>> rec.fit(interactions_df, rating_col="rating")
         """
@@ -683,15 +695,22 @@ class OrchidRecommender:
             unique_vals = np.unique(labels)
             is_binary = len(unique_vals) <= 2 and set(unique_vals).issubset({0.0, 1.0})
             if is_binary:
-                strategy = "als"
-                self._logger.info("auto: detected binary feedback -> als legacy binary MF")
+                strategy = "legacy_binary_mf"
+                self._logger.info("auto: detected binary feedback -> legacy_binary_mf")
             else:
                 strategy = "explicit_mf"
                 self._logger.info("auto: detected explicit ratings (range %.1f-%.1f) -> explicit_mf",
                                   labels.min(), labels.max())
             self._resolved_strategy = strategy
-        if strategy == "als":
-            self._baseline = ALSBaseline(num_users, num_items, device=self.device, **self.strategy_kwargs)
+        if strategy in {"als", "legacy_binary_mf"}:
+            if strategy == "als":
+                warnings.warn(
+                    "strategy='als' is deprecated and still dispatches to legacy_binary_mf. "
+                    "Use 'implicit_als' for true alternating least squares.",
+                    UserWarning,
+                    stacklevel=2,
+                )
+            self._baseline = LegacyImplicitMFBCE(num_users, num_items, device=self.device, **self.strategy_kwargs)
             self._baseline.fit(user_idx, item_idx, labels, sample_missing_negatives=implicit_feedback)
         elif strategy == "explicit_mf":
             # Treat provided labels as explicit 1–5 (or real) ratings and optimise MSE
@@ -720,14 +739,26 @@ class OrchidRecommender:
                 except ValidationError as exc:
                     raise ValueError(str(exc)) from exc
             self._item_features = item_features.astype(np.float32)
+            configured_user_features = self.strategy_kwargs.get("user_features")
+            if configured_user_features is not None:
+                user_features = np.asarray(configured_user_features, dtype=np.float32)
+                if user_features.shape[0] != num_users:
+                    raise ValueError(
+                        "user_features must have one row per mapped user; "
+                        f"got {user_features.shape[0]} rows for {num_users} users"
+                    )
+            else:
+                user_features = self._derive_linucb_user_features(user_idx, labels, num_users)
             self._baseline = LinUCBBaseline(
                 alpha=float(self.strategy_kwargs.get("alpha", 1.5)),
                 item_features=self._item_features,
+                user_features=user_features,
                 device=self.device,
             )
-            # use average rating per item as reward proxy
-            reward_dict = interactions.groupby(item_idx)[rating_col].mean().to_dict()
-            reward_idx = {int(idx): float(val) for idx, val in reward_dict.items()}
+            # Use average reward per observed (user, item) context.
+            rewards_frame = pd.DataFrame({"user_idx": user_idx, "item_idx": item_idx, "reward": labels})
+            reward_dict = rewards_frame.groupby(["user_idx", "item_idx"], sort=False)["reward"].mean().to_dict()
+            reward_idx = {(int(uid), int(iid)): float(val) for (uid, iid), val in reward_dict.items()}
             self._baseline.fit(reward_idx)
         elif strategy == "implicit_als":
             self._baseline = ImplicitALSBaseline(**self.strategy_kwargs)
@@ -776,15 +807,46 @@ class OrchidRecommender:
         return strategy
 
     # ------------------------------------------------------------------
+    @staticmethod
+    def _derive_linucb_user_features(
+        user_idx: np.ndarray,
+        labels: np.ndarray,
+        num_users: int,
+    ) -> np.ndarray:
+        """Build compact user context features for personalized LinUCB."""
+        user_idx = np.asarray(user_idx, dtype=np.int64)
+        labels = np.asarray(labels, dtype=np.float32)
+        counts = np.bincount(user_idx, minlength=num_users).astype(np.float32)
+        sums = np.bincount(user_idx, weights=labels, minlength=num_users).astype(np.float32)
+        positives = np.bincount(
+            user_idx,
+            weights=(labels > 0).astype(np.float32),
+            minlength=num_users,
+        ).astype(np.float32)
+        denom = np.maximum(counts, 1.0)
+        max_count = float(max(1.0, counts.max(initial=0.0)))
+        user_position = (
+            np.arange(num_users, dtype=np.float32) / float(max(1, num_users - 1))
+            if num_users > 1
+            else np.zeros((num_users,), dtype=np.float32)
+        )
+        return np.column_stack(
+            [
+                sums / denom,
+                np.log1p(counts) / np.log1p(max_count),
+                positives / denom,
+                user_position,
+            ]
+        ).astype(np.float32)
+
+    # ------------------------------------------------------------------
     def _scores_for_user(self, user_idx: int, candidate_idx: Sequence[int]) -> torch.Tensor:
         if self._baseline is None:
             raise RuntimeError("Recommender has not been fit yet")
 
         item_tensor = torch.as_tensor(candidate_idx, dtype=torch.long, device=self.device)
-        kwargs = {"item_ids": item_tensor}
-        if hasattr(self._baseline, "user_matrix") or isinstance(self._baseline, ALSBaseline):
-            user_tensor = torch.tensor([user_idx], dtype=torch.long, device=self.device)
-            kwargs["user_ids"] = user_tensor
+        user_tensor = torch.tensor([user_idx], dtype=torch.long, device=self.device)
+        kwargs = {"item_ids": item_tensor, "user_ids": user_tensor}
         logits = self._baseline.infer(**kwargs)
         if not isinstance(logits, torch.Tensor):
             logits = torch.as_tensor(logits, device=self.device)
@@ -1020,7 +1082,7 @@ class OrchidRecommender:
 
         Examples
         --------
-        >>> rec = OrchidRecommender(strategy="als")
+        >>> rec = OrchidRecommender(strategy="legacy_binary_mf")
         >>> rec.fit(interactions_df)
         >>> rec.save("model.pt")
         """

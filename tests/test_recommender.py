@@ -29,15 +29,25 @@ def test_popularity_recommender_round_trip():
 
 def test_als_predicts_known_pair():
     data = _dataset()
-    rec = OrchidRecommender(strategy="als", epochs=1)
+    rec = OrchidRecommender(strategy="legacy_binary_mf", epochs=1)
     rec.fit(data, rating_col="label")
     score = rec.predict(user_id=1, item_id=10)
     assert 0.0 <= score <= 1.0
 
 
+def test_als_alias_warns_and_fits():
+    data = _dataset()
+    with pytest.warns(UserWarning, match="deprecated alias"):
+        rec = OrchidRecommender(strategy="als", epochs=1)
+    with pytest.warns(UserWarning, match="deprecated"):
+        rec.fit(data, rating_col="label")
+
+    assert rec.predict(user_id=1, item_id=10) >= 0.0
+
+
 def test_als_implicit_feedback_samples_missing_negatives():
     data = _dataset()[["user_id", "item_id"]]
-    rec = OrchidRecommender(strategy="als", epochs=1, num_negative_samples=2, random_state=7)
+    rec = OrchidRecommender(strategy="legacy_binary_mf", epochs=1, num_negative_samples=2, random_state=7)
     rec.fit(data)
 
     assert rec._baseline._last_num_training_examples > len(data)
@@ -86,6 +96,27 @@ def test_linucb_with_features_scores_items():
     suggestions = rec.recommend(user_id=1, top_k=2)
     assert suggestions, "expected non-empty slate"
     assert all(isinstance(item.item_id, int) for item in suggestions)
+
+
+def test_linucb_scores_are_user_conditioned():
+    data = pd.DataFrame(
+        {
+            "user_id": [1, 1, 2, 2],
+            "item_id": [10, 11, 10, 11],
+            "label": [1.0, 0.0, 0.0, 1.0],
+        }
+    )
+    item_ids = sorted(data.item_id.unique())
+    matrix = np.eye(len(item_ids), dtype=np.float32)
+
+    rec = OrchidRecommender(strategy="linucb", alpha=0.0)
+    rec.fit(data, rating_col="label", item_features=matrix)
+
+    user1 = rec.recommend(user_id=1, top_k=2, filter_seen=False)
+    user2 = rec.recommend(user_id=2, top_k=2, filter_seen=False)
+
+    assert user1[0].item_id == 10
+    assert user2[0].item_id == 11
 
 
 def test_refit_non_linucb_clears_item_features():

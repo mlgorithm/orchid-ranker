@@ -163,7 +163,7 @@ class OrchidRecommender:
 
 **Parameters:**
 
-- `strategy` — One of: `"auto"`, `"als"`, `"explicit_mf"`, `"neural_mf"`, `"linucb"`, `"user_knn"`, `"popularity"`, `"random"`, `"implicit_als"`, `"implicit_bpr"`. The historical `"als"` strategy is a binary-MF/BCE baseline; use `"implicit_als"` for true alternating least squares. Typos produce a helpful "did you mean?" suggestion.
+- `strategy` — One of: `"auto"`, `"legacy_binary_mf"`, `"als"`, `"explicit_mf"`, `"neural_mf"`, `"linucb"`, `"user_knn"`, `"popularity"`, `"random"`, `"implicit_als"`, `"implicit_bpr"`. The historical `"als"` strategy is a deprecated alias for the binary-MF/BCE baseline; use `"implicit_als"` for true alternating least squares. Typos produce a helpful "did you mean?" suggestion.
 - `device` — `"cpu"` or `"cuda"`. Defaults to auto-detect.
 - `validate_inputs` — When `True`, validates DataFrame schema before fitting. Set `False` for legacy pipeline integration.
 - `**strategy_kwargs` — Forwarded to the underlying strategy (e.g., `epochs=10`, `emb_dim=64`, `alpha=1.5`).
@@ -288,12 +288,16 @@ def compare_logged_policies(
 ```python
 def bootstrap_logged_policy(..., n_bootstrap=500) -> BootstrapLoggedPolicyReport
 def bootstrap_compare_logged_policies(..., n_bootstrap=500) -> BootstrapPolicyComparisonReport
+def evaluate_rollout_gate(report, *, min_effect=0.0, min_ess_fraction=0.05) -> OPERolloutGateReport
 ```
 
 Reports include IPS, SNIPS, direct-method and doubly robust estimates when the
 required columns are supplied, plus coverage, effective sample size, weight
 diagnostics, and confidence intervals. Bootstrap reports add row-resampled
 percentile intervals for rollout gates where normal approximation is too weak.
+`evaluate_rollout_gate(...)` converts a single-policy or policy-comparison
+report into an allow/block decision using lower confidence bounds, effective
+sample size fraction, coverage, and clipped-weight fraction.
 
 ---
 
@@ -582,7 +586,7 @@ def train_test_split(
 ) -> Tuple[pd.DataFrame, pd.DataFrame]
 ```
 
-Split interactions into train/test. When `by_user=True` and a timestamp column is present, each user's future events are held out chronologically. Set `chronological=False` for the legacy random within-user split.
+Split interactions into train/test. When `by_user=True` and a timestamp column is present, each user's future events are held out chronologically. Legacy random within-user splitting now requires both `chronological=False` and `allow_random_within_user=True`.
 
 ### chronological_user_split
 
@@ -751,6 +755,9 @@ def get_dp_config(preset: str) -> Dict[str, Any]
 ```
 
 Returns a differential privacy configuration dictionary.
+Differential privacy is opt-in; the `"off"` preset and `SimpleDPConfig()`
+disable DP unless an enabled preset or explicit `{"enabled": True, ...}` config
+is supplied.
 
 **Presets:**
 

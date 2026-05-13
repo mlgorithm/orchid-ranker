@@ -21,7 +21,7 @@ class TestTrainTestSplit:
             'user_id': [1, 1, 1, 2, 2, 2, 3, 3, 3],
             'item_id': [10, 20, 30, 10, 20, 40, 50, 60, 70],
         })
-        train, test = train_test_split(df, test_size=0.2, by_user=True)
+        train, test = train_test_split(df, test_size=0.2, by_user=True, allow_random_within_user=True)
 
         assert len(train) + len(test) == len(df)
         assert len(train) > 0
@@ -33,7 +33,13 @@ class TestTrainTestSplit:
             'user_id': [1, 1, 1, 1, 2, 2, 2, 2],
             'item_id': [10, 20, 30, 40, 50, 60, 70, 80],
         })
-        train, test = train_test_split(df, test_size=0.25, by_user=True, random_state=42)
+        train, test = train_test_split(
+            df,
+            test_size=0.25,
+            by_user=True,
+            random_state=42,
+            allow_random_within_user=True,
+        )
 
         # Each user should have ~1 test item (25% of 4)
         user_1_train = len(train[train['user_id'] == 1])
@@ -77,7 +83,13 @@ class TestTrainTestSplit:
             'user_id': [1, 1, 1, 2, 2, 2],
             'item_id': [10, 20, 30, 40, 50, 60],
         })
-        train, test = train_test_split(df, test_size=0.33, by_user=True, random_state=42)
+        train, test = train_test_split(
+            df,
+            test_size=0.33,
+            by_user=True,
+            random_state=42,
+            allow_random_within_user=True,
+        )
 
         # Verify that no row appears in both splits by checking data values
         # Convert rows to tuples for comparison
@@ -91,8 +103,8 @@ class TestTrainTestSplit:
             'user_id': [1, 1, 1, 2, 2, 2, 3, 3, 3],
             'item_id': [10, 20, 30, 40, 50, 60, 70, 80, 90],
         })
-        train1, test1 = train_test_split(df, test_size=0.3, random_state=42)
-        train2, test2 = train_test_split(df, test_size=0.3, random_state=42)
+        train1, test1 = train_test_split(df, test_size=0.3, random_state=42, allow_random_within_user=True)
+        train2, test2 = train_test_split(df, test_size=0.3, random_state=42, allow_random_within_user=True)
 
         assert train1.equals(train2)
         assert test1.equals(test2)
@@ -106,7 +118,8 @@ class TestTrainTestSplit:
         })
         train, test = train_test_split(
             df, test_size=0.25, by_user=True,
-            user_col='customer_id', item_col='product_id'
+            user_col='customer_id', item_col='product_id',
+            allow_random_within_user=True,
         )
 
         assert 'rating' in train.columns
@@ -119,11 +132,30 @@ class TestTrainTestSplit:
             'user_id': [1, 2, 3],
             'item_id': [10, 20, 30],
         })
-        train, test = train_test_split(df, test_size=0.33, by_user=True, random_state=42)
+        train, test = train_test_split(
+            df,
+            test_size=0.33,
+            by_user=True,
+            random_state=42,
+            allow_random_within_user=True,
+        )
 
         # Single-interaction users stay in train to avoid impossible cold-start test users
         assert len(train) == len(df)
         assert test.empty
+
+    def test_random_within_user_requires_explicit_opt_in(self):
+        """Adaptive defaults reject leak-prone random within-user splitting."""
+        df = pd.DataFrame({
+            "user_id": [1, 1, 2, 2],
+            "item_id": [10, 20, 30, 40],
+        })
+
+        try:
+            train_test_split(df, test_size=0.25, by_user=True)
+            assert False, "random within-user split should require opt-in"
+        except ValueError as exc:
+            assert "allow_random_within_user" in str(exc)
 
     def test_chronological_user_split_has_no_future_leakage(self):
         """Per-user chronological split never trains on a user's future events."""
@@ -189,6 +221,24 @@ class TestTrainTestSplit:
         )
 
         assert "precision@5" in scores
+
+    def test_random_user_folds_require_explicit_opt_in(self):
+        df = pd.DataFrame({
+            "user_id": [1, 1, 2, 2],
+            "item_id": [10, 20, 30, 40],
+        })
+
+        try:
+            _build_user_stratified_folds(
+                df,
+                k=2,
+                random_state=42,
+                user_col="user_id",
+                chronological=False,
+            )
+            assert False, "random within-user folds should require opt-in"
+        except ValueError as exc:
+            assert "allow_random_within_user" in str(exc)
 
 
 class TestEvaluateOnHoldout:
@@ -427,7 +477,13 @@ class TestCrossValidate:
             "item_id": [10, 11, 12, 10, 11, 12, 10, 11, 12],
         })
 
-        scores = cross_validate(df, "random", k=3, metrics=["precision@5", "recall@5"])
+        scores = cross_validate(
+            df,
+            "random",
+            k=3,
+            metrics=["precision@5", "recall@5"],
+            allow_random_within_user=True,
+        )
 
         assert scores["precision@5"]["mean"] > 0.0
         assert scores["recall@5"]["mean"] > 0.0
@@ -461,6 +517,7 @@ class TestCrossValidate:
             k=3,
             metrics=["precision@5"],
             strategy_kwargs={"epochs": 1, "emb_dim": 8},
+            allow_random_within_user=True,
         )
 
         assert seen_rating_cols

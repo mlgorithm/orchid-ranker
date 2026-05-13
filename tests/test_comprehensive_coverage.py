@@ -313,7 +313,12 @@ class TestEngagementScore:
 
 class TestTrainTestSplit:
     def test_by_user_split(self, interactions_df):
-        train, test = train_test_split(interactions_df, test_size=0.2, by_user=True)
+        train, test = train_test_split(
+            interactions_df,
+            test_size=0.2,
+            by_user=True,
+            allow_random_within_user=True,
+        )
         assert len(train) + len(test) == len(interactions_df)
         assert len(test) > 0
 
@@ -333,13 +338,33 @@ class TestTrainTestSplit:
             train_test_split(empty, test_size=0.2)
 
     def test_reproducibility(self, interactions_df):
-        t1, _ = train_test_split(interactions_df, test_size=0.2, random_state=42)
-        t2, _ = train_test_split(interactions_df, test_size=0.2, random_state=42)
+        t1, _ = train_test_split(
+            interactions_df,
+            test_size=0.2,
+            random_state=42,
+            allow_random_within_user=True,
+        )
+        t2, _ = train_test_split(
+            interactions_df,
+            test_size=0.2,
+            random_state=42,
+            allow_random_within_user=True,
+        )
         pd.testing.assert_frame_equal(t1, t2)
 
     def test_different_seeds_differ(self, interactions_df):
-        t1, _ = train_test_split(interactions_df, test_size=0.2, random_state=1)
-        t2, _ = train_test_split(interactions_df, test_size=0.2, random_state=2)
+        t1, _ = train_test_split(
+            interactions_df,
+            test_size=0.2,
+            random_state=1,
+            allow_random_within_user=True,
+        )
+        t2, _ = train_test_split(
+            interactions_df,
+            test_size=0.2,
+            random_state=2,
+            allow_random_within_user=True,
+        )
         assert not t1.equals(t2)
 
 
@@ -820,5 +845,4 @@ class TestDeterminism:
         s2 = rec2.predict(uid, iid)
         # Torch randomness may cause minor differences, so allow tolerance
         assert np.isclose(s1, s2, rtol=0.1, atol=0.1) or True  # soft check
-
 

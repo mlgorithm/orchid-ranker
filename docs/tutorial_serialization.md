@@ -34,7 +34,7 @@ from orchid_ranker import save_model, OrchidRecommender
 import pandas as pd
 
 # Create and fit model
-rec = OrchidRecommender(strategy="als")
+rec = OrchidRecommender(strategy="legacy_binary_mf")
 interactions = pd.DataFrame({
     "user_id": [1, 1, 2, 2],
     "item_id": [10, 20, 20, 30],
@@ -75,7 +75,7 @@ Delegates to `save_model()`.
 
 **Example:**
 ```python
-rec = OrchidRecommender(strategy="als")
+rec = OrchidRecommender(strategy="legacy_binary_mf")
 rec.fit(interactions_df)
 rec.save("model.pt")
 ```
@@ -92,7 +92,8 @@ rec = OrchidRecommender.load("model.pt")
 ## Supported Strategies
 
 The serialization module supports all OrchidRecommender strategies:
-- `als` (Alternating Least Squares)
+- `legacy_binary_mf` (legacy Adam+BCE binary matrix factorization)
+- `als` (deprecated alias for `legacy_binary_mf`)
 - `explicit_mf` (Explicit Matrix Factorization)
 - `neural_mf` (Neural Matrix Factorization)
 - `popularity` (Popularity-based)
@@ -208,7 +209,7 @@ except FileNotFoundError as e:
     print(f"Checkpoint not found: {e}")
 
 try:
-    rec = OrchidRecommender(strategy="als")
+    rec = OrchidRecommender(strategy="legacy_binary_mf")
     rec.save("model.pt")  # Not fitted yet
 except RuntimeError as e:
     print(f"Cannot save unfitted model: {e}")

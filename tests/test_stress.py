@@ -488,26 +488,26 @@ class TestModelSelectionStress:
             "item_id": list(range(20)),
             "rating": [4.0] * 20,
         })
-        train, test = train_test_split(df, test_size=0.3, by_user=True)
+        train, test = train_test_split(df, test_size=0.3, by_user=True, allow_random_within_user=True)
         assert len(train) + len(test) == 20
 
     def test_split_all_same_rating(self):
         df = make_interactions(n_rows=1000)
         df["rating"] = 3.0
-        train, test = train_test_split(df, test_size=0.2)
+        train, test = train_test_split(df, test_size=0.2, allow_random_within_user=True)
         assert len(train) > 0
         assert len(test) > 0
 
     def test_split_preserves_data(self):
         df = make_interactions(n_rows=500)
-        train, test = train_test_split(df, test_size=0.2, by_user=True)
+        train, test = train_test_split(df, test_size=0.2, by_user=True, allow_random_within_user=True)
         total_rows = len(train) + len(test)
         assert total_rows == 500 or abs(total_rows - 500) < 10
 
     def test_split_extreme_ratio(self):
         df = make_interactions(n_rows=100)
         try:
-            train, test = train_test_split(df, test_size=0.99)
+            train, test = train_test_split(df, test_size=0.99, allow_random_within_user=True)
             assert len(train) >= 1
         except ValueError:
             pass
@@ -521,7 +521,7 @@ class TestModelSelectionStress:
 
     def test_cross_validate_smoke(self):
         df = make_interactions(n_users=20, n_items=10, n_rows=400)
-        results = cross_validate(df, strategy="popularity", k=3)
+        results = cross_validate(df, strategy="popularity", k=3, allow_random_within_user=True)
         assert isinstance(results, dict)
 
     def test_evaluate_on_holdout_empty_test(self):
@@ -545,7 +545,12 @@ from orchid_ranker.tuning import GridSearchCV, RandomSearchCV
 class TestTuningStress:
     def test_grid_search_single_param(self):
         df = make_interactions(n_users=20, n_items=10, n_rows=300)
-        gs = GridSearchCV(strategy="popularity", param_grid={"n_recommendations": [5, 10]}, cv=2)
+        gs = GridSearchCV(
+            strategy="popularity",
+            param_grid={"n_recommendations": [5, 10]},
+            cv=2,
+            allow_random_within_user=True,
+        )
         gs.fit(df)
         assert gs.best_params_ is not None
 
@@ -565,6 +570,7 @@ class TestTuningStress:
             strategy="popularity",
             param_distributions={"n_recommendations": [5, 10, 15, 20]},
             n_iter=10, cv=2,
+            allow_random_within_user=True,
         )
         rs.fit(df)
         assert rs.best_params_ is not None
@@ -572,9 +578,23 @@ class TestTuningStress:
     def test_random_search_reproducible(self):
         df = make_interactions(n_users=20, n_items=10, n_rows=300)
         params = {"n_recommendations": [5, 10, 15]}
-        rs1 = RandomSearchCV(strategy="popularity", param_distributions=params, n_iter=5, cv=2, random_state=42)
+        rs1 = RandomSearchCV(
+            strategy="popularity",
+            param_distributions=params,
+            n_iter=5,
+            cv=2,
+            random_state=42,
+            allow_random_within_user=True,
+        )
         rs1.fit(df)
-        rs2 = RandomSearchCV(strategy="popularity", param_distributions=params, n_iter=5, cv=2, random_state=42)
+        rs2 = RandomSearchCV(
+            strategy="popularity",
+            param_distributions=params,
+            n_iter=5,
+            cv=2,
+            random_state=42,
+            allow_random_within_user=True,
+        )
         rs2.fit(df)
         assert rs1.best_params_ == rs2.best_params_
 

@@ -9,6 +9,7 @@ import torch
 from orchid_ranker.baselines import (
     ALSBaseline,
     ExplicitMFBaseline,
+    LegacyImplicitMFBCE,
     LinUCBBaseline,
     MatrixFactorization,
     NeuralMatrixFactorizationBaseline,
@@ -100,6 +101,22 @@ class TestALSBaseline:
         assert len(chosen) == 2
         assert all(isinstance(i, int) for i in chosen)
         assert metadata["policy"] == "als"
+
+    def test_positive_only_fit_samples_negatives_by_default(self):
+        device = torch.device("cpu")
+        baseline = ALSBaseline(num_users=3, num_items=6, device=device, epochs=1, num_negative_samples=2)
+
+        baseline.fit([0, 1, 2], [0, 1, 2], [1.0, 1.0, 1.0])
+
+        assert baseline._last_num_training_examples > 3
+        assert baseline._last_num_negative_examples > 0
+
+    def test_legacy_binary_mf_name_is_available(self):
+        device = torch.device("cpu")
+        baseline = LegacyImplicitMFBCE(num_users=3, num_items=6, device=device, epochs=1)
+        baseline.fit([0, 1], [0, 1], [1.0, 0.0])
+
+        assert baseline.result.train_loss is not None
 
 
 class TestPopularityBaseline:
@@ -222,6 +239,25 @@ class TestLinUCBBaseline:
 
         chosen, metadata = baseline.decide(logits=logits, top_k=2, item_ids=item_ids)
         assert len(chosen) == 2
+
+    def test_user_features_personalize_scores(self):
+        device = torch.device("cpu")
+        item_features = np.array([[1.0, 0.0], [0.0, 1.0]], dtype=np.float32)
+        user_features = np.array([[1.0, 0.0], [0.0, 1.0]], dtype=np.float32)
+        baseline = LinUCBBaseline(
+            alpha=0.0,
+            item_features=item_features,
+            user_features=user_features,
+            device=device,
+        )
+        baseline.fit({(0, 0): 1.0, (1, 1): 1.0, (0, 1): 0.0, (1, 0): 0.0})
+
+        item_ids = torch.tensor([0, 1], dtype=torch.long, device=device)
+        user0_scores = baseline.infer(user_ids=torch.tensor([0], device=device), item_ids=item_ids)
+        user1_scores = baseline.infer(user_ids=torch.tensor([1], device=device), item_ids=item_ids)
+
+        assert user0_scores[0, 0] > user0_scores[0, 1]
+        assert user1_scores[0, 1] > user1_scores[0, 0]
 
 
 class TestExplicitMFBaseline:
