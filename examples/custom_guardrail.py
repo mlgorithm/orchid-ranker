@@ -20,7 +20,7 @@ interactions = pd.DataFrame({
     "user_id": rng.integers(0, 30, 1500),
     "item_id": rng.integers(0, 60, 1500),
 })
-rec = OrchidRecommender.from_interactions(interactions, strategy="als")
+rec = OrchidRecommender.from_interactions(interactions, strategy="legacy_binary_mf")
 
 # --- Set up progression monitor and guardrail ---
 monitor = RollingProgressionMonitor(

@@ -22,7 +22,7 @@ Ratings on a 1–5 star scale.
 | System | Description |
 |--------|-------------|
 | **Popularity** | Items ranked by training-set positive-interaction count. No personalisation. |
-| **Orchid Frozen (binary MF)** | `OrchidRecommender(strategy="als")`, fit once on training data. The historical `als` name is a binary-MF/BCE baseline, not true ALS. |
+| **Orchid Frozen (binary MF)** | `OrchidRecommender(strategy="legacy_binary_mf")`, fit once on training data. The deprecated `als` alias remains for compatibility only; use `implicit_als` for true ALS. |
 | **Orchid Adaptive** | `OrchidRecommender(strategy="neural_mf")` + `.as_streaming()` for per-user online adaptation. Grid-searched over `lr` and `l2`. |
 | **Implicit ALS** | `OrchidRecommender(strategy="implicit_als")`. Grid-searched over `factors`, `regularization`, `iterations`. |
 | **Implicit BPR** | `OrchidRecommender(strategy="implicit_bpr")`. Grid-searched over `factors`, `learning_rate`. |

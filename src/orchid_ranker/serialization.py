@@ -79,7 +79,7 @@ def save_model(model: Any, path: str | Path) -> None:
 
     Examples
     --------
-    >>> rec = OrchidRecommender(strategy="als")
+    >>> rec = OrchidRecommender(strategy="legacy_binary_mf")
     >>> rec.fit(interactions_df)
     >>> save_model(rec, "model.pt")
     """
@@ -287,7 +287,7 @@ def _extract_orchid_state(model: OrchidRecommender) -> Dict[str, Any]:
         state["baseline_data"] = {"popularity": baseline.popularity}
     elif baseline_name == "RandomBaseline":
         state["baseline_data"] = {}
-    elif baseline_name == "ALSBaseline":
+    elif baseline_name in ("ALSBaseline", "LegacyImplicitMFBCE"):
         state["baseline_data"] = {"model_state_dict": baseline.model.state_dict()}
     elif baseline_name == "ExplicitMFBaseline":
         state["baseline_data"] = {
@@ -306,6 +306,7 @@ def _extract_orchid_state(model: OrchidRecommender) -> Dict[str, Any]:
             "alpha": baseline.alpha,
             "A": baseline.A.cpu(),
             "b": baseline.b.cpu(),
+            "user_features": None if baseline.user_features is None else baseline.user_features.cpu(),
         }
     elif baseline_name == "NeuralMatrixFactorizationBaseline":
         state["baseline_data"] = _extract_neural_mf_state(baseline)
@@ -539,7 +540,7 @@ def _restore_baseline_from_data(
     if baseline_type == "RandomBaseline":
         return RandomBaseline(dev)
 
-    if baseline_type == "ALSBaseline":
+    if baseline_type in ("ALSBaseline", "LegacyImplicitMFBCE"):
         als_baseline = ALSBaseline(num_users, num_items, device=dev, **strategy_kwargs)
         als_baseline.model.load_state_dict(cast(Dict[str, Any], data["model_state_dict"]))
         return als_baseline
@@ -565,6 +566,7 @@ def _restore_baseline_from_data(
         linucb_baseline = LinUCBBaseline(
             alpha=data["alpha"],
             item_features=item_features,
+            user_features=data.get("user_features"),
             device=dev,
         )
         linucb_baseline.A = data["A"].to(dev)

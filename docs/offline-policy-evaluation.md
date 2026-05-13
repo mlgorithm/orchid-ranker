@@ -25,7 +25,10 @@ Use it when you have logs with:
 | Doubly robust | Model value plus propensity-corrected residual | Preferred when both propensities and value estimates are available |
 
 The report also includes coverage, effective sample size, weight diagnostics,
-and confidence intervals for the preferred estimate.
+and confidence intervals for the preferred estimate. Use
+`bootstrap_logged_policy` or `bootstrap_compare_logged_policies` when normal
+intervals look fragile, then pass the result to `evaluate_rollout_gate` before
+serving the policy.
 
 ## Deterministic replay example
 
@@ -63,6 +66,11 @@ report = compare_logged_policies(
 )
 
 print(report.uplift)
+
+from orchid_ranker.ope import evaluate_rollout_gate
+
+gate = evaluate_rollout_gate(report, min_effect=0.0, min_ess_fraction=0.05)
+assert gate.allowed, gate.reasons
 ```
 
 ## Production checklist
@@ -72,5 +80,7 @@ print(report.uplift)
 - Track effective sample size; high raw event count does not help if the target
   policy almost never matches the logged action.
 - Prefer doubly robust reports when a calibrated value model is available.
+- Block rollout when the lower confidence bound is not positive, effective
+  sample size is too low, coverage is too thin, or clipping is heavy.
 - Do not ship a learning policy from offline AUC alone. Pair KT prediction
   quality with OPE on the recommendation action actually shown.

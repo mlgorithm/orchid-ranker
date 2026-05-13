@@ -257,7 +257,7 @@ class TwoTowerRecommender(nn.Module):
         self.dp_cfg = (dp_cfg or {})
         self.dp_engine = str(self.dp_cfg.get("engine", "per_sample")).lower()
         self.dp_settings = SimpleDPConfig(
-            enabled=bool(self.dp_cfg.get("enabled", True)),
+            enabled=bool(self.dp_cfg.get("enabled", False)),
             noise_multiplier=float(self.dp_cfg.get("noise_multiplier", self.dp_cfg.get("sigma", 1.0))),
             max_grad_norm=float(self.dp_cfg.get("max_grad_norm", self.dp_cfg.get("max_grad", 1.0))),
             sample_rate=float(self.dp_cfg.get("sample_rate", 0.02)),

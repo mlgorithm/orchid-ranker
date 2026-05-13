@@ -359,7 +359,7 @@ class TestDPSGDConfig:
     def test_config_default_values(self):
         """Test default configuration values."""
         cfg = SimpleDPConfig()
-        assert cfg.enabled is True
+        assert cfg.enabled is False
         assert cfg.noise_multiplier == 1.0
         assert cfg.max_grad_norm == 1.0
         assert cfg.sample_rate == 0.02

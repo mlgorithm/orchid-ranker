@@ -70,7 +70,7 @@ class GridSearchCV:
     ...     "regularization": [0.01, 0.1, 1.0]
     ... }
     >>> grid = GridSearchCV(
-    ...     strategy="als",
+    ...     strategy="legacy_binary_mf",
     ...     param_grid=param_grid,
     ...     cv=5,
     ...     scoring="ndcg@10"
@@ -89,6 +89,7 @@ class GridSearchCV:
         scoring: str = "ndcg@10",
         random_state: int = 42,
         verbose: int = 0,
+        allow_random_within_user: bool = False,
     ) -> None:
         self.strategy = strategy
         # Validate param_grid: values must be list/tuple sequences, not bare scalars
@@ -103,6 +104,7 @@ class GridSearchCV:
         self.scoring = scoring
         self.random_state = random_state
         self.verbose = verbose
+        self.allow_random_within_user = bool(allow_random_within_user)
 
         self.best_params_: Dict[str, Any] = {}
         self.best_score_: float = -np.inf
@@ -247,6 +249,7 @@ class GridSearchCV:
             k=self.cv,
             random_state=self.random_state,
             user_col=user_col,
+            allow_random_within_user=self.allow_random_within_user,
         )
         if not fold_data:
             raise ValueError("Unable to build non-empty cross-validation folds from the provided interactions")
@@ -370,7 +373,7 @@ class RandomSearchCV:
     ...     "regularization": [0.001, 0.01, 0.1, 1.0]
     ... }
     >>> random = RandomSearchCV(
-    ...     strategy="als",
+    ...     strategy="legacy_binary_mf",
     ...     param_distributions=param_dist,
     ...     n_iter=20,
     ...     cv=5,
@@ -390,6 +393,7 @@ class RandomSearchCV:
         scoring: str = "ndcg@10",
         random_state: int = 42,
         verbose: int = 0,
+        allow_random_within_user: bool = False,
     ) -> None:
         self.strategy = strategy
         # Validate param_distributions: values must be list/tuple sequences
@@ -405,6 +409,7 @@ class RandomSearchCV:
         self.scoring = scoring
         self.random_state = random_state
         self.verbose = verbose
+        self.allow_random_within_user = bool(allow_random_within_user)
 
         self.best_params_: Dict[str, Any] = {}
         self.best_score_: float = -np.inf
@@ -566,6 +571,7 @@ class RandomSearchCV:
             k=self.cv,
             random_state=self.random_state,
             user_col=user_col,
+            allow_random_within_user=self.allow_random_within_user,
         )
         if not fold_data:
             raise ValueError("Unable to build non-empty cross-validation folds from the provided interactions")

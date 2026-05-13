@@ -117,14 +117,15 @@ Understand what makes Orchid different:
 6. **Sketch mode.** Count-Min, Bloom-filter, reservoir, and exact-vector utilities shrink candidate generation before final reranking.
 7. **Offline policy evaluation.** IPS, SNIPS, direct-method, doubly robust, and bootstrap reports test adaptive policies before rollout.
 8. **Safe operation.** Guardrails and frozen fallback rankings keep adaptive rollouts reviewable.
-9. **Privacy hooks.** DP-SGD presets, RBAC, HMAC audit chains, and hashed event IDs support regulated deployments.
+9. **Privacy hooks.** Opt-in DP-SGD presets, RBAC, HMAC audit chains, and hashed event IDs support regulated deployments.
 
 ## Supported strategies
 
 | Strategy | Type | Best for |
 |----------|------|----------|
-| `auto` | Selector | Let Orchid choose legacy binary MF or `explicit_mf` |
-| `als` | Legacy binary MF | Backward-compatible quick start; use `implicit_als` for true ALS |
+| `auto` | Selector | Let Orchid choose `legacy_binary_mf` or `explicit_mf` |
+| `legacy_binary_mf` | Legacy binary MF | Backward-compatible Adam+BCE baseline |
+| `als` | Deprecated alias | Alias for `legacy_binary_mf`; use `implicit_als` for true ALS |
 | `explicit_mf` | Matrix factorization | Explicit rating scales |
 | `neural_mf` | Neural MF | Streaming adaptation through `as_streaming()` |
 | `linucb` | Contextual bandit | Cold-start exploration |
@@ -144,8 +145,9 @@ pieces such as `BayesianKnowledgeTracing`, `DependencyGraph`,
 `ProgressionRecommender`, `orchid_ranker.kt.SAKTTracer`, and
 `orchid_ranker.kt.SAINTPlusTracer` only when you need a custom policy. Use
 `orchid_ranker.ope` to evaluate a new learning policy from logged randomized
-traffic before serving it, and `bootstrap_logged_policy` when rollout decisions
-need row-resampled confidence intervals. Modern KT and policy-learning
+traffic before serving it, `bootstrap_logged_policy` when rollout decisions
+need row-resampled confidence intervals, and `evaluate_rollout_gate` to enforce
+minimum support/coverage/clipping thresholds before live learners see a policy. Modern KT and policy-learning
 algorithms are tracked in the [algorithm roadmap](docs/algorithm-roadmap.md).
 
 For the legacy `OrchidRecommender` API, use `neural_mf` when you want to

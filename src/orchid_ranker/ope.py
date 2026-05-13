@@ -18,12 +18,14 @@ __all__ = [
     "BootstrapLoggedPolicyReport",
     "BootstrapPolicyComparisonReport",
     "LoggedPolicyReport",
+    "OPERolloutGateReport",
     "PolicyComparisonReport",
     "bootstrap_compare_logged_policies",
     "bootstrap_logged_policy",
     "compare_logged_policies",
     "deterministic_policy_probabilities",
     "evaluate_logged_policy",
+    "evaluate_rollout_gate",
 ]
 
 
@@ -159,6 +161,27 @@ class BootstrapPolicyComparisonReport:
                 }
             ),
         )
+
+
+@dataclass(frozen=True)
+class OPERolloutGateReport:
+    """Decision-grade rollout gate derived from an OPE report."""
+
+    allowed: bool
+    estimator: str
+    effect: float
+    ci_low: float
+    ci_high: float
+    min_effect: float
+    n_events: int
+    effective_sample_size: float
+    effective_sample_size_fraction: float
+    coverage: float
+    clipped_fraction: float
+    reasons: tuple[str, ...]
+
+    def to_dict(self) -> dict[str, Any]:
+        return cast(dict[str, Any], _jsonable(asdict(self)))
 
 
 @dataclass(frozen=True)
@@ -408,6 +431,72 @@ def bootstrap_compare_logged_policies(
     )
 
 
+def evaluate_rollout_gate(
+    report: (
+        LoggedPolicyReport
+        | BootstrapLoggedPolicyReport
+        | PolicyComparisonReport
+        | BootstrapPolicyComparisonReport
+    ),
+    *,
+    min_effect: float = 0.0,
+    min_ess_fraction: float = 0.05,
+    min_coverage: float = 0.05,
+    max_clipped_fraction: float = 0.20,
+) -> OPERolloutGateReport:
+    """Gate a candidate adaptive policy before live rollout.
+
+    For single-policy reports, ``effect`` is the estimated policy value. For
+    comparison reports, ``effect`` is target-minus-baseline uplift. Bootstrap
+    reports use bootstrap percentile intervals; plain reports use normal
+    approximation intervals.
+    """
+    if not 0.0 <= min_ess_fraction <= 1.0:
+        raise ValueError("min_ess_fraction must be in [0, 1]")
+    if not 0.0 <= min_coverage <= 1.0:
+        raise ValueError("min_coverage must be in [0, 1]")
+    if not 0.0 <= max_clipped_fraction <= 1.0:
+        raise ValueError("max_clipped_fraction must be in [0, 1]")
+
+    effect, ci_low, ci_high, estimator, diagnostics = _rollout_gate_parts(report)
+    n_events = diagnostics.n_events
+    ess = diagnostics.effective_sample_size
+    ess_fraction = float(ess / n_events) if n_events > 0 else 0.0
+    coverage = diagnostics.coverage
+    clipped = diagnostics.clipped_fraction
+
+    reasons: list[str] = []
+    if not np.isfinite(effect) or not np.isfinite(ci_low) or not np.isfinite(ci_high):
+        reasons.append("non-finite OPE estimate")
+    if ci_low <= float(min_effect):
+        reasons.append(
+            f"lower confidence bound {ci_low:.6g} is not above required effect {float(min_effect):.6g}"
+        )
+    if ess_fraction < float(min_ess_fraction):
+        reasons.append(
+            f"effective sample size fraction {ess_fraction:.3f} is below {float(min_ess_fraction):.3f}"
+        )
+    if coverage < float(min_coverage):
+        reasons.append(f"coverage {coverage:.3f} is below {float(min_coverage):.3f}")
+    if clipped > float(max_clipped_fraction):
+        reasons.append(f"clipped fraction {clipped:.3f} exceeds {float(max_clipped_fraction):.3f}")
+
+    return OPERolloutGateReport(
+        allowed=not reasons,
+        estimator=estimator,
+        effect=float(effect),
+        ci_low=float(ci_low),
+        ci_high=float(ci_high),
+        min_effect=float(min_effect),
+        n_events=int(n_events),
+        effective_sample_size=float(ess),
+        effective_sample_size_fraction=ess_fraction,
+        coverage=float(coverage),
+        clipped_fraction=float(clipped),
+        reasons=tuple(reasons),
+    )
+
+
 def _estimate_logged_policy(
     events: pd.DataFrame,
     *,
@@ -508,6 +597,37 @@ def _estimate_logged_policy(
         clipped_fraction=clipped_fraction,
     )
     return _Estimate(report=report, terms=terms)
+
+
+def _rollout_gate_parts(
+    report: (
+        LoggedPolicyReport
+        | BootstrapLoggedPolicyReport
+        | PolicyComparisonReport
+        | BootstrapPolicyComparisonReport
+    ),
+) -> tuple[float, float, float, str, LoggedPolicyReport]:
+    if isinstance(report, BootstrapPolicyComparisonReport):
+        return (
+            report.base.uplift,
+            report.bootstrap_ci_low,
+            report.bootstrap_ci_high,
+            report.estimator,
+            report.base.target,
+        )
+    if isinstance(report, PolicyComparisonReport):
+        return report.uplift, report.ci_low, report.ci_high, report.estimator, report.target
+    if isinstance(report, BootstrapLoggedPolicyReport):
+        return (
+            report.base.value,
+            report.bootstrap_ci_low,
+            report.bootstrap_ci_high,
+            report.estimator,
+            report.base,
+        )
+    if isinstance(report, LoggedPolicyReport):
+        return report.value, report.ci_low, report.ci_high, report.estimator, report
+    raise TypeError(f"Unsupported OPE report type: {type(report).__name__}")
 
 
 def _require_columns(frame: pd.DataFrame, *columns: str) -> None:

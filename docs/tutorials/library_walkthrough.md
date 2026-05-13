@@ -33,7 +33,7 @@ test = interactions.sample(frac=0.4, random_state=42)
 from orchid_ranker import OrchidRecommender
 
 strategies = [
-    ("als", {"epochs": 5}),
+    ("legacy_binary_mf", {"epochs": 5}),
     ("neural_mf", {"epochs": 5, "emb_dim": 16}),
     ("user_knn", {"k": 3}),
 ]
@@ -58,7 +58,7 @@ python examples/quickstart.py  # creates CSVs in examples/data/
 orchid-evaluate \
   --train examples/data/quickstart_train.csv \
   --test examples/data/quickstart_test.csv \
-  --strategy "als,epochs=3" \
+  --strategy "legacy_binary_mf,epochs=3" \
   --strategy "user_knn,k=10" \
   --top-k 5
 ```
@@ -74,7 +74,7 @@ dp_cfg = {
     "delta": 1e-5,
 }
 
-dp_rec = OrchidRecommender(strategy="als", epochs=3, dp_cfg=dp_cfg)
+dp_rec = OrchidRecommender(strategy="legacy_binary_mf", epochs=3, dp_cfg=dp_cfg)
 dp_rec.fit(train, rating_col="label")
 print(dp_rec.recommend(user_id=2, top_k=3))
 ```
@@ -97,7 +97,7 @@ Fetch `http://localhost:9090/metrics` with curl/Prometheus.
 from orchid_ranker import AuditLogger
 
 logger = AuditLogger.from_env(path="tutorial_audit.jsonl")  # uses env vars if set
-logger.log_event("training_run", actor="tutorial", payload={"strategy": "als", "epsilon": 0.9})
+logger.log_event("training_run", actor="tutorial", payload={"strategy": "legacy_binary_mf", "epsilon": 0.9})
 ```
 
 ## 8. Connectors (Optional)

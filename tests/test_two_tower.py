@@ -32,6 +32,7 @@ class TestTwoTowerRecommenderConstruction:
         assert model.item_emb.num_embeddings == 20
         assert model.user_dim == 5
         assert model.item_dim == 8
+        assert model.dp_settings.enabled is False
 
     def test_construction_honors_max_grad_norm(self):
         """Test that DP config uses the documented clipping field."""

@@ -13,7 +13,8 @@ class SimpleDPConfig:
     Attributes
     ----------
     enabled : bool
-        Whether DP is enabled (default: True).
+        Whether DP is enabled (default: False). Operators must opt in
+        explicitly so accounting cannot be mistaken for silent privacy.
     noise_multiplier : float
         Gaussian noise std (σ), relative to max_grad_norm (default: 1.0).
     max_grad_norm : float
@@ -24,7 +25,7 @@ class SimpleDPConfig:
         Failure probability for (ε, δ)-DP (δ) (default: 1e-5).
     """
 
-    enabled: bool = True
+    enabled: bool = False
     noise_multiplier: float = 1.0     # σ
     max_grad_norm: float = 1.0        # C
     sample_rate: float = 0.02         # q (≈ batch_fraction)

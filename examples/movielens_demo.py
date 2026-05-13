@@ -26,7 +26,7 @@ print(f"Rating distribution:\n{interactions['rating'].value_counts().sort_index(
 
 # --- Fit with ALS (alternating least squares) ---
 rec = OrchidRecommender.from_interactions(
-    interactions, strategy="als", user_col="user_id", item_col="item_id",
+    interactions, strategy="legacy_binary_mf", user_col="user_id", item_col="item_id",
 )
 print(f"Fitted: {rec}\n")
 

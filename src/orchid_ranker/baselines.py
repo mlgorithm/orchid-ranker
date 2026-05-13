@@ -382,7 +382,7 @@ class ALSBaseline(BaseBaseline):
         item_ids: Iterable[int],
         labels: Iterable[int],
         *,
-        sample_missing_negatives: bool = False,
+        sample_missing_negatives: Optional[bool] = None,
     ) -> None:
         """Train the matrix factorization model.
 
@@ -398,6 +398,8 @@ class ALSBaseline(BaseBaseline):
         user_arr = np.asarray(list(user_ids), dtype=np.int64)
         item_arr = np.asarray(list(item_ids), dtype=np.int64)
         label_arr = np.asarray(list(labels), dtype=np.float32)
+        if sample_missing_negatives is None:
+            sample_missing_negatives = not np.any(label_arr <= 0.0)
         if sample_missing_negatives:
             user_arr, item_arr, label_arr = _with_sampled_missing_negatives(
                 user_arr,
@@ -465,6 +467,15 @@ class ALSBaseline(BaseBaseline):
         """
         top = torch.argsort(logits[0], descending=True)[:top_k]
         return [int(item_ids[i].item()) for i in top], {"policy": "als"}
+
+
+class LegacyImplicitMFBCE(ALSBaseline):
+    """Explicit name for Orchid's historical ``als`` strategy.
+
+    The implementation is Adam-trained binary matrix factorization with BCE,
+    not alternating least squares. ``ALSBaseline`` remains as a compatibility
+    alias; new code should use this name or ``implicit_als`` for true ALS.
+    """
 
 
 class UserKNNBaseline(BaseBaseline):
@@ -550,8 +561,8 @@ class UserKNNBaseline(BaseBaseline):
 class LinUCBBaseline(BaseBaseline):
     """Linear Upper Confidence Bound contextual bandit algorithm.
 
-    Uses item features to maintain a linear model with confidence bounds for
-    exploration-exploitation tradeoff.
+    Uses item features and, when supplied, derived user features to maintain a
+    shared linear model over ``phi(user, item)`` with confidence bounds.
 
     Parameters
     ----------
@@ -563,38 +574,88 @@ class LinUCBBaseline(BaseBaseline):
         Torch device for computation.
     """
 
-    def __init__(self, alpha: float, item_features: np.ndarray, device: torch.device):
+    def __init__(
+        self,
+        alpha: float,
+        item_features: np.ndarray,
+        device: torch.device,
+        user_features: Optional[np.ndarray] = None,
+    ):
         super().__init__(device)
         self.alpha = alpha
         self.item_features = torch.tensor(item_features, dtype=torch.float32, device=device)
-        d = self.item_features.shape[1] if self.item_features.shape[1] > 0 else 1
+        if user_features is None:
+            self.user_features = None
+        elif isinstance(user_features, torch.Tensor):
+            self.user_features = user_features.detach().clone().to(device=device, dtype=torch.float32)
+        else:
+            self.user_features = torch.tensor(user_features, dtype=torch.float32, device=device)
+        self.requires_user_ids = self.user_features is not None
+        item_dim = int(self.item_features.shape[1]) if self.item_features.ndim == 2 else 0
+        user_dim = int(self.user_features.shape[1]) if self.user_features is not None else 0
+        d = self._feature_dim(user_dim=user_dim, item_dim=item_dim)
         self.A = torch.eye(d, device=device)
         self.b = torch.zeros(d, device=device)
         self._A_inv = None  # cached inverse, invalidated on fit()
 
-    def fit(self, rewards: Dict[int, float]) -> None:
+    @staticmethod
+    def _feature_dim(*, user_dim: int, item_dim: int) -> int:
+        if item_dim <= 0:
+            return 1
+        if user_dim <= 0:
+            return item_dim
+        return user_dim + item_dim + user_dim * item_dim
+
+    def _phi(self, item_ids: torch.Tensor, user_id: Optional[int] = None) -> torch.Tensor:
+        if self.item_features.shape[1] == 0:
+            return torch.ones((item_ids.numel(), 1), dtype=torch.float32, device=self.device)
+        item_feats = self.item_features[item_ids]
+        if self.user_features is None:
+            return item_feats
+        if user_id is None:
+            raise ValueError("user_ids is required when LinUCBBaseline has user_features")
+        if not (0 <= int(user_id) < self.user_features.shape[0]):
+            raise ValueError(
+                f"User ID {user_id} out of bounds [0, {self.user_features.shape[0]}). "
+                "Pass a valid user index matching the user feature matrix."
+            )
+        user_feat = self.user_features[int(user_id)].expand(item_feats.shape[0], -1)
+        interactions = (user_feat.unsqueeze(2) * item_feats.unsqueeze(1)).flatten(start_dim=1)
+        return torch.cat([user_feat, item_feats, interactions], dim=1)
+
+    def fit(self, rewards: Dict[int | tuple[int, int], float]) -> None:
         """Update linear model parameters with observed rewards.
 
         Parameters
         ----------
         rewards : dict
-            Mapping from item ID to reward value.
+            Mapping from item ID to reward value, or ``(user_id, item_id)`` to
+            reward value when user features were supplied.
         """
         if self.item_features.shape[1] == 0:
             return
         n_items = self.item_features.shape[0]
-        for iid, r in rewards.items():
+        for key, r in rewards.items():
+            uid: Optional[int]
+            if isinstance(key, tuple):
+                uid = int(key[0])
+                iid = int(key[1])
+            else:
+                uid = None
+                iid = int(key)
+            if self.user_features is not None and uid is None:
+                raise ValueError("LinUCBBaseline with user_features requires (user_id, item_id) reward keys")
             if not (0 <= int(iid) < n_items):
                 raise ValueError(
                     f"Item ID {iid} out of bounds [0, {n_items}). "
                     "Pass valid item indices matching the feature matrix."
                 )
-            feature = self.item_features[iid]
+            feature = self._phi(torch.tensor([iid], dtype=torch.long, device=self.device), uid)[0]
             self.A += feature.unsqueeze(1) @ feature.unsqueeze(0)
             self.b += float(r) * feature
         self._A_inv = None  # invalidate cached inverse
 
-    def infer(self, *, item_ids: torch.Tensor, **_):
+    def infer(self, *, item_ids: torch.Tensor, user_ids: Optional[torch.Tensor] = None, **_):
         """Compute UCB scores for candidate items.
 
         Parameters
@@ -613,7 +674,12 @@ class LinUCBBaseline(BaseBaseline):
             self._A_inv = torch.inverse(self.A + 1e-6 * torch.eye(self.A.shape[0], device=self.device))
         A_inv = self._A_inv
         theta = A_inv @ self.b
-        feats = self.item_features[item_ids]
+        user_id = None
+        if self.user_features is not None:
+            if user_ids is None:
+                raise ValueError("user_ids is required for personalized LinUCB scoring")
+            user_id = int(user_ids.flatten()[0].item())
+        feats = self._phi(item_ids, user_id)
         means = feats @ theta
         # Quadratic form x'A^{-1}x; clamp to avoid negative values from numerical noise
         quadratic = ((feats @ A_inv) * feats).sum(dim=1).clamp(min=0.0)
@@ -985,7 +1051,7 @@ class NeuralMatrixFactorizationBaseline(BaseBaseline):
         item_ids: Iterable[int],
         labels: Iterable[float],
         *,
-        sample_missing_negatives: bool = False,
+        sample_missing_negatives: Optional[bool] = None,
     ) -> None:
         """Train the neural matrix factorization model.
 
@@ -1001,6 +1067,8 @@ class NeuralMatrixFactorizationBaseline(BaseBaseline):
         user_arr = np.asarray(list(user_ids), dtype=np.int64)
         item_arr = np.asarray(list(item_ids), dtype=np.int64)
         label_arr = np.asarray(list(labels), dtype=np.float32)
+        if sample_missing_negatives is None:
+            sample_missing_negatives = self.loss_type == "bce" and not np.any(label_arr <= 0.0)
         if sample_missing_negatives and self.loss_type == "bce":
             user_arr, item_arr, label_arr = _with_sampled_missing_negatives(
                 user_arr,
@@ -1284,6 +1352,7 @@ __all__ = [
     "PopularityBaseline",
     "RandomBaseline",
     "ALSBaseline",
+    "LegacyImplicitMFBCE",
     "ExplicitMFBaseline",
     "UserKNNBaseline",
     "LinUCBBaseline",

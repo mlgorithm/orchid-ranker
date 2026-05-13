@@ -3,10 +3,13 @@
 
 Run with: python examples/quickstart.py
 """
+import sys
 from pathlib import Path
 
 import numpy as np
 import pandas as pd
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
 from orchid_ranker import OrchidRecommender
 
@@ -30,7 +33,7 @@ test.to_csv(data_dir / "quickstart_test.csv", index=False)
 # 1. FIT — one-shot training on historical data.
 rec = OrchidRecommender.from_interactions(
     interactions,
-    strategy="als",
+    strategy="legacy_binary_mf",
     epochs=1,
     embedding_dim=8,
 )

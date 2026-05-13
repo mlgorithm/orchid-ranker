@@ -37,7 +37,13 @@ class TestRecommenderPipeline:
         })
 
         # 2. Split
-        train, test = train_test_split(interactions, test_size=0.2, by_user=True, random_state=42)
+        train, test = train_test_split(
+            interactions,
+            test_size=0.2,
+            by_user=True,
+            random_state=42,
+            allow_random_within_user=True,
+        )
         assert len(train) > 0
         assert len(test) > 0
         assert len(train) + len(test) == len(interactions)
@@ -89,8 +95,8 @@ class TestRecommenderPipeline:
             "rating":  rng.uniform(1, 5, size=300).round(1),
         })
 
-        train, test = train_test_split(interactions, test_size=0.2)
-        rec = OrchidRecommender(strategy="als", epochs=3)
+        train, test = train_test_split(interactions, test_size=0.2, allow_random_within_user=True)
+        rec = OrchidRecommender(strategy="legacy_binary_mf", epochs=3)
         rec.fit(train)
 
         uid = train["user_id"].iloc[0]
@@ -126,11 +132,16 @@ class TestCVTuningPipeline:
         })
 
         # Cross-validate a single strategy
-        cv_results = cross_validate(interactions, strategy="popularity", k=3)
+        cv_results = cross_validate(interactions, strategy="popularity", k=3, allow_random_within_user=True)
         assert isinstance(cv_results, dict)
 
         # Compare multiple strategies
-        comparison = compare_models(interactions, strategies=["popularity"], k=2)
+        comparison = compare_models(
+            interactions,
+            strategies=["popularity"],
+            k=2,
+            allow_random_within_user=True,
+        )
         assert isinstance(comparison, pd.DataFrame)
 
     def test_grid_search_pipeline(self):
@@ -147,6 +158,7 @@ class TestCVTuningPipeline:
             strategy="popularity",
             param_grid={"n_recommendations": [5, 10]},
             cv=2,
+            allow_random_within_user=True,
         )
         gs.fit(interactions)
         assert gs.best_params_ is not None
@@ -289,7 +301,7 @@ class TestEducationalMetricsPipeline:
             "rating":  rng.uniform(1, 5, size=500).round(1),
         })
 
-        train, test = train_test_split(interactions, test_size=0.2)
+        train, test = train_test_split(interactions, test_size=0.2, allow_random_within_user=True)
         rec = OrchidRecommender(strategy="popularity")
         rec.fit(train)
 

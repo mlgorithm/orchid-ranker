@@ -31,14 +31,14 @@ print(df.head())
 ```python
 from orchid_ranker import OrchidRecommender
 
-rec = OrchidRecommender(strategy="als")
+rec = OrchidRecommender(strategy="legacy_binary_mf")
 rec.fit(df, user_col="user_id", item_col="item_id", rating_col="rating")
 ```
 
-`"als"` is a backward-compatible binary-MF baseline trained with BCE and
+`"legacy_binary_mf"` is a backward-compatible binary-MF baseline trained with BCE and
 sampled missing-item negatives when `rating_col` is omitted. Pass
 `strategy="auto"` to let Orchid pick -- it selects `explicit_mf` when it
-detects a range of rating values and `als` for binary signals. Install
+detects a range of rating values and `legacy_binary_mf` for binary signals. Install
 `orchid-ranker[implicit]` and use `strategy="implicit_als"` when you need a
 true alternating-least-squares solver.
 
@@ -57,7 +57,7 @@ score = rec.predict(user_id=42, item_id=7)
 ## One-liner with `from_interactions`
 
 ```python
-rec = OrchidRecommender.from_interactions(df, strategy="als",
+rec = OrchidRecommender.from_interactions(df, strategy="legacy_binary_mf",
                                           user_col="user_id",
                                           item_col="item_id",
                                           rating_col="rating")
@@ -78,7 +78,7 @@ assert rec2.predict(user_id=42, item_id=7) == score
 print(OrchidRecommender.available_strategies())
 ```
 
-Output lists all ten strategies (`als`, `auto`, `explicit_mf`, `implicit_als`,
+Output lists the legacy strategy set (`legacy_binary_mf`, `als`, `auto`, `explicit_mf`, `implicit_als`,
 `implicit_bpr`, `linucb`, `neural_mf`, `popularity`, `random`, `user_knn`)
 with one-line descriptions.
 

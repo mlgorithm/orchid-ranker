@@ -40,6 +40,7 @@ def train_test_split(
     item_col: str = "item_id",
     time_col: Optional[str] = "timestamp",
     chronological: Optional[bool] = None,
+    allow_random_within_user: bool = False,
 ) -> Tuple[pd.DataFrame, pd.DataFrame]:
     """Split interactions into train and test sets.
 
@@ -69,6 +70,9 @@ def train_test_split(
     chronological : bool, optional
         Force or disable chronological splitting. ``None`` auto-enables it for
         by-user splits when ``time_col`` exists.
+    allow_random_within_user : bool, optional
+        Explicit opt-in for legacy random within-user splitting when
+        chronological splitting is disabled or timestamps are unavailable.
 
     Returns
     -------
@@ -125,6 +129,12 @@ def train_test_split(
                 test_size=test_size,
                 user_col=user_col,
                 time_col=str(time_col),
+            )
+        if not allow_random_within_user:
+            raise ValueError(
+                "Random within-user split is disabled by default for adaptive-learning data. "
+                "Provide a timestamp column for chronological splitting or pass "
+                "allow_random_within_user=True to opt into the legacy random split."
             )
         # Hold out test_size fraction per user
         train_idx: List[int] = []
@@ -230,6 +240,7 @@ def _build_user_stratified_folds(
     user_col: str,
     time_col: Optional[str] = "timestamp",
     chronological: Optional[bool] = None,
+    allow_random_within_user: bool = False,
 ) -> List[Tuple[pd.DataFrame, pd.DataFrame]]:
     """Build CV folds by holding out interactions within each user.
 
@@ -250,6 +261,13 @@ def _build_user_stratified_folds(
             k=k,
             user_col=user_col,
             time_col=str(time_col),
+        )
+
+    if not allow_random_within_user:
+        raise ValueError(
+            "Random within-user cross-validation is disabled by default for adaptive-learning data. "
+            "Provide a timestamp column for chronological folds or pass "
+            "allow_random_within_user=True to opt into the legacy random folds."
         )
 
     rng = np.random.RandomState(random_state)
@@ -339,6 +357,7 @@ def cross_validate(
     rating_col: Optional[str] = None,
     time_col: Optional[str] = "timestamp",
     chronological: Optional[bool] = None,
+    allow_random_within_user: bool = False,
 ) -> Dict[str, Dict[str, float]]:
     """Perform k-fold cross-validation for a recommender strategy.
 
@@ -374,6 +393,9 @@ def cross_validate(
     chronological : bool, optional
         Force or disable chronological folds. ``None`` auto-enables them when
         ``time_col`` exists.
+    allow_random_within_user : bool, optional
+        Explicit opt-in for legacy random within-user folds when chronological
+        splitting is disabled or timestamps are unavailable.
 
     Returns
     -------
@@ -429,6 +451,7 @@ def cross_validate(
         user_col=user_col,
         time_col=time_col,
         chronological=chronological,
+        allow_random_within_user=allow_random_within_user,
     )
     if not fold_data:
         raise ValueError("Unable to build non-empty cross-validation folds from the provided interactions")
@@ -604,6 +627,7 @@ def compare_models(
     user_col: str = "user_id",
     item_col: str = "item_id",
     rating_col: Optional[str] = None,
+    allow_random_within_user: bool = False,
 ) -> pd.DataFrame:
     """Compare multiple recommender strategies via cross-validation.
 
@@ -634,6 +658,9 @@ def compare_models(
     rating_col : str, optional
         Column name for explicit ratings/feedback. If None and a ``rating``
         column exists, it is used automatically.
+    allow_random_within_user : bool, optional
+        Explicit opt-in for legacy random within-user CV when timestamps are
+        unavailable.
 
     Returns
     -------
@@ -681,6 +708,7 @@ def compare_models(
             user_col=user_col,
             item_col=item_col,
             rating_col=rating_col,
+            allow_random_within_user=allow_random_within_user,
         )
         results_by_strategy[strategy] = cv_results
 

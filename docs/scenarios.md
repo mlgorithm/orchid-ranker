@@ -196,7 +196,7 @@ inside a notebook, batch job, or service endpoint.
 
 **Signals:** `user_id`, `item_id`, optional `rating` or binary label.
 
-**Algorithm path:** ALS, explicit matrix factorization, neural MF, and baseline
+**Algorithm path:** legacy binary MF, explicit matrix factorization, neural MF, and baseline
 ranking.
 
 ```python
@@ -204,7 +204,7 @@ from orchid_ranker import OrchidRecommender
 
 rec = OrchidRecommender.from_interactions(
     interactions,
-    strategy="als",
+    strategy="legacy_binary_mf",
     user_col="user_id",
     item_col="item_id",
     rating_col="rating",
@@ -218,7 +218,7 @@ recs = rec.recommend(
 )
 ```
 
-Use `strategy="auto"` when you want Orchid to choose `als` for binary feedback
+Use `strategy="auto"` when you want Orchid to choose `legacy_binary_mf` for binary feedback
 or `explicit_mf` for wider rating ranges.
 
 ## Scenario 6: Generic streaming recommender
