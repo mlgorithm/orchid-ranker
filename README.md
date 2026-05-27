@@ -89,6 +89,7 @@ Understand what makes Orchid different:
 
 - [Why Orchid](docs/why-orchid.md) --- the adaptive-learning thesis, five pillars, honest comparison
 - [Competitor comparison](docs/competitors.md) --- when to use Orchid vs RecBole, Merlin, implicit, LightFM, TFRS, Gorse
+- [Benchmark credibility protocol](docs/benchmarks/credibility.md) --- one-command JSON + Markdown evidence artifact
 - [ASSISTments KT benchmark](docs/benchmarks/assistments-kt.md) --- adaptive-learning correctness and policy evidence
 - [KT policy OPE benchmark](docs/benchmarks/kt-policy-ope.md) --- evaluate KT-guided next-item policies before rollout
 - [Specialty benchmarks](docs/benchmarks/end-to-end.md) --- cold-start, MovieLens, music, and adjacent progression modules

@@ -54,6 +54,17 @@ def parse_args(argv: Optional[list[str]] = None) -> argparse.Namespace:
     parser.add_argument("--batch-size", type=int, default=512)
     parser.add_argument("--device", default=None)
     parser.add_argument("--output", type=Path, default=None, help="Optional JSON output path")
+    parser.add_argument(
+        "--report-md",
+        type=Path,
+        default=None,
+        help="Optional reviewer-friendly Markdown benchmark report path.",
+    )
+    parser.add_argument(
+        "--benchmark-name",
+        default="Adaptive learning credibility benchmark",
+        help="Human-readable name used in the Markdown report.",
+    )
     return parser.parse_args(argv)
 
 
@@ -67,6 +78,8 @@ def main(argv: Optional[list[str]] = None) -> int:
     quality = _run_quality(args, frame)
     policies = _run_policies(args, frame)
     payload = {
+        "artifact_schema": "orchid-adaptive-efficiency/v1",
+        "benchmark_name": args.benchmark_name,
         "config": _config(args, frame),
         "quality": quality,
         "policy": policies,
@@ -76,6 +89,9 @@ def main(argv: Optional[list[str]] = None) -> int:
     if args.output:
         args.output.parent.mkdir(parents=True, exist_ok=True)
         args.output.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n")
+    if args.report_md:
+        args.report_md.parent.mkdir(parents=True, exist_ok=True)
+        args.report_md.write_text(render_markdown_report(payload) + "\n", encoding="utf-8")
     return 0
 
 
@@ -219,6 +235,7 @@ def _policy_summary(runs: list[dict[str, Any]]) -> dict[str, Any]:
             {
                 "policy": run["policy"],
                 "reward_mode": run["reward_mode"],
+                "n_runs": summary["n_runs"],
                 "target_correct": run["target_correct"],
                 "uplift_mean": summary["uplift_mean"],
                 "uplift_ci_low": summary["uplift_ci_low"],
@@ -251,6 +268,189 @@ def _summary(quality: dict[str, Any], policy: dict[str, Any], *, total_seconds: 
         "best_quality_model": best_quality,
         "best_policy": policy["summary"]["best_by_uplift"],
     }
+
+
+def render_markdown_report(payload: dict[str, Any]) -> str:
+    """Render a reviewer-friendly Markdown report for a benchmark payload."""
+    config = payload["config"]
+    quality = payload["quality"]["summary"]
+    policy_rows = payload["policy"]["summary"]["table"]
+    summary = payload["summary"]
+    title = str(payload.get("benchmark_name") or "Adaptive learning credibility benchmark")
+
+    lines = [
+        f"# {title}",
+        "",
+        "This report is generated from `benchmarks/adaptive_efficiency_benchmark.py`.",
+        "It is intended as reproducible benchmark evidence, not as a causal live-learning claim unless the run uses real logged propensities.",
+        "",
+        "## Run Contract",
+        "",
+        "| Field | Value |",
+        "|-------|-------|",
+        f"| Artifact schema | `{payload.get('artifact_schema', 'unknown')}` |",
+        f"| Data | `{config['data']}` |",
+        f"| Rows / users / items | {_int(config['rows'])} / {_int(config['users'])} / {_int(config['items'])} |",
+        f"| Models | `{', '.join(config['models'])}` |",
+        f"| Seeds | `{', '.join(str(seed) for seed in config['seeds'])}` |",
+        f"| Test fraction | {_num(config['test_fraction'])} |",
+        f"| Candidate size | {_int(config['candidate_size'])} |",
+        f"| Max OPE events | {_none_or_num(config['max_events'])} |",
+        f"| Epochs / batch size | {_int(config['epochs'])} / {_int(config['batch_size'])} |",
+        f"| Device | `{config['device'] or 'auto'}` |",
+        f"| Total seconds | {_num(summary['total_seconds'])} |",
+        "",
+        "## KT Prediction Quality",
+        "",
+        "| Model | Accuracy | AUC | Brier | ECE | Seconds |",
+        "|-------|---------:|----:|------:|----:|--------:|",
+    ]
+
+    for model, model_summary in quality.items():
+        if model == "item_mean":
+            continue
+        lines.append(
+            "| "
+            + " | ".join(
+                [
+                    f"`{model}`",
+                    _mean(model_summary, "accuracy"),
+                    _mean(model_summary, "auc"),
+                    _mean(model_summary, "brier"),
+                    _mean(model_summary, "ece"),
+                    _mean(model_summary, "seconds"),
+                ]
+            )
+            + " |"
+        )
+
+    if "item_mean" in quality:
+        baseline = quality["item_mean"]
+        lines.extend(
+            [
+                "",
+                "Baseline comparator: `item_mean` predicts from historical item correctness only.",
+                "",
+                "| Baseline | Accuracy | AUC | Brier | ECE |",
+                "|----------|---------:|----:|------:|----:|",
+                "| `item_mean` | "
+                + " | ".join(
+                    [
+                        _mean(baseline, "accuracy"),
+                        _mean(baseline, "auc"),
+                        _mean(baseline, "brier"),
+                        _mean(baseline, "ece"),
+                    ]
+                )
+                + " |",
+            ]
+        )
+
+    lines.extend(
+        [
+            "",
+            "## Policy OPE",
+            "",
+            "| Policy | Reward | Runs | Target correct | Baseline | Target | Uplift | 95% CI | Match rate | ESS | Decision |",
+            "|--------|--------|-----:|---------------:|---------:|-------:|-------:|-------:|-----------:|----:|----------|",
+        ]
+    )
+    for row in policy_rows:
+        lines.append(
+            "| "
+            + " | ".join(
+                [
+                    f"`{row['policy']}`",
+                    f"`{row['reward_mode']}`",
+                    _int(row["n_runs"]),
+                    _num(row["target_correct"]),
+                    _num(row["baseline_value_mean"]),
+                    _num(row["target_value_mean"]),
+                    _signed(row["uplift_mean"]),
+                    f"[{_signed(row['uplift_ci_low'])}, {_signed(row['uplift_ci_high'])}]",
+                    _num(row["target_match_rate_mean"]),
+                    _num(row["target_ess_mean"]),
+                    _policy_decision(row),
+                ]
+            )
+            + " |"
+        )
+
+    best = summary.get("best_policy")
+    if best:
+        lines.extend(
+            [
+                "",
+                "## Summary",
+                "",
+                f"- Best KT model by AUC: `{summary['best_quality_model']['model']}` "
+                f"(AUC {_num(summary['best_quality_model']['auc'])}).",
+                f"- Best policy by point-estimate uplift: `{best['policy']}` / `{best['reward_mode']}` "
+                f"at target correctness {_num(best['target_correct'])} with uplift {_signed(best['uplift_mean'])}.",
+                "- Treat policies with confidence intervals crossing zero as research evidence, not production rollout evidence.",
+            ]
+        )
+
+    lines.extend(
+        [
+            "",
+            "## Reproducibility Notes",
+            "",
+            "- The split is time-ordered by user when a timestamp column is supplied.",
+            "- Public education logs often lack true logging propensities; synthetic-uniform candidate propensities are regression evidence, not causal proof.",
+            "- Report JSON should be committed beside this Markdown report so reviewers can inspect raw metrics, seeds, and runtime.",
+        ]
+    )
+    return "\n".join(lines)
+
+
+def _mean(summary: dict[str, Any], metric: str) -> str:
+    return _num(summary[metric]["mean"])
+
+
+def _policy_decision(row: dict[str, Any]) -> str:
+    low = float(row["uplift_ci_low"])
+    high = float(row["uplift_ci_high"])
+    n_runs = float(row.get("n_runs", 0.0))
+    ess = float(row.get("target_ess_mean", 0.0))
+    if n_runs < 3.0 or ess < 100.0:
+        return "research only"
+    if low > 0.0:
+        return "candidate for canary"
+    if high < 0.0:
+        return "do not ship"
+    return "research only"
+
+
+def _num(value: Any) -> str:
+    try:
+        number = float(value)
+    except (TypeError, ValueError):
+        return "n/a"
+    if not np.isfinite(number):
+        return "n/a"
+    return f"{number:.4f}"
+
+
+def _signed(value: Any) -> str:
+    try:
+        number = float(value)
+    except (TypeError, ValueError):
+        return "n/a"
+    if not np.isfinite(number):
+        return "n/a"
+    return f"{number:+.4f}"
+
+
+def _none_or_num(value: Any) -> str:
+    return "none" if value is None else _int(value)
+
+
+def _int(value: Any) -> str:
+    try:
+        return str(int(value))
+    except (TypeError, ValueError):
+        return "n/a"
 
 
 def _mean_std(values: list[Any]) -> dict[str, float]:

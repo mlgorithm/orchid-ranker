@@ -68,6 +68,7 @@ nav:
     - "Guide 3: Operate safely": guides/03-operate-safely.md
     - Migration (0.4 to 0.5): guides/migration-0.4-to-0.5.md
   - Benchmarks:
+    - "Credibility protocol": benchmarks/credibility.md
     - "ASSISTments KT": benchmarks/assistments-kt.md
     - "KT policy OPE": benchmarks/kt-policy-ope.md
     - "Case study: EdNet": benchmarks/ednet.md
