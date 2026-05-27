@@ -134,6 +134,37 @@ class TestLazyImports:
         with pytest.raises(AttributeError, match="has no attribute"):
             _ = orchid_ranker.totally_bogus_name_xyz
 
+    def test_utils_train_eval_import_contract(self):
+        from orchid_ranker.utils.metric import compute_accuracy, compute_auc
+        from orchid_ranker.utils.train_eval import evaluate, train_epoch
+
+        assert callable(train_epoch)
+        assert callable(evaluate)
+        assert compute_accuracy([0, 1, 1], [0.1, 0.8, 0.4]) == pytest.approx(2 / 3)
+        assert compute_auc([0, 1], [0.2, 0.9]) == pytest.approx(1.0)
+        assert compute_auc([1, 1], [0.2, 0.9]) == pytest.approx(0.5)
+
+    def test_optional_plotting_modules_import_without_matplotlib(self, tmp_path):
+        import pandas as pd
+
+        import orchid_ranker.visualization as visualization
+        from orchid_ranker._compat import matplotlib_available
+        from orchid_ranker.experiments import reporting
+
+        assert callable(visualization.plot_user_activity)
+        assert callable(reporting.export_mode_means_and_plots)
+
+        if not matplotlib_available():
+            with pytest.raises(ImportError, match=r"orchid-ranker\[viz\]"):
+                visualization.plot_user_activity(pd.DataFrame({"u": [1, 1, 2]}))
+
+            with pytest.raises(ImportError, match=r"orchid-ranker\[viz\]"):
+                reporting.export_mode_means_and_plots(
+                    {"fixed": pd.DataFrame({"round": [1], "accuracy": [1.0]})},
+                    out_csv=tmp_path / "mode_means.csv",
+                    out_fig_dir=tmp_path / "figures",
+                )
+
 
 # ===================================================================
 # 2. Serialization security -- safe state dicts instead of pickle

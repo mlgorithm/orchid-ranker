@@ -15,7 +15,7 @@ pip install 'orchid-ranker[ml]'
 
 The base `pip install orchid-ranker` package is for torch-free progression
 utilities. `AdaptiveLearningEngine` uses PyTorch-backed tracing, so install
-the `ml` extra for the primary workflow.
+the adaptive/ML extra for the primary workflow.
 
 ## 2. Fit, Rank, Observe
 
@@ -45,22 +45,17 @@ print(ranked)
 ```
 
 See `examples/adaptive_learning_quickstart.py` for the full adaptive-learning
-script and `examples/quickstart.py` for the generic batch recommender fallback.
+script.
 See `examples/scenario_selection.py` when you want Orchid to choose a workflow
 from product and data signals. See `examples/knowledge_tracing_quickstart.py`
 for predicted-correctness ranking from learner sequences,
 `examples/akt_quickstart.py` for difficulty-aware tracing, and
 `examples/kt_policy_quickstart.py` for KT-guided next-item ranking.
 
-## 3. Batch fallback
-
-Use `OrchidRecommender.from_interactions(...)` when you only have ordinary
-user-item interactions and no learning concepts, difficulty, or prerequisites.
-
-## 4. CLI Evaluation
+## 3. CLI Evaluation
 
 ```bash
-python examples/quickstart.py
+python examples/adaptive_learning_quickstart.py
 
 orchid-evaluate \
   --train examples/data/quickstart_train.csv \
@@ -69,9 +64,11 @@ orchid-evaluate \
   --top-k 5
 ```
 
-Sample CSVs are auto-generated when you run `examples/quickstart.py`. The CLI outputs Precision@5, Recall@5, MAP@10, and NDCG@10.
+The CLI outputs Precision@5, Recall@5, MAP@10, and NDCG@10 for compatibility
+benchmarking. Adaptive-learning policy evaluation should additionally use OPE,
+progression reward, calibration, and chronological splits.
 
-## 5. Optional Extras
+## 4. Optional Extras
 
 - Prometheus metrics: `orchid_ranker.start_metrics_server()`.
 - Differential privacy: pass `dp_cfg` with engine `"opacus"` or `"per_sample"` (see `docs/privacy.md`).

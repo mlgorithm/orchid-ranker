@@ -7,7 +7,8 @@ Public API is organized into three stability tiers:
 
 **Tier 1 -- Stable** (semver-guaranteed, safe for production):
     AdaptiveRanker, AdaptiveLearningEngine, AdaptiveLearningRecommender,
-    BayesianKnowledgeTracing,
+    BayesianKnowledgeTracing, SAKTTracer, DKTTracer, DKVMNTracer,
+    AKTTracer, SAINTTracer, SAINTPlusTracer,
     ProficiencyTracker, ForgettingCurve, DependencyGraph,
     ProgressionRecommender, save_model, load_model, cross_validate,
     compare_models, chronological_user_split, train_test_split,
@@ -21,16 +22,21 @@ Public API is organized into three stability tiers:
     DelayedGainRewardModel, build_delayed_gain_training_frame,
     diagnose_delayed_gain_predictions, fit_delayed_gain_reward_model,
     fit_delayed_gain_reward_model_from_frame,
-    LearnerEvent, LoggedDecision, CQLDiscretePolicy, SketchCandidateGenerator,
-    SemanticItemEncoder, SemanticExerciseRanker,
+    LearnerEvent, LoggedDecision, CQLDiscretePolicy, TabularFQE,
+    PersonalizedLinUCB, SketchCandidateGenerator,
+    DenseSemanticItemEncoder, SemanticItemEncoder, SemanticExerciseRanker,
+    IRTAdaptiveSelector, IRTItem, IRTRecommendation,
+    PFATracer, AFMTracer, fit_bkt_em, FSRSScheduler,
+    TemperatureScaler, IsotonicProbabilityCalibrator,
     ScenarioFit, ScenarioRecipe, available_scenarios, recommend_scenarios
 
 **Tier 2 -- Advanced** (stable but may evolve between minor versions):
     AdaptiveAgent, AdaptiveAgentFactory, MultiUserOrchestrator,
     TwoTowerRecommender, DualRecommender, MultiConfig, UserCtx,
-    legacy.OrchidRecommender
+    legacy compatibility modules
 
 **Tier 3 -- Internal / Experimental** (not in ``__all__``; import from submodule):
+    OrchidRecommender and historical generic recommender strategies,
     LinUCBPolicy, BootTS, JSONLLogger, PolicyState, OnlineState,
     GridSearchCV, RandomSearchCV, RankingExperiment, get_dp_config,
     configure_logging, AccessControl, AuditLogger, connectors, etc.
@@ -39,9 +45,7 @@ Installation extras
 -------------------
 ``pip install orchid-ranker``          -- core progression toolkit (BKT, dependency graph, evaluation)
 ``pip install orchid-ranker[adaptive]`` -- adds PyTorch for AdaptiveRanker and AdaptiveLearningEngine
-``pip install orchid-ranker[legacy]``   -- adds historical generic recommender extras
-``pip install orchid-ranker[implicit]`` -- adds implicit ALS/BPR strategies
-``pip install orchid-ranker[all]``     -- everything (ML, viz, agentic, observability, connectors)
+``pip install orchid-ranker[all]``      -- adaptive stack plus optional viz, agentic, observability, connectors
 """
 
 __version__ = "0.5.0"
@@ -58,6 +62,15 @@ from .adaptive_schema import (
     validate_learner_events,
     validate_logged_decisions,
 )
+from .bandits import BanditScore, PersonalizedLinUCB
+from .bkt_em import BKTFitReport, fit_bkt_em
+from .calibration import (
+    CalibrationReport,
+    IsotonicProbabilityCalibrator,
+    TemperatureScaler,
+    brier_score,
+    expected_calibration_error,
+)
 from .curriculum import (
     DependencyGraph,
     ProgressionRecommender,
@@ -69,6 +82,7 @@ from .delayed_gain import (
     fit_delayed_gain_reward_model,
     fit_delayed_gain_reward_model_from_frame,
 )
+from .edm import AFMTracer, EDMTrainingReport, PFATracer
 from .evaluation import (
     ProgressionReport,
     difficulty_appropriateness,
@@ -77,6 +91,8 @@ from .evaluation import (
     progression_gain,
     sequence_adherence,
 )
+from .fqe import FQEReport, TabularFQE
+from .irt import IRTAdaptiveSelector, IRTItem, IRTRecommendation
 from .knowledge_tracing import (
     BayesianKnowledgeTracing,
     ForgettingCurve,
@@ -115,7 +131,8 @@ from .scenarios import (
     available_scenarios,
     recommend_scenarios,
 )
-from .semantic import SemanticExerciseRanker, SemanticItemEncoder, SemanticRecommendation
+from .semantic import DenseSemanticItemEncoder, SemanticExerciseRanker, SemanticItemEncoder, SemanticRecommendation
+from .spaced_repetition import FSRSReviewState, FSRSScheduler, ReviewRecommendation
 
 # ── Lazy imports for torch-dependent and optional-dependency modules ──────
 #
@@ -131,10 +148,12 @@ _TORCH_LAZY = {
     "AdaptiveLearningEngine": (".adaptive_learning", "AdaptiveLearningRecommender"),
     "AdaptiveLearningRecommendation": (".adaptive_learning", "AdaptiveLearningRecommendation"),
     "AdaptiveLearningRecommender": (".adaptive_learning", "AdaptiveLearningRecommender"),
-    "OrchidRecommender": (".recommender", "OrchidRecommender"),
-    "Recommendation": (".recommender", "Recommendation"),
-    "SUPPORTED_STRATEGIES": (".recommender", "SUPPORTED_STRATEGIES"),
-    "STRATEGY_GUIDE": (".recommender", "STRATEGY_GUIDE"),
+    "SAKTTracer": (".kt", "SAKTTracer"),
+    "DKTTracer": (".kt", "DKTTracer"),
+    "DKVMNTracer": (".kt", "DKVMNTracer"),
+    "AKTTracer": (".kt", "AKTTracer"),
+    "SAINTTracer": (".kt", "SAINTTracer"),
+    "SAINTPlusTracer": (".kt", "SAINTPlusTracer"),
     "save_model": (".serialization", "save_model"),
     "load_model": (".serialization", "load_model"),
     "cross_validate": (".model_selection", "cross_validate"),
@@ -201,6 +220,10 @@ _DEPRECATED_ALIASES = {
     "EducationalReport": (".evaluation", "ProgressionReport"),
     "StudentAgent": (".agents.student_agent", "AdaptiveAgent"),
     "StudentAgentFactory": (".agents.student_agent", "AdaptiveAgentFactory"),
+    "OrchidRecommender": (".legacy", "OrchidRecommender"),
+    "Recommendation": (".legacy", "Recommendation"),
+    "SUPPORTED_STRATEGIES": (".legacy", "SUPPORTED_STRATEGIES"),
+    "STRATEGY_GUIDE": (".legacy", "STRATEGY_GUIDE"),
 }
 
 
@@ -218,7 +241,7 @@ def __getattr__(name: str):
 
         module = importlib.import_module(module_path, __name__)
         value = getattr(module, attr_name)
-        new_public_name = attr_name if attr_name != name else attr_name
+        new_public_name = f"orchid_ranker.legacy.{attr_name}" if module_path == ".legacy" else attr_name
         warnings.warn(
             f"orchid_ranker.{name} is deprecated, use {new_public_name} instead. "
             "Will be removed in v1.0.",
@@ -258,6 +281,12 @@ __all__ = [
     "AdaptiveLearningEngine",
     "AdaptiveLearningRecommendation",
     "AdaptiveLearningRecommender",
+    "SAKTTracer",
+    "DKTTracer",
+    "DKVMNTracer",
+    "AKTTracer",
+    "SAINTTracer",
+    "SAINTPlusTracer",
     "BayesianKnowledgeTracing",
     "ProficiencyTracker",
     "ForgettingCurve",
@@ -290,14 +319,35 @@ __all__ = [
     "validate_logged_decisions",
     "CQLDiscretePolicy",
     "CQLTrainingReport",
+    "TabularFQE",
+    "FQEReport",
+    "PersonalizedLinUCB",
+    "BanditScore",
+    "PFATracer",
+    "AFMTracer",
+    "EDMTrainingReport",
+    "fit_bkt_em",
+    "BKTFitReport",
+    "FSRSScheduler",
+    "FSRSReviewState",
+    "ReviewRecommendation",
+    "TemperatureScaler",
+    "IsotonicProbabilityCalibrator",
+    "CalibrationReport",
+    "expected_calibration_error",
+    "brier_score",
     "BloomFilter",
     "CountMinSketch",
     "ExactEmbeddingIndex",
     "ReservoirSampler",
     "SketchCandidateGenerator",
+    "DenseSemanticItemEncoder",
     "SemanticItemEncoder",
     "SemanticRecommendation",
     "SemanticExerciseRanker",
+    "IRTAdaptiveSelector",
+    "IRTItem",
+    "IRTRecommendation",
     "PyKTSequence",
     "PyKTPredictionAdapter",
     "export_pykt_sequences",

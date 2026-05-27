@@ -6,6 +6,7 @@ import pytest
 from orchid_ranker import (
     AdaptiveRanker,
     CQLDiscretePolicy,
+    DenseSemanticItemEncoder,
     ExactEmbeddingIndex,
     LearnerEvent,
     LoggedDecision,
@@ -15,6 +16,7 @@ from orchid_ranker import (
     stable_context_hash,
     validate_logged_decisions,
 )
+from orchid_ranker.adaptive_learning import AdaptiveLearningRecommendation
 
 
 def _events() -> pd.DataFrame:
@@ -99,6 +101,49 @@ def test_cql_discrete_policy_learns_conservative_best_action():
     assert policy.score(ctx, ["i2", "i3"])["i3"] > policy.score(ctx, ["i2", "i3"])["i2"]
 
 
+def test_cql_discrete_policy_uses_inverse_propensity_update_weights():
+    ctx = stable_context_hash("learner-a", "fractions")
+    frame = pd.DataFrame(
+        [
+            {
+                "learner_id": "learner-a",
+                "ts": 1,
+                "candidate_item_ids": ["rare", "common"],
+                "chosen_item_id": "rare",
+                "propensity": 0.1,
+                "policy_name": "logging",
+                "policy_version": "v1",
+                "scores": [0.1, 0.9],
+                "context_hash": ctx,
+                "reward": 1.0,
+            },
+            {
+                "learner_id": "learner-a",
+                "ts": 2,
+                "candidate_item_ids": ["rare", "common"],
+                "chosen_item_id": "common",
+                "propensity": 0.9,
+                "policy_name": "logging",
+                "policy_version": "v1",
+                "scores": [0.1, 0.9],
+                "context_hash": ctx,
+                "reward": 1.0,
+            },
+        ]
+    )
+
+    policy = CQLDiscretePolicy(
+        epochs=30,
+        learning_rate=0.05,
+        conservative_weight=0.0,
+        propensity_weighting=True,
+    ).fit(frame)
+
+    scores = policy.score(ctx, ["rare", "common"])
+    assert scores["rare"] > scores["common"]
+    assert policy.report_.propensity_weighting is True
+
+
 def test_sketch_candidate_generator_combines_heavy_hitters_and_vector_search():
     index = ExactEmbeddingIndex()
     index.add("i3", [1.0, 0.0])
@@ -173,6 +218,83 @@ def test_adaptive_ranker_accepts_saint_plus_and_semantic_candidates():
     assert diagnostics["adaptive_ranker"]["semantic_encoder"]["n_items"] == 4
 
 
+def test_adaptive_ranker_can_score_semantic_cold_start_item_outside_kt_universe():
+    catalog = pd.DataFrame(
+        {
+            "item_id": ["i2", "i5"],
+            "item_text": [
+                "compare fractions with like denominators",
+                "add fractions with unlike denominators",
+            ],
+            "concept_id": ["fractions", "fractions"],
+            "difficulty": [0.45, 0.55],
+        }
+    )
+    ranker = AdaptiveRanker(
+        kt_backbone="sakt",
+        epochs=1,
+        d_model=16,
+        n_heads=2,
+        batch_size=4,
+        device="cpu",
+    ).fit_kt(_events(), item_difficulty_col="difficulty")
+    ranker.fit_semantic_items(catalog, metadata_cols=["concept_id", "difficulty"], n_features=256)
+
+    ranked = ranker.recommend(
+        "learner-a",
+        ["i5"],
+        top_k=1,
+        item_query_text="fraction addition with unlike denominators",
+    )
+
+    assert ranked[0].item_id == "i5"
+    assert ranked[0].policy == "semantic_cold_start"
+    assert ranked[0].item_support == 0.0
+    assert ranked[0].concept_id == "fractions"
+    assert ranked[0].difficulty == pytest.approx(0.55)
+
+
+def test_adaptive_ranker_observe_preserves_saint_plus_timestamp():
+    ranker = AdaptiveRanker(
+        kt_backbone="saint+",
+        epochs=1,
+        d_model=16,
+        n_heads=2,
+        batch_size=4,
+        device="cpu",
+    ).fit_kt(_events(), item_difficulty_col="difficulty")
+
+    ranker.observe(LearnerEvent("learner-a", 99, "i2", "fractions", 1))
+
+    assert ranker.recommender_.tracer_._history_times["learner-a"][-1] == 99.0
+
+
+def test_adaptive_ranker_blends_offline_policy_additively():
+    class _FakeRecommender:
+        is_fitted = True
+        item_ids_ = ["adaptive", "offline"]
+
+        def rank(self, learner_id, candidates, top_k):
+            del learner_id, candidates, top_k
+            return [
+                AdaptiveLearningRecommendation("adaptive", score=0.9, p_correct=0.7, policy="fake"),
+                AdaptiveLearningRecommendation("offline", score=0.1, p_correct=0.7, policy="fake"),
+            ]
+
+    class _FakeOfflinePolicy:
+        def score(self, context_hash, item_ids):
+            del context_hash, item_ids
+            return {"adaptive": 0.0, "offline": 0.2}
+
+    ranker = AdaptiveRanker(offline_policy_weight=1.0)
+    ranker.recommender_ = _FakeRecommender()
+    ranker.offline_policy_ = _FakeOfflinePolicy()
+
+    ranked = ranker.recommend("learner-a", ["adaptive", "offline"], top_k=2)
+
+    assert [rec.item_id for rec in ranked] == ["adaptive", "offline"]
+
+
 def test_semantic_item_encoder_ranks_matching_exercises():
     catalog = pd.DataFrame(
         {
@@ -209,3 +331,43 @@ def test_semantic_item_encoder_profiles_from_known_items():
 
     assert ranked[0] == "quadratic"
     assert "linear" not in ranked
+
+
+def test_dense_semantic_item_encoder_uses_external_embedding_adapter():
+    vocab = {
+        "fraction": [1.0, 0.0, 0.0],
+        "fractions": [1.0, 0.0, 0.0],
+        "ratio": [0.0, 1.0, 0.0],
+        "geometry": [0.0, 0.0, 1.0],
+    }
+
+    def embed(texts):
+        rows = []
+        for text in texts:
+            vec = [0.0, 0.0, 0.0]
+            for token in text.lower().split():
+                basis = vocab.get(token)
+                if basis is None:
+                    continue
+                vec = [left + right for left, right in zip(vec, basis)]
+            rows.append(vec)
+        return rows
+
+    catalog = pd.DataFrame(
+        {
+            "item_id": ["fractions", "ratios", "geometry"],
+            "item_text": [
+                "fraction addition",
+                "ratio tables",
+                "geometry angles",
+            ],
+            "concept_id": ["fractions", "ratios", "geometry"],
+        }
+    )
+    encoder = DenseSemanticItemEncoder(embed).fit(catalog, metadata_cols=["concept_id"])
+
+    ranked = encoder.similar_items("fraction practice", top_k=2)
+
+    assert ranked[0] == "fractions"
+    assert encoder.diagnostics()["embedding_dim"] == 3
+    assert encoder.metadata("fractions")["concept_id"] == "fractions"

@@ -18,16 +18,16 @@ from __future__ import annotations
 
 import logging
 from pathlib import Path
-from typing import Dict, List, Optional
+from typing import Any, Dict, List, Optional
 
-import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 
-logger = logging.getLogger(__name__)
-
+from orchid_ranker._compat import get_matplotlib_pyplot
 from orchid_ranker.dp import get_dp_config
 from orchid_ranker.experiments import RankingExperiment
+
+logger = logging.getLogger(__name__)
 
 # -----------------------------
 # Cohort + profiles
@@ -332,10 +332,16 @@ METRIC_BOUNDS = {
     "mean_knowledge": (0.0, 1.0),
 }
 
+
+def _pyplot():
+    return get_matplotlib_pyplot("orchid_ranker.experiments.reporting")
+
+
 def _clean_title(s: str) -> str:
     return s.replace("_", " ").title()
 
-def _save_fig(fig: plt.Figure, out: Path) -> None:
+def _save_fig(fig: Any, out: Path) -> None:
+    plt = _pyplot()
     out.parent.mkdir(parents=True, exist_ok=True)
     fig.tight_layout()
     fig.savefig(out.with_suffix(".png"), dpi=150)
@@ -352,6 +358,7 @@ def _plot_lines(
     ylabel: str,
     out_path: Path,
 ) -> None:
+    plt = _pyplot()
     fig, ax = plt.subplots(figsize=(7.0, 4.2))
     for label, g in series.items():
         gg = g[[x_col, y_col]].dropna().sort_values(x_col)
@@ -389,6 +396,7 @@ def export_adaptive_model_means(df_user: pd.DataFrame, out_csv: Path, out_fig_di
     grp.to_csv(out_csv, index=False)
 
     metrics = ["engagement", "knowledge", "accept_rate", "correct"]
+    plt = _pyplot()
     for metric in metrics:
         fig, ax = plt.subplots(figsize=(7, 4))
         for method, sub in grp.groupby("student_method"):
@@ -432,6 +440,7 @@ def export_mode_means_and_plots(
     comp.to_csv(out_csv, index=False)
 
     # one plot per metric, lines by mode
+    plt = _pyplot()
     for metric in metrics:
         lines: Dict[str, pd.DataFrame] = {}
         for mode in comp["mode"].unique():

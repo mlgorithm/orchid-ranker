@@ -1,91 +1,112 @@
-# Guide 1: Fit the batch fallback
+# Guide 1: Fit Offline
 
-`OrchidRecommender` is Orchid's batch fallback for ordinary user-item data. Use
-it when you do not yet have learning concepts, difficulty, prerequisites, or
-live outcome updates. For the primary adaptive-learning workflow, start with
-`AdaptiveLearningEngine` in the [Quickstart](../quickstart.md). This guide
-walks through the minimal batch path: load interactions, fit, recommend,
-predict, and save.
+Fit Orchid as an adaptive-learning ranker: learner outcomes in, staged
+learner-state and progression policy out. This is the default path for new
+projects.
 
 ## Install
 
 ```bash
-pip install 'orchid-ranker[ml]'
+pip install 'orchid-ranker[adaptive]'
 ```
 
-## Load interactions
+## Load learner events
 
-Your data needs three columns: a user identifier, an item identifier, and
-(optionally) a numeric rating. If no rating column is provided, all
-interactions are treated as implicit positive feedback.
+At minimum, provide learner ID, item ID, correctness, and timestamp. Concept
+and difficulty metadata make the policy materially more useful.
 
 ```python
 import pandas as pd
 
-df = pd.read_csv("interactions.csv")  # user_id, item_id, rating
-print(df.head())
+events = pd.read_csv("learner_events.csv")
+catalog = pd.read_csv("exercise_catalog.csv")
+
+training = events.merge(catalog, on="item_id", how="left")
 ```
+
+Expected columns:
+
+| Column | Meaning |
+|--------|---------|
+| `learner_id` | Learner or user identifier |
+| `item_id` | Exercise / lesson / task identifier |
+| `correct` | Binary or thresholdable outcome |
+| `ts` | Monotonic timestamp for chronological splits and time-aware KT |
+| `concept_id` | Skill/concept label for competence and prerequisites |
+| `difficulty` | Item difficulty in `[0, 1]` when available |
 
 ## Fit
 
 ```python
-from orchid_ranker import OrchidRecommender
+from orchid_ranker import AdaptiveRanker
 
-rec = OrchidRecommender(strategy="legacy_binary_mf")
-rec.fit(df, user_col="user_id", item_col="item_id", rating_col="rating")
+ranker = AdaptiveRanker(
+    kt_backbone="saint+",
+    policy="auto",
+    epochs=2,
+    d_model=32,
+).fit_kt(
+    training,
+    learner_col="learner_id",
+    item_col="item_id",
+    correct_col="correct",
+    timestamp_col="ts",
+    concept_col="concept_id",
+    item_difficulty_col="difficulty",
+)
 ```
 
-`"legacy_binary_mf"` is a backward-compatible binary-MF baseline trained with BCE and
-sampled missing-item negatives when `rating_col` is omitted. Pass
-`strategy="auto"` to let Orchid pick -- it selects `explicit_mf` when it
-detects a range of rating values and `legacy_binary_mf` for binary signals. Install
-`orchid-ranker[implicit]` and use `strategy="implicit_als"` when you need a
-true alternating-least-squares solver.
+Use `kt_backbone="sakt"` for a compact attention baseline, `"dkt"` or
+`"dkvmn"` for sequence ablations, and `"akt"` / `"saint+"` when you have
+difficulty or timestamp signal.
 
-## Recommend and predict
+## Recommend And Observe
 
 ```python
-# Top-k recommendations for a user
-recs = rec.recommend(user_id=42, top_k=10)
-for r in recs:
-    print(r.item_id, r.score)
+candidates = catalog["item_id"].tolist()
+ranked = ranker.recommend("learner-42", candidates, top_k=5)
 
-# Pointwise score for a specific (user, item) pair
-score = rec.predict(user_id=42, item_id=7)
+ranker.observe(
+    learner_id="learner-42",
+    ts=123456,
+    item_id=ranked[0].item_id,
+    concept_id=None,
+    correct=1,
+)
 ```
 
-## One-liner with `from_interactions`
+The next call to `recommend(...)` uses the updated learner state.
+
+## Add Semantic Cold Start
 
 ```python
-rec = OrchidRecommender.from_interactions(df, strategy="legacy_binary_mf",
-                                          user_col="user_id",
-                                          item_col="item_id",
-                                          rating_col="rating")
+ranker.fit_semantic_items(
+    catalog,
+    item_col="item_id",
+    text_col="item_text",
+    metadata_cols=["concept_id", "difficulty"],
+)
+
+ranked = ranker.recommend(
+    "learner-42",
+    top_k=5,
+    item_query_text="fraction addition with unlike denominators",
+)
 ```
 
-## Save and reload
+Semantic candidates outside the KT training universe can still be returned with
+`policy="semantic_cold_start"` when catalog metadata is available.
+
+## Logged-Policy Learning
+
+When you have logged candidate sets, chosen actions, propensities, and rewards:
 
 ```python
-rec.save("model.pt")
-
-rec2 = OrchidRecommender.load("model.pt")
-assert rec2.predict(user_id=42, item_id=7) == score
+policy_report = ranker.fit_policy(logged_decisions, algo="cql")
+ope = ranker.ope_report(logged_decisions)
 ```
 
-## Browse available strategies
+Use OPE and rollout gates before serving a learned policy to live learners.
 
-```python
-print(OrchidRecommender.available_strategies())
-```
-
-Output lists the legacy strategy set (`legacy_binary_mf`, `als`, `auto`, `explicit_mf`, `implicit_als`,
-`implicit_bpr`, `linucb`, `neural_mf`, `popularity`, `random`, `user_knn`)
-with one-line descriptions.
-
----
-
-You can stop here and have a working fallback model. For adaptive learning
-with learner state and live outcomes, use
-`examples/adaptive_learning_quickstart.py`. For generic real-time adaptation
-without learning metadata, continue to
-[Guide 2: Serve a streaming recommender](02-serve-streaming.md).
+Continue to [Guide 2: Serve Adaptive Recommendations](02-serve-streaming.md)
+for online serving patterns.

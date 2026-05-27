@@ -46,6 +46,7 @@ class AdaptiveRankerConfig:
     device: Optional[str] = None
     random_state: Optional[int] = 42
     offline_policy_weight: float = 1.0
+    semantic_cold_start_weight: float = 0.50
 
 
 class AdaptiveRanker:
@@ -87,8 +88,8 @@ class AdaptiveRanker:
     ) -> "AdaptiveRanker":
         """Fit learner-state tracing and the default adaptive policy."""
         backbone = self.config.kt_backbone.lower().replace("_", "-")
-        if backbone not in {"akt", "sakt", "akt-inspired", "saint", "saint+", "saint-plus"}:
-            raise ValueError("kt_backbone must be one of 'akt', 'sakt', 'saint', or 'saint+'")
+        if backbone not in {"akt", "sakt", "akt-inspired", "dkt", "dkvmn", "dkvmn-style", "saint", "saint+", "saint-plus"}:
+            raise ValueError("kt_backbone must be one of 'akt', 'sakt', 'dkt', 'dkvmn', 'saint', or 'saint+'")
         work = validate_learner_events(
             events,
             learner_col=learner_col,
@@ -219,19 +220,34 @@ class AdaptiveRanker:
             )
         if not candidates:
             candidates = list(self.recommender_.item_ids_)
-        recs = self.recommender_.rank(learner_id, candidates, top_k=max(top_k, len(candidates)))
+        known_items = set(self.recommender_.item_ids_)
+        known_candidates = [item_id for item_id in candidates if item_id in known_items]
+        cold_candidates = [item_id for item_id in candidates if item_id not in known_items]
+        recs: list[AdaptiveLearningRecommendation] = []
+        if known_candidates:
+            recs.extend(self.recommender_.rank(learner_id, known_candidates, top_k=max(top_k, len(known_candidates))))
+        recs.extend(
+            self._semantic_cold_start_recommendations(
+                learner_id,
+                cold_candidates,
+                query_text=item_query_text,
+                top_k=max(top_k, len(cold_candidates)),
+            )
+        )
         if self.offline_policy_ is not None:
             ctx = context_hash or stable_context_hash(learner_id, concept_goal)
             q_scores = self.offline_policy_.score(ctx, [rec.item_id for rec in recs])
             recs = sorted(
                 recs,
                 key=lambda rec: (
-                    self.config.offline_policy_weight * q_scores.get(rec.item_id, 0.0),
+                    rec.score + self.config.offline_policy_weight * q_scores.get(rec.item_id, 0.0),
                     rec.score,
                     str(rec.item_id),
                 ),
                 reverse=True,
             )
+        else:
+            recs = sorted(recs, key=lambda rec: (rec.score, str(rec.item_id)), reverse=True)
         return recs[: min(int(top_k), len(recs))]
 
     def observe(self, event: LearnerEvent | None = None, **kwargs: Any) -> Any:
@@ -239,7 +255,12 @@ class AdaptiveRanker:
         self._require_fitted()
         assert self.recommender_ is not None
         learner_event = event or LearnerEvent(**kwargs)
-        return self.recommender_.observe(learner_event.learner_id, learner_event.item_id, learner_event.correct)
+        return self.recommender_.observe(
+            learner_event.learner_id,
+            learner_event.item_id,
+            learner_event.correct,
+            timestamp=learner_event.ts,
+        )
 
     def ope_report(
         self,
@@ -281,6 +302,83 @@ class AdaptiveRanker:
         }
         return data
 
+    def _semantic_cold_start_recommendations(
+        self,
+        learner_id: Any,
+        candidate_item_ids: Sequence[Any],
+        *,
+        query_text: Optional[str],
+        top_k: int,
+    ) -> list[AdaptiveLearningRecommendation]:
+        if top_k <= 0 or not candidate_item_ids or self.semantic_encoder_ is None or self.recommender_ is None:
+            return []
+        encoded_items = set(getattr(self.semantic_encoder_, "item_ids_", []))
+        cold_items = []
+        seen = set()
+        for item_id in candidate_item_ids:
+            if item_id in encoded_items and item_id not in seen:
+                cold_items.append(item_id)
+                seen.add(item_id)
+        if not cold_items:
+            return []
+
+        if query_text:
+            semantic_scores = self.semantic_encoder_.scores(query_text, candidate_item_ids=cold_items)
+        else:
+            semantic_scores = {item_id: 0.5 for item_id in cold_items}
+
+        recs: list[AdaptiveLearningRecommendation] = []
+        semantic_weight = _clamp01(self.config.semantic_cold_start_weight)
+        structure_weight = 1.0 - semantic_weight
+        for item_id in cold_items:
+            if item_id not in semantic_scores:
+                continue
+            metadata = self.semantic_encoder_.metadata(item_id) if hasattr(self.semantic_encoder_, "metadata") else {}
+            concept = _first_metadata_value(metadata, ("concept_id", "concept", "skill_id", "skill"))
+            difficulty = _optional_float(_first_metadata_value(metadata, ("difficulty", "item_difficulty", "difficulty_score")))
+            prerequisites_met = self._cold_start_prerequisites_met(learner_id, concept)
+            if (
+                not prerequisites_met
+                and self.recommender_.config.enforce_prerequisites
+                and not self.recommender_.config.allow_prerequisite_fallback
+            ):
+                continue
+            competence = self.recommender_.competence_for(learner_id, concept) if concept is not None else None
+            p_correct = _cold_start_correctness_prior(competence=competence, difficulty=difficulty)
+            normalizer = max(self.config.target_correct, 1.0 - self.config.target_correct, 1e-6)
+            stretch_fit = max(0.0, 1.0 - abs(p_correct - self.config.target_correct) / normalizer)
+            uncertainty = max(0.0, 1.0 - 2.0 * abs(p_correct - 0.5))
+            structure_score = 0.7 * stretch_fit + 0.3 * uncertainty
+            score = semantic_weight * _clamp01(semantic_scores[item_id]) + structure_weight * structure_score
+            recs.append(
+                AdaptiveLearningRecommendation(
+                    item_id=item_id,
+                    score=float(score),
+                    p_correct=float(p_correct),
+                    policy="semantic_cold_start",
+                    difficulty=difficulty,
+                    concept_id=concept,
+                    competence=competence,
+                    expected_reward=float(score),
+                    stretch_fit=float(stretch_fit),
+                    uncertainty=float(uncertainty),
+                    support_penalty=1.0,
+                    item_support=0.0,
+                    concept_support=0.0,
+                    prerequisites_met=prerequisites_met,
+                )
+            )
+        recs.sort(key=lambda rec: (rec.score, str(rec.item_id)), reverse=True)
+        return recs[: min(int(top_k), len(recs))]
+
+    def _cold_start_prerequisites_met(self, learner_id: Any, concept: Any) -> bool:
+        if self.recommender_ is None or concept is None:
+            return True
+        requirements = self.recommender_.prerequisite_by_concept_.get(concept, set())
+        if not requirements:
+            return True
+        return set(requirements).issubset(self.recommender_.mastered_concepts(learner_id))
+
     def _adaptive_config(self, *, policy: str) -> AdaptiveLearningConfig:
         return AdaptiveLearningConfig(
             tracer_model=self.config.kt_backbone,
@@ -308,3 +406,43 @@ class AdaptiveRanker:
     def _require_fitted(self) -> None:
         if not self.is_fitted:
             raise RuntimeError("AdaptiveRanker.fit_kt must be called before serving")
+
+
+def _first_metadata_value(metadata: dict[str, Any], keys: Sequence[str]) -> Any:
+    for key in keys:
+        if key in metadata:
+            return metadata[key]
+    return None
+
+
+def _optional_float(value: Any) -> Optional[float]:
+    if value is None:
+        return None
+    try:
+        numeric = float(value)
+    except (TypeError, ValueError):
+        return None
+    if numeric != numeric:
+        return None
+    return numeric
+
+
+def _clamp01(value: Any) -> float:
+    numeric = _optional_float(value)
+    if numeric is None:
+        return 0.0
+    if numeric < 0.0:
+        return 0.0
+    if numeric > 1.0:
+        return 1.0
+    return numeric
+
+
+def _cold_start_correctness_prior(*, competence: Optional[float], difficulty: Optional[float]) -> float:
+    if competence is None and difficulty is None:
+        return 0.5
+    if competence is None:
+        return _clamp01(1.0 - float(difficulty))
+    if difficulty is None:
+        return _clamp01(float(competence))
+    return _clamp01(0.5 + 0.5 * (float(competence) - float(difficulty)))

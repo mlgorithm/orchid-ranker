@@ -1,6 +1,7 @@
 """Learning policies that turn KT predictions into next-item rankings."""
 from __future__ import annotations
 
+import inspect
 import math
 from dataclasses import dataclass
 from typing import Any, Dict, Mapping, Optional, Sequence
@@ -105,9 +106,9 @@ class KTValuePolicy:
         recs.sort(key=lambda rec: (rec.score, rec.stretch_fit, str(rec.item_id)), reverse=True)
         return recs[: min(int(top_k), len(recs))]
 
-    def observe(self, user_id: Any, item_id: Any, correct: Any) -> Any:
+    def observe(self, user_id: Any, item_id: Any, correct: Any, *, timestamp: Optional[Any] = None) -> Any:
         """Forward a live outcome into the underlying tracer."""
-        return self.tracer.observe(user_id, item_id, correct)
+        return _observe_tracer(self.tracer, user_id, item_id, correct, timestamp=timestamp)
 
 
 @dataclass(frozen=True)
@@ -239,9 +240,9 @@ class ProgressionValuePolicy:
         )
         return recs[: min(int(top_k), len(recs))]
 
-    def observe(self, user_id: Any, item_id: Any, correct: Any) -> Any:
+    def observe(self, user_id: Any, item_id: Any, correct: Any, *, timestamp: Optional[Any] = None) -> Any:
         """Forward a live outcome and update progression history."""
-        result = self.tracer.observe(user_id, item_id, correct)
+        result = _observe_tracer(self.tracer, user_id, item_id, correct, timestamp=timestamp)
         self.record_outcome(user_id, item_id, correct)
         return result
 
@@ -601,6 +602,25 @@ def _clamp01(value: float) -> float:
     if numeric > 1.0:
         return 1.0
     return numeric
+
+
+def _observe_tracer(
+    tracer: Any,
+    user_id: Any,
+    item_id: Any,
+    correct: Any,
+    *,
+    timestamp: Optional[Any] = None,
+) -> Any:
+    """Forward timestamps to time-aware tracers without requiring every tracer to accept them."""
+    if timestamp is not None:
+        try:
+            params = inspect.signature(tracer.observe).parameters
+        except (TypeError, ValueError):
+            params = {}
+        if "timestamp" in params:
+            return tracer.observe(user_id, item_id, correct, timestamp=timestamp)
+    return tracer.observe(user_id, item_id, correct)
 
 
 def _predict_many(model: Any, feature_rows: Sequence[Mapping[str, float]]) -> list[float]:

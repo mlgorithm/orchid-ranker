@@ -8,7 +8,7 @@ This walk-through (see also `docs/tutorials/safe_mode.ipynb` for an interactive 
 
 ## Prerequisites
 
-- Python 3.10+ with `pip install ".[agentic]"`.
+- Python 3.11-3.13 with `pip install ".[agentic]"`.
 - `PYTHONPATH` pointing to `src/` when running scripts locally.
 
 ## 1. Baseline agentic run (optional)

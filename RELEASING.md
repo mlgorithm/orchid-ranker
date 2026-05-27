@@ -8,7 +8,7 @@ Orchid Ranker follows [Semantic Versioning](https://semver.org/):
 - **MINOR**: New features (backward compatible)
 - **PATCH**: Bug fixes and improvements
 
-Current version is in `pyproject.toml` and `orchid_ranker/__init__.py`.
+Current version is in `pyproject.toml` and `src/orchid_ranker/__init__.py`.
 
 ## Pre-Release Checklist
 
@@ -18,7 +18,7 @@ Before releasing, ensure:
 2. `CHANGELOG.md` is updated with the new version and changes
 3. Version is bumped in:
    - `pyproject.toml` (`version = "X.Y.Z"`)
-   - `orchid_ranker/__init__.py` (`__version__ = "X.Y.Z"`)
+   - `src/orchid_ranker/__init__.py` (`__version__ = "X.Y.Z"`)
 4. Code is committed and pushed to main
 
 ## How to Release
@@ -26,8 +26,8 @@ Before releasing, ensure:
 Tag the release and push to GitHub:
 
 ```bash
-git tag v0.3.0
-git push origin v0.3.0
+git tag vX.Y.Z
+git push origin vX.Y.Z
 ```
 
 The tag name must follow the pattern `v*` (e.g., `v0.3.0`, `v1.0.0`).

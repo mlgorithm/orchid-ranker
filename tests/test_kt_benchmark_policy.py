@@ -173,13 +173,16 @@ class _FakeDelayedRewardModel:
 class _ReplayFeatureTracer:
     def __init__(self) -> None:
         self._histories = {}
+        self._history_times = {"existing": [123.0]}
 
     def predict_correct(self, user_id, item_id):
         del item_id
         return 0.10 + 0.10 * len(self._histories.get(user_id, []))
 
-    def observe(self, user_id, item_id, correct):
+    def observe(self, user_id, item_id, correct, timestamp=None):
         self._histories.setdefault(user_id, []).append((item_id, int(correct)))
+        if timestamp is not None:
+            self._history_times.setdefault(user_id, []).append(float(timestamp))
         return len(self._histories[user_id])
 
 
@@ -508,6 +511,7 @@ def test_delayed_gain_training_frame_can_use_tracer_replay_predictions():
 
     assert examples["p_correct"].round(6).tolist() == [0.1, 0.2]
     assert tracer._histories == {}
+    assert tracer._history_times == {"existing": [123.0]}
 
 
 def test_run_kt_policy_ope_benchmark_supports_delayed_gain_reward():

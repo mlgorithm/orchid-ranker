@@ -107,7 +107,7 @@ class PolicyComparisonReport:
 
 @dataclass(frozen=True)
 class BootstrapLoggedPolicyReport:
-    """Logged-policy report with row-bootstrap confidence interval."""
+    """Logged-policy report with bootstrap confidence interval."""
 
     base: LoggedPolicyReport
     estimator: str
@@ -116,6 +116,7 @@ class BootstrapLoggedPolicyReport:
     bootstrap_standard_error: float
     bootstrap_ci_low: float
     bootstrap_ci_high: float
+    cluster_col: Optional[str] = None
 
     def to_dict(self) -> dict[str, Any]:
         return cast(
@@ -129,6 +130,7 @@ class BootstrapLoggedPolicyReport:
                     "bootstrap_standard_error": self.bootstrap_standard_error,
                     "bootstrap_ci_low": self.bootstrap_ci_low,
                     "bootstrap_ci_high": self.bootstrap_ci_high,
+                    "cluster_col": self.cluster_col,
                 }
             ),
         )
@@ -136,7 +138,7 @@ class BootstrapLoggedPolicyReport:
 
 @dataclass(frozen=True)
 class BootstrapPolicyComparisonReport:
-    """Paired policy comparison with row-bootstrap uplift interval."""
+    """Paired policy comparison with bootstrap uplift interval."""
 
     base: PolicyComparisonReport
     estimator: str
@@ -145,6 +147,7 @@ class BootstrapPolicyComparisonReport:
     bootstrap_standard_error: float
     bootstrap_ci_low: float
     bootstrap_ci_high: float
+    cluster_col: Optional[str] = None
 
     def to_dict(self) -> dict[str, Any]:
         return cast(
@@ -158,6 +161,7 @@ class BootstrapPolicyComparisonReport:
                     "bootstrap_standard_error": self.bootstrap_standard_error,
                     "bootstrap_ci_low": self.bootstrap_ci_low,
                     "bootstrap_ci_high": self.bootstrap_ci_high,
+                    "cluster_col": self.cluster_col,
                 }
             ),
         )
@@ -318,10 +322,17 @@ def bootstrap_logged_policy(
     ci: float = 0.95,
     n_bootstrap: int = 500,
     random_state: Optional[int] = 42,
+    cluster_col: Optional[str] = None,
 ) -> BootstrapLoggedPolicyReport:
-    """Evaluate a logged policy with percentile bootstrap confidence bounds."""
+    """Evaluate a logged policy with percentile bootstrap confidence bounds.
+
+    When ``cluster_col`` is supplied, resampling happens at the cluster level
+    instead of the row level. This is useful for adaptive-learning logs where
+    events from the same learner, classroom, or course are correlated.
+    """
     if n_bootstrap < 1:
         raise ValueError("n_bootstrap must be >= 1")
+    _validate_cluster_col(events, cluster_col)
     base = evaluate_logged_policy(
         events,
         reward_col=reward_col,
@@ -338,7 +349,7 @@ def bootstrap_logged_policy(
     rng = np.random.RandomState(random_state)
     values = np.zeros((int(n_bootstrap),), dtype=float)
     for idx in range(int(n_bootstrap)):
-        sample = events.iloc[rng.randint(0, len(events), size=len(events))].reset_index(drop=True)
+        sample = _bootstrap_sample(events, rng=rng, cluster_col=cluster_col)
         values[idx] = evaluate_logged_policy(
             sample,
             reward_col=reward_col,
@@ -361,6 +372,7 @@ def bootstrap_logged_policy(
         bootstrap_standard_error=float(np.std(values, ddof=1)) if values.size > 1 else 0.0,
         bootstrap_ci_low=low,
         bootstrap_ci_high=high,
+        cluster_col=cluster_col,
     )
 
 
@@ -381,10 +393,17 @@ def bootstrap_compare_logged_policies(
     ci: float = 0.95,
     n_bootstrap: int = 500,
     random_state: Optional[int] = 42,
+    cluster_col: Optional[str] = None,
 ) -> BootstrapPolicyComparisonReport:
-    """Compare two logged policies with a paired row-bootstrap uplift interval."""
+    """Compare two logged policies with a paired bootstrap uplift interval.
+
+    When ``cluster_col`` is supplied, resampling happens at the cluster level.
+    Use learner/classroom/course IDs here when logged outcomes are correlated
+    within those groups.
+    """
     if n_bootstrap < 1:
         raise ValueError("n_bootstrap must be >= 1")
+    _validate_cluster_col(events, cluster_col)
     base = compare_logged_policies(
         events,
         reward_col=reward_col,
@@ -403,7 +422,7 @@ def bootstrap_compare_logged_policies(
     rng = np.random.RandomState(random_state)
     uplifts = np.zeros((int(n_bootstrap),), dtype=float)
     for idx in range(int(n_bootstrap)):
-        sample = events.iloc[rng.randint(0, len(events), size=len(events))].reset_index(drop=True)
+        sample = _bootstrap_sample(events, rng=rng, cluster_col=cluster_col)
         uplifts[idx] = compare_logged_policies(
             sample,
             reward_col=reward_col,
@@ -428,6 +447,7 @@ def bootstrap_compare_logged_policies(
         bootstrap_standard_error=float(np.std(uplifts, ddof=1)) if uplifts.size > 1 else 0.0,
         bootstrap_ci_low=low,
         bootstrap_ci_high=high,
+        cluster_col=cluster_col,
     )
 
 
@@ -650,6 +670,31 @@ def _validate_config(*, min_propensity: float, max_weight: Optional[float], ci: 
         raise ValueError("max_weight must be positive")
     if not 0.0 < ci < 1.0:
         raise ValueError("ci must be in (0, 1)")
+
+
+def _validate_cluster_col(events: pd.DataFrame, cluster_col: Optional[str]) -> None:
+    if cluster_col is None:
+        return
+    if cluster_col not in events.columns:
+        raise ValueError(f"cluster_col={cluster_col!r} is not present in events")
+    if events[cluster_col].isna().any():
+        raise ValueError(f"cluster_col={cluster_col!r} contains missing values")
+
+
+def _bootstrap_sample(
+    events: pd.DataFrame,
+    *,
+    rng: np.random.RandomState,
+    cluster_col: Optional[str],
+) -> pd.DataFrame:
+    if cluster_col is None:
+        return events.iloc[rng.randint(0, len(events), size=len(events))].reset_index(drop=True)
+
+    clusters = np.asarray(events[cluster_col].drop_duplicates().tolist(), dtype=object)
+    sampled_clusters = rng.choice(clusters, size=len(clusters), replace=True)
+    by_cluster = {cluster: group for cluster, group in events.groupby(cluster_col, sort=False)}
+    parts = [by_cluster[cluster] for cluster in sampled_clusters]
+    return pd.concat(parts, ignore_index=True)
 
 
 def _effective_sample_size(weights: np.ndarray) -> float:
