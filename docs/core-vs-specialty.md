@@ -18,11 +18,14 @@ Core modules have:
 - Stable APIs under semver. Breaking changes require a major version bump.
 - Regression tests that run on every PR.
 
-Core modules: `AdaptiveLearningEngine`, `AKTTracer`, `SAKTTracer`,
-`ProgressionValuePolicy`, `BayesianKnowledgeTracing`, `DependencyGraph`,
-`ProgressionRecommender`, `ProgressionGuardrail`, `SafeSwitchDR`, OPE,
-evaluation metrics, and serialization. `OrchidRecommender` remains core as the
-batch/generic fallback for teams without learning metadata.
+Core modules: `AdaptiveRanker`, `AdaptiveLearningEngine`, `SAINTPlusTracer`,
+`SAINTTracer`, `AKTTracer`, `SAKTTracer`, `DKTTracer`, `DKVMNTracer`,
+`PFATracer`, `AFMTracer`, `BayesianKnowledgeTracing`, `fit_bkt_em`,
+`IRTAdaptiveSelector`, `ProgressionValuePolicy`, `PersonalizedLinUCB`,
+`FSRSScheduler`, `TabularFQE`, `DependencyGraph`, `ProgressionRecommender`,
+`ProgressionGuardrail`, `SafeSwitchDR`, OPE, evaluation metrics, and
+serialization. Historical generic recommenders are compatibility modules, not
+core adaptive-learning modules.
 
 ---
 

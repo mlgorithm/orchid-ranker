@@ -13,10 +13,21 @@ engineers can locate entry points quickly.
   reward, prerequisite gating, and live policy state.
 - `orchid_ranker.scenarios.recommend_scenarios`: choose an Orchid workflow
   from product/data signals before picking a model.
+- `orchid_ranker.kt.SAINTPlusTracer`: timestamp-aware transformer tracer with
+  elapsed-time and lag-time features.
 - `orchid_ranker.kt.AKTTracer`: difficulty-aware tracer for candidate learning
   items from a learner's recent interaction sequence.
 - `orchid_ranker.kt.SAKTTracer`: compact SAKT-style tracer when difficulty
   metadata is unavailable.
+- `orchid_ranker.kt.DKTTracer` and `orchid_ranker.kt.DKVMNTracer`: compact
+  recurrent and memory-network baselines for sequence ablations.
+- `orchid_ranker.PFATracer`, `orchid_ranker.AFMTracer`, and
+  `orchid_ranker.fit_bkt_em`: interpretable small-data EDM/BKT baselines.
+- `orchid_ranker.IRTAdaptiveSelector`: placement and mastery-check selection
+  from item information.
+- `orchid_ranker.FSRSScheduler`: forgetting-aware review scheduling.
+- `orchid_ranker.PersonalizedLinUCB`: user-conditioned exploration with
+  explicit learner/item feature maps.
 - `orchid_ranker.learning_policy.ProgressionValuePolicy`: stable default policy
   for adaptive-learning serving. It scores target-correctness fit, stretch-zone
   fit, mastery-gain potential, difficulty, and repetition/easy-item penalties.
@@ -27,26 +38,13 @@ engineers can locate entry points quickly.
 - `orchid_ranker.pykt_bridge`: export Orchid interactions to pyKT sequence
   format and reuse pyKT prediction tables behind Orchid policies and OPE.
 
-## Ranking Machinery and Fallbacks
+## Compatibility Namespace
 
-- `orchid_ranker.OrchidRecommender`: Surprise-style API with strategies such as
-  `explicit_mf` (FunkSVD-style explicit MF), `legacy_binary_mf` (`als` alias),
-  `neural_mf` (with `loss="bce"|"bpr"|"softmax"`),
-  `implicit_als`, `implicit_bpr`, `linucb`, `user_knn`, `popularity`, and `random`.
-  This is supporting machinery for non-learning metadata, baseline comparison,
-  and fallback paths rather than the main product surface.
-- `orchid_ranker.recommender.Recommendation`: lightweight dataclass returned by
-  `recommend()`.
-- `recommend(..., candidate_item_ids=[...])`: rank a caller-provided candidate
-  pool using the original item IDs from the fitted interaction data.
-- `OrchidRecommender.from_interactions(...)`: one-call fit path. The default
-  `strategy="auto"` chooses `legacy_binary_mf` for binary feedback and `explicit_mf` for
-  explicit rating ranges.
+`orchid_ranker.legacy` contains the historical generic recommender API for old
+experiments and migration. It is intentionally outside the main adaptive
+workflow and should not be used for new adaptive-learning features.
 
 ## Streaming and Safety
-- `OrchidRecommender.as_streaming()`: promote a fitted `neural_mf` recommender
-  into a live adaptive ranker. The bridge accepts the same external user and
-  item IDs used in training data.
 - `orchid_ranker.streaming.StreamingAdaptiveRanker`: lower-level streaming
   runtime for custom towers.
 - `orchid_ranker.live_metrics.RollingProgressionMonitor`: rolling progression

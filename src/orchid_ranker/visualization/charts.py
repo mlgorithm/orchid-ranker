@@ -3,11 +3,12 @@ from __future__ import annotations
 
 import math
 from itertools import cycle
-from typing import Iterable, Optional, Tuple
+from typing import Any, Iterable, Optional, Tuple
 
-import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
+
+from orchid_ranker._compat import get_matplotlib_pyplot
 
 PALETTE = {
     "adaptive": "#d62728",
@@ -19,7 +20,12 @@ PALETTE = {
 }
 
 
+def _pyplot():
+    return get_matplotlib_pyplot("orchid_ranker.visualization")
+
+
 def _ensure_matplotlib_style():
+    plt = _pyplot()
     plt.rcParams.setdefault("axes.grid", True)
     plt.rcParams.setdefault("grid.alpha", 0.2)
 
@@ -27,9 +33,10 @@ def _ensure_matplotlib_style():
 def plot_user_activity(
     interactions: pd.DataFrame,
     top_n: int = 20,
-    ax: Optional[plt.Axes] = None,
-) -> plt.Axes:
+    ax: Optional[Any] = None,
+) -> Any:
     """Bar chart of the busiest users by number of interactions."""
+    plt = _pyplot()
     if ax is None:
         _, ax = plt.subplots(figsize=(6, 4))
     _ensure_matplotlib_style()
@@ -46,11 +53,12 @@ def plot_user_activity(
 def plot_item_difficulty(
     item_side: pd.DataFrame,
     difficulty_col: str = "difficulty",
-    ax: Optional[plt.Axes] = None,
-) -> plt.Axes:
+    ax: Optional[Any] = None,
+) -> Any:
     """Histogram of item difficulties (assumes column scaled to [0,1])."""
     if difficulty_col not in item_side.columns:
         raise KeyError(f"Column '{difficulty_col}' not found in item side info")
+    plt = _pyplot()
     if ax is None:
         _, ax = plt.subplots(figsize=(6, 4))
     _ensure_matplotlib_style()
@@ -65,12 +73,13 @@ def plot_item_difficulty(
 def plot_learning_curve(
     round_summary: pd.DataFrame,
     metric: str = "mean_accuracy",
-    ax: Optional[plt.Axes] = None,
-) -> plt.Axes:
+    ax: Optional[Any] = None,
+) -> Any:
     """Line plot of a round-level metric for adaptive vs fixed policies."""
     if {"round", "policy", metric}.difference(round_summary.columns):
         missing = {"round", "policy", metric}.difference(round_summary.columns)
         raise KeyError(f"round_summary missing columns: {missing}")
+    plt = _pyplot()
     if ax is None:
         _, ax = plt.subplots(figsize=(7, 4))
     _ensure_matplotlib_style()
@@ -86,13 +95,14 @@ def plot_learning_curve(
 
 def plot_acceptance_heatmap(
     interactions: pd.DataFrame,
-    ax: Optional[plt.Axes] = None,
+    ax: Optional[Any] = None,
     bins: int = 50,
-) -> plt.Axes:
+) -> Any:
     """2D heatmap of acceptance vs difficulty (requires both columns)."""
     for col in ("accept", "difficulty"):
         if col not in interactions.columns:
             raise KeyError(f"Column '{col}' required for heatmap")
+    plt = _pyplot()
     if ax is None:
         _, ax = plt.subplots(figsize=(6, 5))
     _ensure_matplotlib_style()
@@ -107,7 +117,8 @@ def plot_acceptance_heatmap(
     return ax
 
 
-def plot_round_comparison(df_round: pd.DataFrame, metrics: Iterable[str], ax: Optional[plt.Axes] = None) -> plt.Axes:
+def plot_round_comparison(df_round: pd.DataFrame, metrics: Iterable[str], ax: Optional[Any] = None) -> Any:
+    plt = _pyplot()
     if ax is None:
         _, ax = plt.subplots(figsize=(7, 4))
     _ensure_matplotlib_style()
@@ -142,9 +153,10 @@ def plot_round_comparison(df_round: pd.DataFrame, metrics: Iterable[str], ax: Op
     return ax
 
 
-def plot_knowledge_trajectory(round_summary: pd.DataFrame, ax: Optional[plt.Axes] = None) -> plt.Axes:
+def plot_knowledge_trajectory(round_summary: pd.DataFrame, ax: Optional[Any] = None) -> Any:
     if {"round", "mean_knowledge", "mode"}.difference(round_summary.columns):
         raise KeyError("round_summary must contain round, mean_knowledge, mode")
+    plt = _pyplot()
     if ax is None:
         _, ax = plt.subplots(figsize=(7, 4))
     _ensure_matplotlib_style()
@@ -163,12 +175,13 @@ def plot_metric_trajectory(
     *,
     ylabel: Optional[str] = None,
     title: Optional[str] = None,
-    ax: Optional[plt.Axes] = None,
-) -> plt.Axes:
+    ax: Optional[Any] = None,
+) -> Any:
     required = {"round", "mode", metric}
     missing = required.difference(round_summary.columns)
     if missing:
         raise KeyError(f"round_summary missing columns: {missing}")
+    plt = _pyplot()
     if ax is None:
         _, ax = plt.subplots(figsize=(7, 4))
     _ensure_matplotlib_style()
@@ -213,9 +226,10 @@ def plot_metric_grid(
     figsize: Tuple[int, int] = (14, 8),
     sharex: bool = True,
     sharey: bool = False,
-) -> plt.Figure:
+) -> Any:
     if not metrics:
         raise ValueError("metrics list cannot be empty")
+    plt = _pyplot()
     nrows = math.ceil(len(metrics) / ncols)
     fig, axes = plt.subplots(nrows=nrows, ncols=ncols, figsize=figsize, sharex=sharex, sharey=sharey)
     axes = np.atleast_1d(axes).flatten()

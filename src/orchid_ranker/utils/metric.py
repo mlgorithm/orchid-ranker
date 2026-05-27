@@ -2,6 +2,47 @@ import numpy as np
 import torch
 
 
+def compute_accuracy(labels, scores, threshold=0.5):
+    """Return binary accuracy for labels and probability-like scores."""
+    y_true = _binary_labels(labels)
+    y_score = _finite_vector(scores, "scores")
+    if y_true.shape[0] != y_score.shape[0]:
+        raise ValueError("labels and scores must have the same length")
+    if y_true.size == 0:
+        return 0.0
+    y_pred = (y_score >= float(threshold)).astype(int)
+    return float(np.mean(y_pred == y_true))
+
+
+def compute_auc(labels, scores):
+    """Return ROC AUC, falling back to 0.5 when only one class is present."""
+    y_true = _binary_labels(labels)
+    y_score = _finite_vector(scores, "scores")
+    if y_true.shape[0] != y_score.shape[0]:
+        raise ValueError("labels and scores must have the same length")
+    if y_true.size == 0:
+        return 0.0
+    if np.unique(y_true).size < 2:
+        return 0.5
+
+    order = np.argsort(y_score, kind="mergesort")
+    ranks = np.empty_like(order, dtype=float)
+    sorted_scores = y_score[order]
+    start = 0
+    while start < sorted_scores.size:
+        end = start + 1
+        while end < sorted_scores.size and sorted_scores[end] == sorted_scores[start]:
+            end += 1
+        ranks[order[start:end]] = (start + end + 1) / 2.0
+        start = end
+
+    positives = y_true == 1
+    n_pos = int(np.sum(positives))
+    n_neg = int(y_true.size - n_pos)
+    rank_sum_pos = float(np.sum(ranks[positives]))
+    return float((rank_sum_pos - n_pos * (n_pos + 1) / 2.0) / (n_pos * n_neg))
+
+
 def precision_recall_ndcg_at_k(model, val_df, k, num_users, num_items, device="cpu", implicit=True):
     """
     Compute Precision@K, Recall@K, and NDCG@K for recommendation.
@@ -72,4 +113,16 @@ def precision_recall_ndcg_at_k(model, val_df, k, num_users, num_items, device="c
     return np.mean(precisions), np.mean(recalls), np.mean(ndcgs)
 
 
-__all__ = ["precision_recall_ndcg_at_k"]
+def _finite_vector(values, name):
+    array = np.asarray(list(values), dtype=float).reshape(-1)
+    if np.any(~np.isfinite(array)):
+        raise ValueError(f"{name} must contain only finite values")
+    return array
+
+
+def _binary_labels(values):
+    labels = _finite_vector(values, "labels")
+    return (labels >= 0.5).astype(int)
+
+
+__all__ = ["compute_accuracy", "compute_auc", "precision_recall_ndcg_at_k"]

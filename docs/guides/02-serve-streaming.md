@@ -1,103 +1,93 @@
-# Guide 2: Serve a streaming recommender
+# Guide 2: Serve Adaptive Recommendations
 
-A batch recommender re-ranks on stale data. In a progression domain --
-education, rehab, onboarding -- a user's competence changes with every
-interaction. This guide promotes the batch model from Guide 1 into a live,
-adaptive ranker that updates per-user residuals and competence estimates on
-every observed outcome.
+Adaptive learning changes after every outcome. Serve Orchid by keeping a fitted
+`AdaptiveRanker` in memory, logging every decision, and feeding observed
+outcomes back through `observe(...)`.
 
-## Prerequisites
-
-A fitted `OrchidRecommender` with a neural strategy. The streaming bridge
-requires a neural tower, so use `neural_mf` from the high-level API. The
-lower-level `TwoTowerRecommender` is available for advanced custom training, but
-it is not a `strategy=` value for `OrchidRecommender`.
+## Serve A Candidate Set
 
 ```python
-import pandas as pd
-from orchid_ranker import OrchidRecommender
+from orchid_ranker import LoggedDecision, stable_context_hash
 
-df = pd.read_csv("interactions.csv")
-rec = OrchidRecommender.from_interactions(df, strategy="neural_mf",
-                                          user_col="user_id",
-                                          item_col="item_id",
-                                          rating_col="rating")
+learner_id = "learner-42"
+concept_goal = "fractions"
+candidates = ["frac-01", "frac-02", "frac-03"]
+context_hash = stable_context_hash(learner_id, concept_goal)
+
+ranked = ranker.recommend(
+    learner_id,
+    candidates,
+    top_k=3,
+    context_hash=context_hash,
+    concept_goal=concept_goal,
+)
 ```
 
-## Create a streaming ranker
+## Log The Decision
+
+Policy learning and OPE require candidate sets and propensities. Log the served
+decision even when the reward arrives later.
 
 ```python
-streamer = rec.as_streaming(lr=0.05, l2=1e-3)
+decision = LoggedDecision(
+    learner_id=learner_id,
+    ts=123456,
+    candidate_item_ids=candidates,
+    chosen_item_id=ranked[0].item_id,
+    propensity=1.0,  # deterministic policy; use exploration probability when randomized
+    policy_name="progression",
+    policy_version="v1",
+    scores=[rec.score for rec in ranked],
+    context_hash=context_hash,
+)
 ```
 
-`as_streaming()` freezes the base tower and attaches a per-user online adapter
-plus a Bayesian Knowledge Tracing state provider. No tensors to manage -- the
-bridge materialises everything internally and accepts the original `user_id` and
-`item_id` values from the fitted interactions DataFrame.
+Persist the decision row in an append-only event log. When reward/outcome is
+available, join it back by event ID or context/action fields before OPE.
 
-## Observe and rank
+## Observe Outcomes
 
 ```python
-# A user answers item 7 correctly -- update competence + residual
-streamer.observe(user_id=42, item_id=7, correct=True)
-
-# Re-rank candidates with the just-updated state
-top = streamer.rank(user_id=42, candidate_item_ids=[1, 2, 3, 7, 99], top_k=5)
-for item_id, score in top:
-    print(item_id, score)
+ranker.observe(
+    learner_id=learner_id,
+    ts=123500,
+    item_id=ranked[0].item_id,
+    concept_id=concept_goal,
+    correct=1,
+)
 ```
 
-Each `observe` runs one SGD step on the user's residual embedding and updates
-their competence estimate via outcome tracing. The next `rank` reflects that
-update immediately -- no batch delay. Use `category="fractions"` on `observe`
-to track competence per category rather than a single global estimate.
+For SAINT+ backbones, the timestamp is forwarded into the live tracer state so
+elapsed-time and lag-time features keep working after offline fit.
 
-## Hook up a Kafka bus
+## Sketch Mode
 
-For a production service, interactions arrive from a message bus rather than
-inline calls. `StreamingIngestor` ties a bus to the ranker in a background
-thread.
+For large catalogs, attach a sketch candidate generator and let Orchid shrink
+the candidate set before final adaptive reranking.
 
 ```python
-from orchid_ranker.streaming_bus import KafkaEventBus, StreamingIngestor
+from orchid_ranker import ExactEmbeddingIndex, SketchCandidateGenerator
 
-bus = KafkaEventBus(brokers="kafka:9092", topic="interactions")
-ingestor = StreamingIngestor(bus, streamer)
-ingestor.start()  # background daemon thread
+index = ExactEmbeddingIndex()
+index.add("frac-01", [0.9, 0.1])
+index.add("ratio-01", [0.1, 0.9])
+
+ranker.attach_sketch_generator(SketchCandidateGenerator(ann_index=index))
+ranked = ranker.recommend(
+    learner_id,
+    mode="sketch",
+    concept_goal="fractions",
+    item_query_vec=[1.0, 0.0],
+    top_k=5,
+)
 ```
 
-Events are JSON with the schema `{"user_id": int, "item_id": int,
-"correct": 0|1}`. Optional fields: `"skill"` (legacy category label; use
-`"category"` when calling `observe` directly) and `"timestamp"` (epoch seconds).
+## Production Loop
 
-## Minimal docker-compose for Kafka
+1. Fit offline with chronological data.
+2. Serve recommendations from `AdaptiveRanker.recommend(...)`.
+3. Log candidates, scores, chosen action, propensity, policy version, and context hash.
+4. Call `observe(...)` after each outcome.
+5. Run `ope_report(...)`, bootstrap OPE, and rollout gates before enabling a new learned policy.
 
-```yaml
-version: "3.8"
-services:
-  zookeeper:
-    image: confluentinc/cp-zookeeper:7.6.0
-    environment:
-      ZOOKEEPER_CLIENT_PORT: 2181
-
-  kafka:
-    image: confluentinc/cp-kafka:7.6.0
-    depends_on: [zookeeper]
-    ports: ["9092:9092"]
-    environment:
-      KAFKA_BROKER_ID: 1
-      KAFKA_ZOOKEEPER_CONNECT: zookeeper:2181
-      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:9092
-      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
-```
-
-Install the Kafka driver alongside Orchid:
-
-```bash
-pip install 'orchid-ranker[ml]' confluent-kafka
-```
-
----
-
-You can stop here and have a live, adaptive recommender. For production safety
-and monitoring, continue to [Guide 3: Operate safely in production](03-operate-safely.md).
+Continue to [Guide 3: Operate safely in production](03-operate-safely.md).

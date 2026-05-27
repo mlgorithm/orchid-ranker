@@ -26,6 +26,8 @@ import torch.nn as nn  # noqa: E402
 
 __all__ = [
     "AKTTracer",
+    "DKTTracer",
+    "DKVMNTracer",
     "KTRecommendation",
     "SAKTTrainingExample",
     "SAKTTracer",
@@ -429,6 +431,97 @@ class _SAINTPlusModel(_SAINTModel):
         if history_lag is None:
             history_lag = torch.zeros_like(history_items)
         return cast(torch.Tensor, x + self.elapsed_emb(history_elapsed.long()) + self.lag_emb(history_lag.long()))
+
+
+class _DKTModel(nn.Module):
+    """Compact DKT-style recurrent knowledge tracer."""
+
+    def __init__(
+        self,
+        *,
+        num_items: int,
+        d_model: int,
+        dropout: float,
+    ) -> None:
+        super().__init__()
+        self.num_items = int(num_items)
+        self.interaction_emb = nn.Embedding(2 * self.num_items + 1, d_model, padding_idx=0)
+        self.query_item_emb = nn.Embedding(self.num_items + 1, d_model, padding_idx=0)
+        self.gru = nn.GRU(d_model, d_model, batch_first=True)
+        self.out = nn.Sequential(
+            nn.Linear(2 * d_model, d_model),
+            nn.ReLU(),
+            nn.Dropout(dropout),
+            nn.Linear(d_model, 1),
+        )
+
+    def forward(
+        self,
+        history_items: torch.Tensor,
+        history_correct: torch.Tensor,
+        query_items: torch.Tensor,
+    ) -> torch.Tensor:
+        pad_mask = history_items.eq(0)
+        interaction_codes = history_items + history_correct.long() * self.num_items
+        interaction_codes = interaction_codes.masked_fill(pad_mask, 0)
+        x = self.interaction_emb(interaction_codes)
+        outputs, _ = self.gru(x)
+        lengths = (~pad_mask).sum(dim=1).clamp(min=1) - 1
+        batch_index = torch.arange(history_items.shape[0], device=history_items.device)
+        context = outputs[batch_index, lengths]
+        query = self.query_item_emb(query_items)
+        return cast(torch.Tensor, self.out(torch.cat([context, query], dim=-1)).squeeze(-1))
+
+
+class _DKVMNModel(nn.Module):
+    """Compact DKVMN-style key-value memory tracer.
+
+    This implementation uses item-key attention over historical interaction
+    values. It intentionally keeps the same Orchid tracer contract as SAKT so
+    it can serve as a small, benchmarkable in-repo memory-network baseline.
+    """
+
+    def __init__(
+        self,
+        *,
+        num_items: int,
+        d_model: int,
+        dropout: float,
+    ) -> None:
+        super().__init__()
+        self.num_items = int(num_items)
+        self.item_key_emb = nn.Embedding(self.num_items + 1, d_model, padding_idx=0)
+        self.interaction_value_emb = nn.Embedding(2 * self.num_items + 1, d_model, padding_idx=0)
+        self.out = nn.Sequential(
+            nn.Linear(2 * d_model, d_model),
+            nn.ReLU(),
+            nn.Dropout(dropout),
+            nn.Linear(d_model, 1),
+        )
+        self.scale = float(d_model) ** -0.5
+
+    def forward(
+        self,
+        history_items: torch.Tensor,
+        history_correct: torch.Tensor,
+        query_items: torch.Tensor,
+    ) -> torch.Tensor:
+        pad_mask = history_items.eq(0)
+        interaction_codes = history_items + history_correct.long() * self.num_items
+        interaction_codes = interaction_codes.masked_fill(pad_mask, 0)
+
+        keys = self.item_key_emb(history_items)
+        values = self.interaction_value_emb(interaction_codes)
+        query = self.item_key_emb(query_items)
+        scores = torch.sum(keys * query.unsqueeze(1), dim=-1) * self.scale
+        key_padding_mask = pad_mask.clone()
+        all_padding = key_padding_mask.all(dim=1)
+        if bool(all_padding.any()):
+            key_padding_mask[all_padding, -1] = False
+        scores = scores.masked_fill(key_padding_mask, -1e9)
+        weights = torch.softmax(scores, dim=-1)
+        context = torch.bmm(weights.unsqueeze(1), values).squeeze(1)
+        return cast(torch.Tensor, self.out(torch.cat([context, query], dim=-1)).squeeze(-1))
 
 
 class SAKTTracer:
@@ -924,6 +1017,66 @@ class SAINTPlusTracer(SAINTTracer):
         elapsed_tensor = torch.as_tensor(elapsed, dtype=torch.long, device=self.device).repeat(count, 1)
         lag_tensor = torch.as_tensor(lag, dtype=torch.long, device=self.device).repeat(count, 1)
         return elapsed_tensor, lag_tensor
+
+
+class DKTTracer(SAKTTracer):
+    """DKT-style recurrent tracer for next-response prediction.
+
+    DKT is still a useful adaptive-learning baseline because it tests whether a
+    simple recurrent learner-state model is enough before adding attention,
+    item difficulty, or temporal transformer features.
+    """
+
+    def _make_model(self) -> nn.Module:
+        return _DKTModel(
+            num_items=len(self._item2idx),
+            d_model=self.d_model,
+            dropout=self.dropout,
+        )
+
+
+class DKVMNTracer(SAKTTracer):
+    """Compact DKVMN-style memory-network tracer.
+
+    This is a curated, dependency-light baseline for concept/item memory
+    tracing. It is not a line-by-line reproduction of every DKVMN paper detail;
+    benchmark docs should describe it as "DKVMN-style".
+    """
+
+    def __init__(
+        self,
+        *,
+        max_seq_len: int = 50,
+        d_model: int = 64,
+        n_heads: int = 1,
+        dropout: float = 0.1,
+        learning_rate: float = 1e-3,
+        epochs: int = 5,
+        batch_size: int = 128,
+        correct_threshold: float = 0.5,
+        device: Optional[str] = None,
+        random_state: Optional[int] = None,
+    ) -> None:
+        del n_heads  # Memory attention is single-head in this compact baseline.
+        super().__init__(
+            max_seq_len=max_seq_len,
+            d_model=d_model,
+            n_heads=1,
+            dropout=dropout,
+            learning_rate=learning_rate,
+            epochs=epochs,
+            batch_size=batch_size,
+            correct_threshold=correct_threshold,
+            device=device,
+            random_state=random_state,
+        )
+
+    def _make_model(self) -> nn.Module:
+        return _DKVMNModel(
+            num_items=len(self._item2idx),
+            d_model=self.d_model,
+            dropout=self.dropout,
+        )
 
 
 class AKTTracer(SAKTTracer):

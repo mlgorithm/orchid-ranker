@@ -1,6 +1,7 @@
 """Delayed-gain reward modeling for adaptive-learning policies."""
 from __future__ import annotations
 
+import inspect
 from dataclasses import asdict, dataclass
 from typing import TYPE_CHECKING, Any, Mapping, Optional, Sequence
 
@@ -404,6 +405,7 @@ def _build_training_examples(
         user_col=split.user_col,
         item_col=split.item_col,
         label_col="__orchid_label__",
+        timestamp_col=split.timestamp_col,
     )
     global_label_prior = 0.5
 
@@ -517,6 +519,7 @@ def _replay_tracer_predictions(
     user_col: str,
     item_col: str,
     label_col: str,
+    timestamp_col: Optional[str],
 ) -> dict[int, float]:
     if tracer is None:
         return {}
@@ -530,6 +533,13 @@ def _replay_tracer_predictions(
             for user_id, history in getattr(tracer, "_histories").items()
         }
         setattr(tracer, "_histories", {})
+    original_history_times = None
+    if hasattr(tracer, "_history_times"):
+        original_history_times = {
+            user_id: list(times)
+            for user_id, times in getattr(tracer, "_history_times").items()
+        }
+        setattr(tracer, "_history_times", {})
     predictions: dict[int, float] = {}
     try:
         for user_id, group in train.groupby(user_col, sort=False):
@@ -540,11 +550,33 @@ def _replay_tracer_predictions(
                 else:
                     pred = tracer.predict_many(user_id, [item_id])[item_id]
                 predictions[int(row["__orchid_row_id__"])] = _clamp01(pred)
-                tracer.observe(user_id, item_id, int(row[label_col]))
+                if timestamp_col is not None and timestamp_col in row:
+                    _observe_tracer_for_replay(tracer, user_id, item_id, int(row[label_col]), timestamp=row[timestamp_col])
+                else:
+                    tracer.observe(user_id, item_id, int(row[label_col]))
     finally:
         if original_histories is not None:
             setattr(tracer, "_histories", original_histories)
+        if original_history_times is not None:
+            setattr(tracer, "_history_times", original_history_times)
     return predictions
+
+
+def _observe_tracer_for_replay(
+    tracer: Any,
+    user_id: Any,
+    item_id: Any,
+    label: int,
+    *,
+    timestamp: Any,
+) -> Any:
+    try:
+        params = inspect.signature(tracer.observe).parameters
+    except (TypeError, ValueError):
+        params = {}
+    if "timestamp" in params:
+        return tracer.observe(user_id, item_id, label, timestamp=timestamp)
+    return tracer.observe(user_id, item_id, label)
 
 
 def _future_same_concept(

@@ -10,18 +10,20 @@ item, evaluate safely, and explain why.
 
 | Area | Shipped today | Role in adaptive learning |
 |------|---------------|---------------------------|
-| Learner state | `BayesianKnowledgeTracing`, `SAINTPlusTracer`, `SAINTTracer`, `AKTTracer`, `SAKTTracer` | Online competence and correctness estimates per learner and item |
+| Learner state | `BayesianKnowledgeTracing`, `fit_bkt_em`, `PFATracer`, `AFMTracer`, `DKTTracer`, `DKVMNTracer`, `SAINTPlusTracer`, `SAINTTracer`, `AKTTracer`, `SAKTTracer` | Online competence and correctness estimates per learner and item |
 | Catalog constraints | `DependencyGraph`, `ProgressionRecommender` | Prerequisite-aware eligibility and path ordering |
 | Adaptive ranking | `AdaptiveLearningEngine`, `ProgressionValuePolicy` | Next-item ranking from KT, difficulty, prerequisites, and progression reward |
-| Base recommender fallback | MF, neural MF, ALS, BPR, user-kNN, LinUCB | Generic ranking when learning metadata is missing |
+| Adaptive testing | `IRTAdaptiveSelector` | Placement tests and mastery checks via item information |
 | Live adaptation | `AdaptiveLearningEngine.observe`, `StreamingAdaptiveRanker` | Per-outcome updates without full retraining |
-| Offline policy evaluation | `orchid_ranker.ope` | IPS/SNIPS/direct-method/doubly robust and bootstrap checks before adaptive rollout |
+| Offline policy evaluation | `orchid_ranker.ope`, `TabularFQE` | IPS/SNIPS/direct-method/doubly robust, bootstrap, rollout gates, and fitted-Q checks before adaptive rollout |
+| Personalized exploration | `PersonalizedLinUCB` | User-conditioned exploration from explicit learner/item feature maps |
+| Retention | `FSRSScheduler` | Forgetting-aware review scheduling |
 | Semantic retrieval | `orchid_ranker.semantic` | Text/metadata candidate generation for sparse or new exercises |
 | Safety | progression monitors, guardrails, safe fallback | Stops harmful adaptive behavior before broad rollout |
 
 This is a strong product foundation, and the next modeling layer should keep
-moving beyond the generic recommender fallback so Orchid is evaluated as an
-adaptive-learning engine.
+removing the generic recommender fallback from the main narrative so Orchid is
+evaluated as an adaptive-learning engine.
 
 ## Research direction
 
@@ -42,16 +44,21 @@ Add adaptive-learning algorithms under explicit, boring names:
 
 | Module | Proposed API | Purpose |
 |--------|--------------|---------|
-| `orchid_ranker.kt` | `SAKTTracer`, `AKTTracer`, `SAINTTracer`, `SAINTPlusTracer`, future `DKTTracer` | Predict next correctness and expose learner-state vectors |
+| `orchid_ranker.kt` | `SAKTTracer`, `AKTTracer`, `SAINTTracer`, `SAINTPlusTracer`, `DKTTracer`, `DKVMNTracer` | Predict next correctness and expose learner-state vectors |
+| `orchid_ranker.edm` | `PFATracer`, `AFMTracer` | Classical interpretable EDM baselines |
+| `orchid_ranker.bkt_em` | `fit_bkt_em` | Estimate BKT parameters from learner sequences |
+| `orchid_ranker.calibration` | `TemperatureScaler`, `IsotonicProbabilityCalibrator`, `expected_calibration_error` | Calibrate predicted correctness before policy serving |
 | `orchid_ranker.learning_policy` | `KTValuePolicy`, future `StretchBanditPolicy` | Choose next item from eligible candidates using expected progress |
+| `orchid_ranker.bandits` | `PersonalizedLinUCB` | Safe personalized exploration using `phi(learner, item)` features |
+| `orchid_ranker.spaced_repetition` | `FSRSScheduler` | Review urgency and retention-aware ranking |
+| `orchid_ranker.fqe` | `TabularFQE` | Model-based fixed-policy value cross-check |
 | `orchid_ranker.pykt_bridge` | `export_pykt_sequences`, `PyKTPredictionAdapter` | Interoperate with pyKT research models and bring predictions back into Orchid policy/OPE |
 | `orchid_ranker.semantic` | `SemanticItemEncoder`, `SemanticExerciseRanker` | Score new exercises using text/metadata embeddings |
 | `orchid_ranker.ope` | `evaluate_logged_policy`, `compare_logged_policies`, bootstrap variants | Evaluate adaptive policies before serving them |
 
-Keep `AdaptiveLearningEngine` as the beginner API for the primary
-adaptive-learning workflow. Keep `OrchidRecommender` as the generic
-fit/recommend fallback for users who do not yet have concepts, difficulty, or
-prerequisite metadata.
+Keep `AdaptiveRanker` and `AdaptiveLearningEngine` as the beginner APIs for the
+primary adaptive-learning workflow. Historical generic recommenders stay under
+`orchid_ranker.legacy` only for compatibility and old experiment replay.
 
 ## Implementation order
 
@@ -96,9 +103,21 @@ prerequisite metadata.
     when timestamped events are available.
 12. **Semantic cold start.** Added `SemanticItemEncoder` and
     `SemanticExerciseRanker` for deterministic text/metadata candidate
-    retrieval before final adaptive reranking.
-13. **Bootstrap OPE intervals.** Added row-bootstrap OPE reports for single
-    policies and paired comparisons.
+    retrieval before final adaptive reranking. The `AdaptiveRanker` facade can
+    also score semantic catalog items that were not present in KT training.
+    `DenseSemanticItemEncoder` adds the provider-neutral adapter for modern
+    dense embeddings.
+13. **Bootstrap OPE intervals.** Added row- and cluster-bootstrap OPE reports
+    for single policies and paired comparisons.
+14. **Propensity-aware tabular CQL.** The lightweight CQL-style policy now uses
+    clipped, normalized inverse-propensity update weights from logged decisions.
+15. **IRT adaptive selector.** Added a small Rasch/2PL/3PL-compatible selector
+    for placement tests and mastery checks using item information.
+16. **Curated adaptive baseline collection.** Added DKT and DKVMN-style tracers,
+    PFA/AFM, EM fitting for BKT, probability calibration helpers, FSRS-style
+    retention scheduling, personalized LinUCB, and tabular FQE. These are the
+    "best useful collection" layer: enough breadth to compare adaptive methods
+    honestly without turning Orchid into a generic recommender model zoo.
 
 ## Claim discipline
 
