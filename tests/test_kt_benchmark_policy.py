@@ -732,6 +732,7 @@ def test_kt_policy_ope_cli_seed_sweep_smoke(tmp_path):
 def test_adaptive_efficiency_benchmark_cli_smoke(tmp_path):
     data_path = tmp_path / "events.csv"
     output_path = tmp_path / "adaptive_efficiency.json"
+    report_path = tmp_path / "adaptive_efficiency.md"
     _delayed_gain_events().to_csv(data_path, index=False)
 
     result = subprocess.run(
@@ -775,6 +776,10 @@ def test_adaptive_efficiency_benchmark_cli_smoke(tmp_path):
             "cpu",
             "--output",
             str(output_path),
+            "--report-md",
+            str(report_path),
+            "--benchmark-name",
+            "Smoke credibility benchmark",
         ],
         capture_output=True,
         text=True,
@@ -786,6 +791,11 @@ def test_adaptive_efficiency_benchmark_cli_smoke(tmp_path):
     assert "akt" in metrics["quality"]["summary"]
     assert metrics["policy"]["summary"]["table"]
     assert metrics["summary"]["best_policy"]["policy"] in {"progression", "delayed_gain", "support_delayed_gain"}
+    report = report_path.read_text()
+    assert "# Smoke credibility benchmark" in report
+    assert "## KT Prediction Quality" in report
+    assert "## Policy OPE" in report
+    assert "research evidence" in report
 
 
 def test_delayed_gain_model_benchmark_cli_smoke(tmp_path):

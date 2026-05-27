@@ -18,6 +18,7 @@ fitness progression, expertise-driven shopping, or curated content discovery.
 | You need dozens of research algorithms and standard benchmark protocols | RecBole |
 | You need GPU-scale feature engineering, training, and Triton serving | NVIDIA Merlin |
 | You need hybrid matrix factorization with user/item metadata | LightFM |
+| You need a deep knowledge-tracing model zoo and KT-only benchmark workflow | pyKT |
 | You want to build custom Keras retrieval/ranking models | TensorFlow Recommenders |
 | You want notebooks and examples for many recommendation approaches | Microsoft Recommenders |
 | You want a standalone recommender service with REST APIs and a dashboard | Gorse |
@@ -61,6 +62,7 @@ rec.observe(user_id=42, item_id=ranked[0].item_id, correct=True)
 | [NVIDIA Merlin](https://developer.nvidia.com/nvidia-merlin/nvtabular) | GPU-accelerated recommender pipeline components for feature engineering, training, and production inference. | Orchid is not a GPU infrastructure stack. It is a Python runtime for progression-aware ranking and adaptive safety. |
 | [implicit](https://github.com/benfred/implicit) | Fast collaborative filtering for implicit feedback datasets. | `implicit` is stronger for plain collaborative filtering. Orchid's reason to exist is adaptive learning: learner state, prerequisites, progression reward, live `observe()`, OPE, and guardrails. |
 | [LightFM](https://making.lyst.com/lightfm/docs/) | Hybrid recommendation algorithms for implicit and explicit feedback, with user and item metadata. | Orchid's wedge is user trajectory and operational safety, not only hybrid matrix factorization. |
+| [pyKT](https://github.com/pykt-team/pykt-toolkit) | Toolkit for benchmarking deep learning knowledge tracing models. | pyKT is stronger for KT model breadth. Orchid's job is to turn KT predictions into next-item rankings, OPE reports, and safe rollout decisions. |
 | [TensorFlow Recommenders](https://www.tensorflow.org/recommenders) | Keras-based library for building recommender system models across data preparation, modeling, training, evaluation, and deployment. | Orchid sits at a higher product layer: a ready recommender API plus progression-specific serving and monitoring behavior. |
 | [Microsoft Recommenders](https://github.com/recommenders-team/recommenders) | Jupyter notebook examples and best practices for recommendation systems. | Orchid is an importable runtime with a narrow progression thesis, not primarily an examples repository. |
 | [Gorse](https://gorse.io/) | Open-source recommender system engine with APIs, database integrations, dashboard, and online evaluation. | Orchid is a Python library for embedding progression-aware recommendation inside an existing product or service. |
