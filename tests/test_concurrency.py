@@ -17,7 +17,6 @@ import pandas as pd
 
 from orchid_ranker.agents.config import MultiConfig
 from orchid_ranker.connectors.bigquery import BigQueryConnector
-from orchid_ranker.recommender import OrchidRecommender
 from orchid_ranker.safety.safeswitch_dr import SafeSwitchDR, SafeSwitchDRConfig
 from orchid_ranker.security.audit import AuditEvent, AuditLogger, verify_log_integrity
 
@@ -161,81 +160,6 @@ class TestMultiConfigThreadSafety:
         assert len(configs) == expected, (
             f"Expected {expected} configs, got {len(configs)}"
         )
-
-
-# ---------------------------------------------------------------------------
-# OrchidRecommender fit/read serialization
-# ---------------------------------------------------------------------------
-
-class TestOrchidRecommenderThreadSafety:
-    """Verify that retraining does not interleave with recommendation reads."""
-
-    def test_recommend_blocks_while_fit_holds_state_lock(self, monkeypatch) -> None:
-        """recommend() should wait for an in-flight fit() instead of observing mixed state."""
-        rec = OrchidRecommender(strategy="popularity")
-        initial = pd.DataFrame(
-            {
-                "user_id": [1, 1, 2],
-                "item_id": [10, 11, 10],
-                "rating": [1.0, 2.0, 3.0],
-            }
-        )
-        updated = pd.DataFrame(
-            {
-                "user_id": [1, 1, 2],
-                "item_id": [20, 21, 20],
-                "rating": [4.0, 5.0, 2.0],
-            }
-        )
-        rec.fit(initial, rating_col="rating")
-
-        entered_fit = threading.Event()
-        release_fit = threading.Event()
-        recommend_finished = threading.Event()
-        errors: list[Exception] = []
-
-        original_fit_baseline = rec._fit_baseline
-
-        def blocking_fit_baseline(*args, **kwargs):
-            entered_fit.set()
-            assert release_fit.wait(timeout=2.0)
-            return original_fit_baseline(*args, **kwargs)
-
-        monkeypatch.setattr(rec, "_fit_baseline", blocking_fit_baseline)
-
-        def run_fit():
-            try:
-                rec.fit(updated, rating_col="rating")
-            except Exception as exc:  # pragma: no cover - failure path assertion below
-                errors.append(exc)
-
-        fit_thread = threading.Thread(target=run_fit)
-        fit_thread.start()
-        assert entered_fit.wait(timeout=2.0)
-
-        recommendations: list = []
-
-        def run_recommend():
-            try:
-                recommendations.extend(rec.recommend(user_id=1, top_k=1, filter_seen=False))
-            except Exception as exc:  # pragma: no cover - failure path assertion below
-                errors.append(exc)
-            finally:
-                recommend_finished.set()
-
-        recommend_thread = threading.Thread(target=run_recommend)
-        recommend_thread.start()
-        time.sleep(0.05)
-        assert not recommend_finished.is_set()
-
-        release_fit.set()
-        fit_thread.join(timeout=2.0)
-        recommend_thread.join(timeout=2.0)
-
-        assert errors == []
-        assert recommend_finished.is_set()
-        assert len(recommendations) == 1
-        assert recommendations[0].item_id in {20, 21}
 
 
 # ---------------------------------------------------------------------------

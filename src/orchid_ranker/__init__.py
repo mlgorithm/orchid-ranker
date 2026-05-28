@@ -1,51 +1,28 @@
-"""Orchid Ranker -- adaptive-learning engine.
+"""Orchid Ranker -- adaptive-learning and knowledge-tracing recommender.
 
 Build systems that choose the next exercise, lesson, task, or review item from
 learner state, catalog structure, progression reward, and live outcome updates.
 
-Public API is organized into three stability tiers:
+The public API is intentionally adaptive-learning first. Orchid no longer
+exports a generic recommender model zoo from the package root.
 
-**Tier 1 -- Stable** (semver-guaranteed, safe for production):
+**Stable adaptive surface**:
     AdaptiveRanker, AdaptiveLearningEngine, AdaptiveLearningRecommender,
-    BayesianKnowledgeTracing, SAKTTracer, DKTTracer, DKVMNTracer,
-    AKTTracer, SAINTTracer, SAINTPlusTracer,
-    ProficiencyTracker, ForgettingCurve, DependencyGraph,
-    ProgressionRecommender, save_model, load_model, cross_validate,
-    compare_models, chronological_user_split, train_test_split,
-    evaluate_on_holdout,
-    progression_gain, proficiency_coverage, sequence_adherence,
-    difficulty_appropriateness, engagement_score, ProgressionReport,
-    evaluate_logged_policy, compare_logged_policies, evaluate_rollout_gate,
-    PyKTPredictionAdapter, export_pykt_sequences,
-    ProgressionValuePolicy, DelayedGainValuePolicy,
-    SupportConstrainedDelayedGainPolicy, ProgressionRewardConfig,
-    DelayedGainRewardModel, build_delayed_gain_training_frame,
-    diagnose_delayed_gain_predictions, fit_delayed_gain_reward_model,
-    fit_delayed_gain_reward_model_from_frame,
-    LearnerEvent, LoggedDecision, CQLDiscretePolicy, TabularFQE,
-    PersonalizedLinUCB, SketchCandidateGenerator,
-    DenseSemanticItemEncoder, SemanticItemEncoder, SemanticExerciseRanker,
-    IRTAdaptiveSelector, IRTItem, IRTRecommendation,
-    PFATracer, AFMTracer, fit_bkt_em, FSRSScheduler,
-    TemperatureScaler, IsotonicProbabilityCalibrator,
-    ScenarioFit, ScenarioRecipe, available_scenarios, recommend_scenarios
+    knowledge-tracing tracers, BKT/EDM/IRT helpers, progression policies,
+    prerequisite graphs, semantic exercise retrieval, logged-policy learning,
+    offline policy evaluation, calibration, retention scheduling, and rollout
+    safety helpers.
 
-**Tier 2 -- Advanced** (stable but may evolve between minor versions):
-    AdaptiveAgent, AdaptiveAgentFactory, MultiUserOrchestrator,
-    TwoTowerRecommender, DualRecommender, MultiConfig, UserCtx,
-    legacy compatibility modules
-
-**Tier 3 -- Internal / Experimental** (not in ``__all__``; import from submodule):
-    OrchidRecommender and historical generic recommender strategies,
-    LinUCBPolicy, BootTS, JSONLLogger, PolicyState, OnlineState,
-    GridSearchCV, RandomSearchCV, RankingExperiment, get_dp_config,
-    configure_logging, AccessControl, AuditLogger, connectors, etc.
+**Advanced surface**:
+    AdaptiveAgent, AdaptiveAgentFactory, MultiUserOrchestrator, MultiConfig,
+    UserCtx, optional observability, security, connector, and visualization
+    helpers.
 
 Installation extras
 -------------------
-``pip install orchid-ranker``          -- core progression toolkit (BKT, dependency graph, evaluation)
-``pip install orchid-ranker[adaptive]`` -- adds PyTorch for AdaptiveRanker and AdaptiveLearningEngine
-``pip install orchid-ranker[all]``      -- adaptive stack plus optional viz, agentic, observability, connectors
+``pip install orchid-ranker``            -- torch-free adaptive-learning utilities
+``pip install orchid-ranker[adaptive]``  -- PyTorch-backed KT and AdaptiveRanker
+``pip install orchid-ranker[all]``       -- adaptive stack plus optional operations integrations
 """
 
 __version__ = "0.5.0"
@@ -85,11 +62,11 @@ from .delayed_gain import (
 from .edm import AFMTracer, EDMTrainingReport, PFATracer
 from .evaluation import (
     ProgressionReport,
-    difficulty_appropriateness,
+    category_coverage,
     engagement_score,
-    proficiency_coverage,
     progression_gain,
     sequence_adherence,
+    stretch_fit,
 )
 from .fqe import FQEReport, TabularFQE
 from .irt import IRTAdaptiveSelector, IRTItem, IRTRecommendation
@@ -154,22 +131,12 @@ _TORCH_LAZY = {
     "AKTTracer": (".kt", "AKTTracer"),
     "SAINTTracer": (".kt", "SAINTTracer"),
     "SAINTPlusTracer": (".kt", "SAINTPlusTracer"),
-    "save_model": (".serialization", "save_model"),
-    "load_model": (".serialization", "load_model"),
-    "cross_validate": (".model_selection", "cross_validate"),
-    "compare_models": (".model_selection", "compare_models"),
-    "chronological_user_split": (".model_selection", "chronological_user_split"),
-    "train_test_split": (".model_selection", "train_test_split"),
-    "evaluate_on_holdout": (".model_selection", "evaluate_on_holdout"),
-    "EVALUATION_METRICS": (".model_selection", "EVALUATION_METRICS"),
     # Tier 2 -- requires torch
     "AdaptiveAgent": (".agents.student_agent", "AdaptiveAgent"),
     "AdaptiveAgentFactory": (".agents.student_agent", "AdaptiveAgentFactory"),
     "MultiUserOrchestrator": (".agents.orchestrator", "MultiUserOrchestrator"),
     "MultiConfig": (".agents.config", "MultiConfig"),
     "UserCtx": (".agents.config", "UserCtx"),
-    "TwoTowerRecommender": (".agents.two_tower", "TwoTowerRecommender"),
-    "DualRecommender": (".agents.dual_recommender", "DualRecommender"),
 }
 
 # Tier 3 -- optional deps (torch, prometheus, matplotlib, etc.)
@@ -183,7 +150,6 @@ _OPTIONAL_LAZY = {
     "plot_acceptance_heatmap": (".visualization", "plot_acceptance_heatmap"),
     "plot_round_comparison": (".visualization", "plot_round_comparison"),
     "plot_knowledge_trajectory": (".visualization", "plot_knowledge_trajectory"),
-    "RankingExperiment": (".experiments", "RankingExperiment"),
     "get_dp_config": (".dp", "get_dp_config"),
     "configure_logging": (".logging", "configure_logging"),
     "AccessControl": (".security", "AccessControl"),
@@ -198,8 +164,6 @@ _OPTIONAL_LAZY = {
     "record_training": (".observability", "record_training"),
     "export_metrics": (".observability", "export_metrics"),
     "metrics_content_type": (".observability", "metrics_content_type"),
-    "GridSearchCV": (".tuning", "GridSearchCV"),
-    "RandomSearchCV": (".tuning", "RandomSearchCV"),
     "BloomFilter": (".sketch", "BloomFilter"),
     "CountMinSketch": (".sketch", "CountMinSketch"),
     "ExactEmbeddingIndex": (".sketch", "ExactEmbeddingIndex"),
@@ -215,15 +179,13 @@ _DEPRECATED_ALIASES = {
     "PrerequisiteGraph": (".curriculum", "DependencyGraph"),
     "CurriculumRecommender": (".curriculum", "ProgressionRecommender"),
     "learning_gain": (".evaluation", "progression_gain"),
-    "knowledge_coverage": (".evaluation", "proficiency_coverage"),
+    "knowledge_coverage": (".evaluation", "category_coverage"),
+    "proficiency_coverage": (".evaluation", "category_coverage"),
     "curriculum_adherence": (".evaluation", "sequence_adherence"),
+    "difficulty_appropriateness": (".evaluation", "stretch_fit"),
     "EducationalReport": (".evaluation", "ProgressionReport"),
     "StudentAgent": (".agents.student_agent", "AdaptiveAgent"),
     "StudentAgentFactory": (".agents.student_agent", "AdaptiveAgentFactory"),
-    "OrchidRecommender": (".legacy", "OrchidRecommender"),
-    "Recommendation": (".legacy", "Recommendation"),
-    "SUPPORTED_STRATEGIES": (".legacy", "SUPPORTED_STRATEGIES"),
-    "STRATEGY_GUIDE": (".legacy", "STRATEGY_GUIDE"),
 }
 
 
@@ -241,9 +203,8 @@ def __getattr__(name: str):
 
         module = importlib.import_module(module_path, __name__)
         value = getattr(module, attr_name)
-        new_public_name = f"orchid_ranker.legacy.{attr_name}" if module_path == ".legacy" else attr_name
         warnings.warn(
-            f"orchid_ranker.{name} is deprecated, use {new_public_name} instead. "
+            f"orchid_ranker.{name} is deprecated, use {attr_name} instead. "
             "Will be removed in v1.0.",
             DeprecationWarning,
             stacklevel=2,
@@ -293,9 +254,9 @@ __all__ = [
     "DependencyGraph",
     "ProgressionRecommender",
     "progression_gain",
-    "proficiency_coverage",
+    "category_coverage",
     "sequence_adherence",
-    "difficulty_appropriateness",
+    "stretch_fit",
     "engagement_score",
     "ProgressionReport",
     "LoggedPolicyReport",
@@ -366,21 +327,15 @@ __all__ = [
     "ProgressionValuePolicy",
     "ProgressionRewardConfig",
     "SupportConstrainedDelayedGainPolicy",
-    "save_model",
-    "load_model",
-    "cross_validate",
-    "compare_models",
-    "chronological_user_split",
-    "train_test_split",
-    "evaluate_on_holdout",
-    "EVALUATION_METRICS",
     # Tier 1 -- Backward-compatible aliases
     "MasteryTracker",
     "PrerequisiteGraph",
     "CurriculumRecommender",
     "learning_gain",
     "knowledge_coverage",
+    "proficiency_coverage",
     "curriculum_adherence",
+    "difficulty_appropriateness",
     "EducationalReport",
     # Tier 2 -- Advanced (generic names)
     "AdaptiveAgent",
@@ -388,8 +343,6 @@ __all__ = [
     "MultiUserOrchestrator",
     "MultiConfig",
     "UserCtx",
-    "TwoTowerRecommender",
-    "DualRecommender",
     # Tier 2 -- Backward-compatible aliases
     "StudentAgent",
     "StudentAgentFactory",

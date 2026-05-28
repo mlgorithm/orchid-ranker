@@ -93,6 +93,22 @@ The current public ASSISTments and specialty results are L2 to L3 depending on
 the module. They are useful for release gating and product direction. They are
 not substitutes for L4 or L5 evidence on a customer's own logs.
 
+## 9.5/10 adaptive-learning bar
+
+A high score for Orchid is not based on the number of recommender algorithms it
+contains. It is based on whether the adaptive-learning workflow is coherent,
+measurable, and safe to operate.
+
+| Dimension | 9.5/10 expectation |
+|-----------|--------------------|
+| Public API focus | New docs and examples lead with `AdaptiveRanker`, `AdaptiveLearningEngine`, KT, OPE, progression policy, and guardrails. |
+| KT quality | Time-ordered replay reports correctness quality, calibration, and item-mean baselines. |
+| Next-item policy value | Progression or delayed-gain policy reports include uplift, confidence intervals, match rate, and ESS. |
+| Learning metadata | Benchmarks use concepts, difficulty, prerequisites, or explicit cold-start metadata instead of plain user-item clicks. |
+| Safety | Candidate policies pass OPE gates before canary and have a reviewed fallback policy. |
+| Operations | Tests, lint, type checks, docs, package build, and import-contract checks pass with no unexpected deprecation warnings. |
+| Claim discipline | Generic top-K recommendation, CTR, music/movie, and ad-ranking claims are absent. |
+
 ## Competitor interpretation
 
 | Library | What it should beat Orchid at | What Orchid must prove instead |
@@ -116,6 +132,7 @@ A release can make a strong production-readiness claim only when:
 4. Every positive result includes support diagnostics: match rate, ESS, and CI.
 5. Every unsupported or negative result is documented as such.
 6. Delayed-gain or progression claims are separated from immediate-correctness claims.
+7. The docs and examples do not route users toward deleted generic recommender APIs.
 
 This standard is deliberately strict. It makes Orchid look less like a grab bag
 of algorithms and more like a library with a falsifiable product thesis.

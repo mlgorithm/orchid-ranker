@@ -1,4 +1,4 @@
-"""Tests for knowledge tracing models: BayesianKnowledgeTracing, MasteryTracker, ForgettingCurve."""
+"""Tests for knowledge tracing models: BayesianKnowledgeTracing, ProficiencyTracker, ForgettingCurve."""
 
 import math
 from datetime import datetime, timedelta
@@ -6,7 +6,7 @@ from datetime import datetime, timedelta
 from orchid_ranker.knowledge_tracing import (
     BayesianKnowledgeTracing,
     ForgettingCurve,
-    MasteryTracker,
+    ProficiencyTracker,
 )
 
 
@@ -103,26 +103,26 @@ class TestBayesianKnowledgeTracing:
         assert bkt.p_known > 0.3
 
 
-class TestMasteryTracker:
-    """Test MasteryTracker for multi-skill mastery tracking."""
+class TestProficiencyTracker:
+    """Test ProficiencyTracker for multi-skill mastery tracking."""
 
     def test_initialization_valid(self):
         """Test initialization with valid skill list."""
-        tracker = MasteryTracker(skills=['algebra', 'geometry', 'calculus'])
+        tracker = ProficiencyTracker(skills=['algebra', 'geometry', 'calculus'])
         assert len(tracker.skills) == 3
         assert 'algebra' in tracker.skills
 
     def test_initialization_empty_skills_raises(self):
         """Test that empty skills list raises ValueError."""
         try:
-            MasteryTracker(skills=[])
+            ProficiencyTracker(skills=[])
             assert False, "Should raise ValueError for empty skills"
         except ValueError:
             pass
 
     def test_single_skill_update(self):
         """Test updating a single skill."""
-        tracker = MasteryTracker(skills=['algebra'])
+        tracker = ProficiencyTracker(skills=['algebra'])
         initial_mastery = tracker.get_mastery()
         assert initial_mastery['algebra'] == 0.1
         tracker.update('algebra', correct=True)
@@ -131,14 +131,14 @@ class TestMasteryTracker:
 
     def test_get_mastery_all_skills(self):
         """Test getting mastery for all skills."""
-        tracker = MasteryTracker(skills=['math', 'science', 'english'])
+        tracker = ProficiencyTracker(skills=['math', 'science', 'english'])
         mastery = tracker.get_mastery()
         assert len(mastery) == 3
         assert all(0 <= v <= 1 for v in mastery.values())
 
     def test_update_invalid_skill_raises(self):
         """Test that updating non-existent skill raises KeyError."""
-        tracker = MasteryTracker(skills=['algebra'])
+        tracker = ProficiencyTracker(skills=['algebra'])
         try:
             tracker.update('geometry', correct=True)
             assert False, "Should raise KeyError for unknown skill"
@@ -147,7 +147,7 @@ class TestMasteryTracker:
 
     def test_mastered_skills_filtering(self):
         """Test filtering of mastered vs unmastered skills."""
-        tracker = MasteryTracker(
+        tracker = ProficiencyTracker(
             skills=['a', 'b', 'c'],
             default_params={'p_init': 0.05, 'mastery_threshold': 0.5}
         )
@@ -155,8 +155,8 @@ class TestMasteryTracker:
         tracker._trackers['b']._p_known = 0.3
         tracker._trackers['c']._p_known = 0.55
 
-        mastered = tracker.mastered_skills()
-        unmastered = tracker.unmastered_skills()
+        mastered = tracker.succeeded()
+        unmastered = tracker.remaining()
 
         assert set(mastered) == {'a', 'c'}
         assert set(unmastered) == {'b'}
@@ -164,13 +164,13 @@ class TestMasteryTracker:
 
     def test_ready_for_no_prerequisites(self):
         """Test readiness check with no prerequisites."""
-        tracker = MasteryTracker(skills=['algebra', 'geometry'])
+        tracker = ProficiencyTracker(skills=['algebra', 'geometry'])
         assert tracker.ready_for('algebra') is True
         assert tracker.ready_for('geometry') is True
 
     def test_ready_for_with_prerequisites(self):
         """Test readiness check with prerequisite graph."""
-        tracker = MasteryTracker(skills=['algebra', 'calculus'])
+        tracker = ProficiencyTracker(skills=['algebra', 'calculus'])
         prerequisites = {'calculus': ['algebra']}
 
         # Not ready (algebra not mastered)
@@ -182,7 +182,7 @@ class TestMasteryTracker:
 
     def test_ready_for_invalid_skill_raises(self):
         """Test that checking readiness for unknown skill raises KeyError."""
-        tracker = MasteryTracker(skills=['algebra'])
+        tracker = ProficiencyTracker(skills=['algebra'])
         try:
             tracker.ready_for('unknown_skill')
             assert False, "Should raise KeyError"
@@ -191,7 +191,7 @@ class TestMasteryTracker:
 
     def test_recommend_next_without_prerequisites(self):
         """Test skill recommendation without prerequisites."""
-        tracker = MasteryTracker(skills=['a', 'b', 'c'], default_params={'p_init': 0.1})
+        tracker = ProficiencyTracker(skills=['a', 'b', 'c'], default_params={'p_init': 0.1})
         tracker._trackers['a']._p_known = 0.99
         tracker._trackers['b']._p_known = 0.5
         tracker._trackers['c']._p_known = 0.3
@@ -203,7 +203,7 @@ class TestMasteryTracker:
 
     def test_recommend_next_respects_prerequisites(self):
         """Test that recommendations respect prerequisite constraints."""
-        tracker = MasteryTracker(skills=['a', 'b', 'c'])
+        tracker = ProficiencyTracker(skills=['a', 'b', 'c'])
         tracker._trackers['a']._p_known = 0.99
         tracker._trackers['b']._p_known = 0.1
         tracker._trackers['c']._p_known = 0.1
@@ -220,7 +220,7 @@ class TestMasteryTracker:
         bkt_params = {
             'algebra': {'p_init': 0.3, 'p_transit': 0.2},
         }
-        tracker = MasteryTracker(
+        tracker = ProficiencyTracker(
             skills=['algebra', 'geometry'],
             bkt_params=bkt_params,
             default_params={'p_init': 0.1, 'p_transit': 0.1}

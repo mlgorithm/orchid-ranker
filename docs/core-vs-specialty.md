@@ -1,88 +1,62 @@
-# Core vs. specialty modules
+# Core adaptive-learning surface
 
-Orchid Ranker ships two kinds of modules. Understanding the distinction will save you time and set correct expectations.
-
----
+Orchid Ranker is an adaptive-learning and knowledge-tracing library. The core
+surface is intentionally narrow: modules are core only when they support
+next-learning-item decisions from learner state, catalog structure, progression
+reward, logged-policy evidence, or safe rollout.
 
 ## Core
 
-The core library delivers **adaptive-learning recommendation** for domains that satisfy three conditions:
+The core library serves domains that satisfy three conditions:
 
-1. Items have an ordering (prerequisites, difficulty, curator-authored progression).
-2. Each interaction produces a signal richer than "they clicked" (completed, answered correctly, adhered, adopted, kept).
-3. The stakeholder measures long-term outcomes, not short-term engagement (retention, pass rates, time-to-competence, clinical outcome).
+1. Items have learning structure: concepts, difficulty, prerequisites, review
+   timing, or authored progression.
+2. Interactions produce outcome signals such as correctness, completion,
+   mastery, retention, adherence, or skill gain.
+3. The stakeholder measures long-term progress, not only short-term clicks.
 
-Core modules have:
+Core modules:
 
-- Published benchmarks on public datasets with honest, reproducible results.
-- Stable APIs under semver. Breaking changes require a major version bump.
-- Regression tests that run on every PR.
+| Area | APIs |
+|------|------|
+| Product facade | `AdaptiveRanker`, `AdaptiveLearningEngine`, `AdaptiveLearningRecommender` |
+| Learner state | `SAKTTracer`, `AKTTracer`, `SAINTTracer`, `SAINTPlusTracer`, `DKTTracer`, `DKVMNTracer` |
+| Classical KT / EDM | `BayesianKnowledgeTracing`, `PFATracer`, `AFMTracer`, `fit_bkt_em` |
+| Adaptive testing | `IRTAdaptiveSelector`, `IRTItem` |
+| Progression structure | `DependencyGraph`, `ProgressionRecommender`, `ProgressionValuePolicy`, `ProgressionRewardConfig` |
+| Semantic exercise retrieval | `SemanticItemEncoder`, `DenseSemanticItemEncoder`, `SemanticExerciseRanker` |
+| Logged policy evidence | `CQLDiscretePolicy`, `TabularFQE`, `evaluate_logged_policy`, `compare_logged_policies`, `evaluate_rollout_gate` |
+| Calibration and support diagnostics | `TemperatureScaler`, `IsotonicProbabilityCalibrator`, delayed-gain diagnostics |
+| Retention and exploration | `FSRSScheduler`, `PersonalizedLinUCB` |
+| Safety and operations | `ProgressionGuardrail`, `SafeSwitchDR`, audit, observability, connectors |
 
-Core modules: `AdaptiveRanker`, `AdaptiveLearningEngine`, `SAINTPlusTracer`,
-`SAINTTracer`, `AKTTracer`, `SAKTTracer`, `DKTTracer`, `DKVMNTracer`,
-`PFATracer`, `AFMTracer`, `BayesianKnowledgeTracing`, `fit_bkt_em`,
-`IRTAdaptiveSelector`, `ProgressionValuePolicy`, `PersonalizedLinUCB`,
-`FSRSScheduler`, `TabularFQE`, `DependencyGraph`, `ProgressionRecommender`,
-`ProgressionGuardrail`, `SafeSwitchDR`, OPE, evaluation metrics, and
-serialization. Historical generic recommenders are compatibility modules, not
-core adaptive-learning modules.
+## Advanced
 
----
+Advanced modules are useful for research, simulation, or large deployments, but
+they do not define Orchid's public claim by themselves:
 
-## Specialty
+| Area | APIs |
+|------|------|
+| Agentic simulation | `AdaptiveAgent`, `AdaptiveAgentFactory`, `MultiUserOrchestrator`, `MultiConfig` |
+| Candidate narrowing | `BloomFilter`, `CountMinSketch`, `ReservoirSampler`, `SketchCandidateGenerator` |
+| Optional operations | visualization, Prometheus metrics, RBAC/audit, Snowflake/BigQuery/S3/MLflow connectors |
 
-Specialty modules extend Orchid into adjacent territories where the three conditions hold with domain-specific reinterpretation. Each is narrowly scoped — the module name says exactly what it does and what it doesn't.
+Generic collaborative filtering, movie/music recommendation, commerce taste
+ranking, and social-feed ranking are not Orchid's product surface. Historical
+implementation files may remain temporarily while tests and migration paths are
+unwound, but new docs, examples, benchmarks, and top-level exports should not
+promote them.
 
-Specialty modules have:
+## Graduation Bar
 
-- Unit tests with good coverage.
-- A gate paragraph in the module docstring that tells a senior engineer in two sentences whether the module is for them.
-- An "experimental" label until they pass the graduation bar below.
+A module graduates into the core adaptive surface only when all three are true:
 
-Specialty modules:
+1. It is directly useful for adaptive learning, KT, progression, OPE, or safe
+   rollout.
+2. It has focused tests and an example that uses learner outcomes or catalog
+   learning metadata.
+3. Its claims are backed by public benchmark artifacts or clearly marked as
+   experimental.
 
-| Module | Domain | Status | Benchmark |
-|--------|--------|--------|-----------|
-| `orchid_ranker.scaling` | 100M registered users, ~10M concurrent active | Experimental | Synthetic 1M users: 99.8% memory savings, 840K ops/s |
-| `orchid_ranker.curated_feed` | Editorially curated publications with reader learning arcs | Experimental | Synthetic only: +30.7% combined score |
-| `orchid_ranker.cold_start` | New-user bootstrapping with transparent blend to Orchid | Experimental | **MovieLens-1M: +67% Surv@5 vs popularity** |
-| `orchid_ranker.taste_progression` | Expertise-driven product domains (wine, photography, coffee) | Experimental | **Amazon Cell Phones: +0.9% kept-rate, 40.6% stretch accuracy; 92.9% warm-phase kept-rate in E2E** |
-
----
-
-## Graduation bar
-
-A specialty module graduates to core when all three conditions are met:
-
-1. **Benchmark.** A published benchmark on a public dataset with an honest win over the relevant baseline. The benchmark must be reproducible (script in `benchmarks/`, data download automated, results in `docs/benchmarks/`). "Honest win" means the module moves a metric that matters for the domain — not just a unit-test assertion.
-
-2. **External validation.** At least one external adopter running the module in production (or on their own data) with reported results. A design-partner case study counts. A single internal experiment does not.
-
-3. **API stability.** The module survives one full release cycle (at least one minor version) with no breaking API changes. If the API needed breaking changes, the clock resets.
-
-When all three conditions are met, the module moves from the specialty table to the core list in this document, the "experimental" label is removed from its docstring, and it is added to `__all__` in `__init__.py`.
-
-Until then, specialty modules are shipped, supported, and tested — but adopters should benchmark on their own data before deploying.
-
-### Current graduation progress
-
-| Module | Condition 1 (Benchmark) | Condition 2 (External) | Condition 3 (API stable) |
-|--------|:-----------------------:|:----------------------:|:------------------------:|
-| `cold_start` | **Met** — MovieLens-1M, +67% Surv@5 | Not yet | In progress |
-| `taste_progression` | **Partial** — Amazon Cell Phones +0.9% standalone, 92.9% warm-phase in E2E pipeline. Domain-dependent. | Not yet | In progress |
-| `scaling` | **Partial** — synthetic benchmark. Memory and throughput are hardware properties, but no real-workload validation. | Not yet | In progress |
-| `curated_feed` | **Not met** — synthetic data only. Needs a real news/content dataset. | Not yet | In progress |
-
-`cold_start` is closest to graduation — it has a real-data benchmark with a meaningful win. It needs one external adopter and one stable release cycle.
-
----
-
-## Why this matters
-
-Open-source recommender libraries lose credibility one of two ways: they claim too little (and nobody tries them) or they claim too much (and early adopters get burned). The specialty/core distinction is how we claim precisely as much as we can defend.
-
-If you're evaluating Orchid for the core use case, start with adaptive
-learning: ordered items, learner outcomes, concept/difficulty metadata,
-prerequisites, and stakeholders who care about measurable progress.
-
-If you're evaluating a specialty module, two of four now have public-dataset benchmarks (`cold_start` on MovieLens-1M, `taste_progression` on Amazon Digital Music). The remaining burden is domain-specific: benchmark on your data, verify the fit, and tell us what you find. Your results are what graduate these modules.
+This keeps Orchid's claim precise: best-in-class adaptive learning and
+knowledge-tracing recommendation, not another general recommender toolkit.

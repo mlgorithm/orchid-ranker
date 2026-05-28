@@ -914,10 +914,10 @@ class AdaptiveAgentFactory:
     """
 
     _registry = {
-        "irt": lambda **kw: AdaptiveAgent(act_mode="IRT", **kw),
-        "mirt": lambda **kw: AdaptiveAgent(act_mode="MIRT", knowledge_mode="vector", **kw),
-        "zpd": lambda **kw: AdaptiveAgent(act_mode="ZPD", **kw),
-        "contextual_zpd": lambda **kw: AdaptiveAgent(act_mode="ContextualZPD", **kw),
+        "irt": lambda **kw: AdaptiveAgent(ability_model="IRT", **kw),
+        "mirt": lambda **kw: AdaptiveAgent(ability_model="MIRT", knowledge_mode="vector", **kw),
+        "zpd": lambda **kw: AdaptiveAgent(ability_model="ZPD", **kw),
+        "contextual_zpd": lambda **kw: AdaptiveAgent(ability_model="ContextualZPD", **kw),
     }
 
     @classmethod

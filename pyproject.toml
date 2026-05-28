@@ -30,7 +30,6 @@ keywords = [
   "learning-analytics",
   "adaptive-recommendation",
   "safe-rollout",
-  "recommender-systems",
   "bandits",
 ]
 classifiers = [
@@ -63,17 +62,6 @@ sketch = [
 privacy = [
   "opacus>=1.5,<2",
   "PyJWT[crypto]>=2.8,<3",
-]
-legacy = [
-  "torch>=2.0,<3",
-  "implicit>=0.7,<1",
-]
-ml = [
-  "torch>=2.0,<3",
-]
-implicit = [
-  "torch>=2.0,<3",
-  "implicit>=0.7,<1",
 ]
 torch = [
   "torch>=2.0,<3",
@@ -123,7 +111,6 @@ benchmarks = [
   "pandas>=1.5.3",
   "matplotlib>=3.6,<4",
   "tqdm>=4.60,<5",
-  "implicit>=0.7,<1",
 ]
 dev = [
   "torch>=2.0,<3",
@@ -142,7 +129,6 @@ dev = [
 ]
 all = [
   "torch>=2.0,<3",
-  "implicit>=0.7,<1",
   "matplotlib>=3.6,<4",
   "mkdocs>=1.5,<2",
   "mkdocs-material>=9.5,<10",
@@ -180,7 +166,6 @@ where = ["src"]
 include = ["orchid_ranker", "orchid_ranker.*"]
 
 [project.scripts]
-orchid-evaluate = "orchid_ranker.cli.evaluate:main"
 orchid-serve = "orchid_ranker.cli.serve:main"
 
 [tool.ruff]
@@ -212,8 +197,6 @@ module = [
   "orchid_ranker.agents.*",
   "orchid_ranker.baselines",
   "orchid_ranker.calibration",
-  "orchid_ranker.cli.evaluate",
-  "orchid_ranker.cold_start",
   "orchid_ranker.connectors.*",
   "orchid_ranker.contrib.*",
   "orchid_ranker.curriculum",
@@ -225,10 +208,12 @@ module = [
   "orchid_ranker.offline_policy",
   "orchid_ranker.security.audit",
   "orchid_ranker.streaming",
-  "orchid_ranker.taste_progression",
 ]
 ignore_errors = true
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 pythonpath = ["src"]
+filterwarnings = [
+  "ignore:The PyTorch API of nested tensors is in prototype stage.*:UserWarning",
+]

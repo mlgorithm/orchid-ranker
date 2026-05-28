@@ -92,7 +92,8 @@ updated = rec.rank(user_id=0, candidate_item_ids=[101, 201, 202], top_k=3)
 ```
 
 If you only have ordinary user-item interactions and no concepts, difficulty,
-or prerequisites, use `OrchidRecommender` as the batch/generic fallback.
+or prerequisites, Orchid is not the right first tool. Add learning metadata or
+use a dedicated collaborative-filtering stack for that separate problem.
 
 For production deployments, add a progression guardrail:
 
@@ -106,10 +107,14 @@ guardrail = ProgressionGuardrail(monitor)
 if guardrail.evaluate():
     recs = rec.rank(user_id, candidate_item_ids=candidates, top_k=5)
 else:
-    recs = baseline_rec.baseline_rank(user_id, top_k=5, candidate_item_ids=candidates)
+    recs = reviewed_prerequisite_policy.rank(user_id, candidates, top_k=5)
 ```
 
-This pattern -- adaptive policy gated by a progression guardrail with a frozen fallback -- is the recommended deployment topology. It gives you the upside of online adaptation with a hard safety bound: if the adaptive path starts hurting users, the system reverts to the offline model automatically.
+This pattern -- adaptive policy gated by a progression guardrail with a
+reviewed learning-policy fallback -- is the recommended deployment topology.
+It gives you the upside of online adaptation with a hard safety bound: if the
+adaptive path starts hurting users, the system reverts to a known-safe learning
+path automatically.
 
 ## Who should use this
 
@@ -131,7 +136,7 @@ Orchid Ranker is open-source and available on PyPI:
 
 ```bash
 pip install orchid-ranker        # core toolkit (BKT, dependency graphs, evaluation)
-pip install orchid-ranker[ml]    # adds PyTorch for AdaptiveLearningEngine
+pip install orchid-ranker[adaptive]  # adds PyTorch for AdaptiveLearningEngine
 pip install orchid-ranker[all]   # everything (ML, viz, agentic, observability)
 ```
 

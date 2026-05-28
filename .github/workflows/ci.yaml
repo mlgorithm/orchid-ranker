@@ -57,7 +57,7 @@ jobs:
     runs-on: ubuntu-latest
     strategy:
       matrix:
-        contract: ["base", "ml", "implicit"]
+        contract: ["base", "adaptive"]
 
     steps:
       - name: Checkout repository
@@ -78,11 +78,8 @@ jobs:
             base)
               python -m pip install .
               ;;
-            ml)
-              python -m pip install ".[ml]"
-              ;;
-            implicit)
-              python -m pip install ".[implicit]"
+            adaptive)
+              python -m pip install ".[adaptive]"
               ;;
           esac
 
@@ -99,37 +96,15 @@ jobs:
           try:
               from orchid_ranker import OrchidRecommender  # noqa: F401
           except ImportError as exc:
-              assert "requires PyTorch" in str(exc)
+              assert "OrchidRecommender" in str(exc)
           else:
               raise AssertionError("base install unexpectedly exposed OrchidRecommender")
           PY
 
-      - name: Smoke ML install
-        if: matrix.contract == 'ml'
+      - name: Smoke adaptive install
+        if: matrix.contract == 'adaptive'
         run: |
-          python examples/quickstart.py
-          orchid-evaluate \
-            --train examples/data/quickstart_train.csv \
-            --test examples/data/quickstart_test.csv \
-            --strategy "als,epochs=1" \
-            --top-k 5
-
-      - name: Smoke implicit install
-        if: matrix.contract == 'implicit'
-        run: |
-          python - <<'PY'
-          import pandas as pd
-          from orchid_ranker import OrchidRecommender
-
-          interactions = pd.DataFrame({
-              "user_id": [1, 1, 2, 2, 3, 3],
-              "item_id": [10, 11, 10, 12, 11, 13],
-              "label": [1, 1, 1, 1, 1, 1],
-          })
-          rec = OrchidRecommender(strategy="implicit_als", factors=4, iterations=1)
-          rec.fit(interactions, rating_col="label")
-          assert rec.recommend(user_id=1, top_k=1)
-          PY
+          python examples/adaptive_learning_quickstart.py
 
   lower-bounds:
     runs-on: ubuntu-latest
@@ -146,7 +121,7 @@ jobs:
       - name: Install lower-bound dependency set
         run: |
           python -m pip install --upgrade pip
-          python -m pip install -e ".[ml]" \
+          python -m pip install -e ".[adaptive]" \
             "numpy==1.23.5" \
             "pandas==1.5.3" \
             "scikit-learn==1.2.2" \
@@ -155,7 +130,7 @@ jobs:
             "joblib==1.2.0" \
             "torch==2.0.1"
 
-      - name: Smoke lower-bound recommender path
+      - name: Smoke lower-bound adaptive-learning path
         run: |
           python - <<'PY'
           import joblib
@@ -166,7 +141,7 @@ jobs:
           import torch
           import yaml
 
-          from orchid_ranker import OrchidRecommender
+          from orchid_ranker import AdaptiveLearningEngine
 
           assert numpy.__version__ == "1.23.5"
           assert pd.__version__ == "1.5.3"
@@ -179,11 +154,25 @@ jobs:
           interactions = pd.DataFrame({
               "user_id": [1, 1, 2, 2, 3, 3],
               "item_id": [10, 11, 10, 12, 11, 13],
-              "label": [1, 0, 1, 1, 0, 1],
+              "correct": [1, 0, 1, 1, 0, 1],
+              "concept": ["a", "b", "a", "b", "a", "b"],
+              "difficulty": [0.2, 0.4, 0.2, 0.5, 0.2, 0.4],
           })
-          rec = OrchidRecommender(strategy="als", epochs=1, embedding_dim=4)
-          rec.fit(interactions, rating_col="label")
-          assert rec.recommend(user_id=1, top_k=1)
+          rec = AdaptiveLearningEngine(
+              tracer_model="akt",
+              policy="auto",
+              epochs=1,
+              d_model=8,
+              n_heads=2,
+              batch_size=4,
+              device="cpu",
+          ).fit(
+              interactions,
+              correct_col="correct",
+              concept_col="concept",
+              item_difficulty_col="difficulty",
+          )
+          assert rec.rank(user_id=1, candidate_item_ids=[10, 11, 12, 13], top_k=1)
           PY
 
   build-distribution:

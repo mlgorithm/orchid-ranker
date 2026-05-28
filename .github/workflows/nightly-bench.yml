@@ -19,16 +19,29 @@ jobs:
       - name: Install dependencies
         run: |
           pip install -e ".[dev,benchmarks]"
-          pip install scikit-surprise implicit lightfm || true
 
-      - name: Run internal benchmarks
-        run: python benchmarks/bench_strategies.py --save-golden
-
-      - name: Run cross-library benchmarks
-        run: python benchmarks/bench_competitors.py --output benchmarks/golden/competitors.json
-
-      - name: Check regression against golden baselines
-        run: python benchmarks/check_regression.py
+      - name: Run adaptive-learning credibility smoke benchmark
+        run: |
+          PYTHONPATH=src python benchmarks/adaptive_efficiency_benchmark.py \
+            --data benchmarks/fixtures/assistments_tiny_raw.csv \
+            --user-col user_id \
+            --item-col problem_id \
+            --correct-col correct \
+            --timestamp-col order_id \
+            --concept-col skill_id \
+            --models akt \
+            --seeds 11 \
+            --policy-targets 0.70 \
+            --policy-rewards progression \
+            --candidate-size 3 \
+            --max-events 20 \
+            --max-rows 20 \
+            --epochs 1 \
+            --d-model 8 \
+            --n-heads 2 \
+            --batch-size 4 \
+            --output benchmarks/golden/adaptive_smoke.json \
+            --report-md benchmarks/golden/adaptive_smoke.md
 
       - name: Upload benchmark artifacts
         uses: actions/upload-artifact@v4

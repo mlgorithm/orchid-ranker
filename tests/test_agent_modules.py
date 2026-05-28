@@ -652,7 +652,7 @@ class TestDualRecommender:
 
         dual._after_student_update()
 
-        for anchor_param, teacher_param in zip(dual.student.teacher.parameters(), dual.teacher.parameters()):
+        for anchor_param, teacher_param in zip(dual.student.anchor.parameters(), dual.teacher.parameters()):
             assert torch.allclose(anchor_param, teacher_param)
 
     def test_train_step_replay_samples_buffer(self, teacher_student, monkeypatch):

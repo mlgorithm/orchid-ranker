@@ -743,8 +743,10 @@ __all__ = [
 # --- Deprecation handling for renamed symbols (PEP 562) ---
 _DEPRECATED_NAMES = {
     "learning_gain": "progression_gain",
-    "knowledge_coverage": "proficiency_coverage",
+    "knowledge_coverage": "category_coverage",
+    "proficiency_coverage": "category_coverage",
     "curriculum_adherence": "sequence_adherence",
+    "difficulty_appropriateness": "stretch_fit",
     "EducationalReport": "ProgressionReport",
 }
 

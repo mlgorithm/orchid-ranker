@@ -15,7 +15,7 @@ import torch
 
 from orchid_ranker import MultiConfig, MultiUserOrchestrator, UserCtx
 from orchid_ranker.agents.recommender_agent import DualRecommender, TwoTowerRecommender
-from orchid_ranker.agents.student_agent import StudentAgent
+from orchid_ranker.agents.student_agent import AdaptiveAgent
 
 
 def build_users(n: int, d: int, seed: int, device: torch.device):
@@ -23,7 +23,7 @@ def build_users(n: int, d: int, seed: int, device: torch.device):
     U = torch.rand(n, d, device=device)
     users = []
     for idx in range(n):
-        sa = StudentAgent(user_id=idx, seed=seed + idx)
+        sa = AdaptiveAgent(user_id=idx, seed=seed + idx)
         users.append(UserCtx(user_id=idx, user_idx=idx, student=sa, user_vec=U[idx : idx + 1]))
     return users, U
 

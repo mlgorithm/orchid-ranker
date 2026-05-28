@@ -62,13 +62,13 @@ except Exception as e:
 
 try:
     from orchid_ranker.agents.student_agent import (
+        AdaptiveAgent,
+        AdaptiveAgentFactory,
         ItemMeta,
-        StudentAgent,
-        StudentAgentFactory,
     )
+    _ok("AdaptiveAgent", AdaptiveAgent)
+    _ok("AdaptiveAgentFactory", AdaptiveAgentFactory)
     _ok("ItemMeta", ItemMeta)
-    _ok("StudentAgent", StudentAgent)
-    _ok("StudentAgentFactory", StudentAgentFactory)
 except Exception as e:
     _fail("orchid_ranker.agents.student_agent", e)
     raise
@@ -76,8 +76,8 @@ except Exception as e:
 __all__ = [
     "JSONLLogger",
     "ItemMeta",
-    "StudentAgent",
-    "StudentAgentFactory",
+    "AdaptiveAgent",
+    "AdaptiveAgentFactory",
     "LinUCBPolicy",
     "BootTS",
     "TwoTowerRecommender",

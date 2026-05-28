@@ -19,9 +19,8 @@ Orchid Ranker operates as a library within the customer's application runtime. T
 │  │ • JWTAuthenticator (optional)                        ││
 │  │ • DP-SGD with RDP Accounting                         ││
 │  │ • HMAC Hash-Chained Audit Logging                    ││
-│  │ • Model Serialization & Checksums                    ││
 │  │ • Connectors (Snowflake, BigQuery, S3, MLflow)       ││
-│  │ • StudentAgent (simulation)                          ││
+│  │ • AdaptiveAgent (simulation)                         ││
 │  └─────────────────────────────────────────────────────┘│
 └─────────────────────────────────────────────────────────┘
          │
@@ -51,12 +50,7 @@ Orchid Ranker operates as a library within the customer's application runtime. T
 - **Optional Fernet encryption at rest**: Logs can be encrypted with symmetric keys before storage
 - **Immutability via chaining**: Each log entry includes HMAC of previous entry, making retroactive modification impossible without invalidating the chain
 
-### 3.4 Model Integrity
-- **Serialization with checksums**: Models saved with `torch.save()` and version metadata
-- **Format validation on load**: Checkpoint structure (version, model_type, state) is validated before restoration
-- **Type checking**: `load_model()` rejects unknown model types; supported types are whitelisted
-
-### 3.5 Credential Security
+### 3.4 Credential Security
 - **from_env/from_vault patterns**: Connectors (Snowflake, BigQuery, S3, MLflow) support credential loading from environment or secret vaults
 - **Password masking**: Sensitive fields (e.g., passwords) are masked in `__repr__()` to prevent accidental log leakage
 - **No hardcoded secrets**: Library design encourages injecting credentials at runtime rather than embedding them
@@ -78,7 +72,7 @@ Orchid Ranker operates as a library within the customer's application runtime. T
 | # | Threat | Category | Mitigation | Residual Risk | Severity |
 |---|--------|----------|-----------|---|----------|
 | 1 | **Model poisoning via malicious training data** | Tampering | Validate input data schema and distributions; log all training dataset accesses; use differential privacy to limit single-record influence | Distributed attacks or subtle poisoning may evade detection if DP epsilon budget is high | Medium |
-| 2 | **Deserialization attacks (torch.load pickle gadgets)** | Tampering | Validate checkpoint format and model_type before instantiation; do not deserialize untrusted checkpoints; use code review for custom model classes | Operators may still deserialize untrusted files if not trained on safe practices | High |
+| 2 | **Deserialization attacks (pickle / torch.load gadgets)** | Tampering | Orchid does not expose a package-root model deserialization helper; operators should avoid loading untrusted checkpoints and prefer signed artifacts | Custom application code may still use unsafe deserialization | High |
 | 3 | **Privacy budget exhaustion without user awareness** | Information Disclosure | RDP accountant tracks epsilon; library warns when budget near exhaustion; deploy monitoring on epsilon drift | Attackers may conduct membership inference via repeated queries if epsilon budget exhausted silently | Medium |
 | 4 | **Audit log tampering via replay or forgery** | Repudiation | HMAC hash-chaining detects tampering; optional Fernet encryption protects at rest | Logs in transit are unencrypted unless TLS enforced by operator; keys must be protected | Medium |
 | 5 | **Credential leakage (API keys, passwords)** | Information Disclosure | `from_env()`/`from_vault()` patterns; password masking in logs; no default hardcoding | Developer mistakes (e.g., logging credentials directly) still possible; requires discipline | Medium |
@@ -86,33 +80,27 @@ Orchid Ranker operates as a library within the customer's application runtime. T
 | 7 | **Side-channel attacks on DP noise generation** | Information Disclosure | Opacus uses cryptographically secure RNG (torch.randn w/ seed); timing of noise addition is constant per batch | Timing attacks on gradient clipping or noise generation theoretically possible but require fine-grained measurement | Low |
 | 8 | **Replay attacks on JWT tokens** | Spoofing | JWTAuthenticator validates exp (expiration) claim; operator must enforce short token TTLs | Tokens valid until expiry can be replayed; no built-in revocation list; requires operator infrastructure | Medium |
 | 9 | **SQL injection via connector parameterization (Snowflake/BigQuery)** | Tampering | Connectors accept parameterized queries; ORM-like patterns prevent raw SQL concatenation | Operators using raw SQL templates may introduce injection; requires query review | Medium |
-| 10 | **Denial of service via large model files** | Denial of Service | No size limits enforced on `load_model()`; operator must set filesystem quotas and network bandwidth limits | Memory exhaustion or disk full possible if untrusted checkpoint loaded; requires monitoring | Low |
+| 10 | **Denial of service via large model artifacts** | Denial of Service | Operator must set filesystem quotas and network bandwidth limits around any application-level model artifact loading | Memory exhaustion or disk full possible if untrusted artifacts are loaded; requires monitoring | Low |
 | 11 | **Unauthorized access to sensitive actions (e.g., dp_sensitive)** | Elevation of Privilege | `AccessControl.require()` enforces policy; missing checks bypass protection | Developers may forget to call `require()` before sensitive operations | Medium |
 | 12 | **Composition attacks across DP training sessions** | Information Disclosure | RDP accounting is per-accountant instance; composition across independent sessions is operator responsibility | Attackers may combine inferences from multiple training runs; operators must manage overall privacy budget | Medium |
 
-## 6. Serialization Security
+## 6. Artifact Loading Security
 
 ### Attack Surface
 
-PyTorch's `torch.load()` uses pickle, which is known to execute arbitrary code during deserialization:
+Python pickle and PyTorch's `torch.load()` can execute arbitrary code during deserialization:
 
 ```python
 # Unsafe pattern (VULNERABLE):
 model = torch.load(untrusted_checkpoint)  # May execute arbitrary code
 ```
 
-### Mitigations Implemented
+### Mitigations
 
-1. **Whitelist model types**: `load_model()` only accepts `OrchidRecommender` or `TwoTowerRecommender`
-2. **Validate checkpoint structure**: Missing `version`, `model_type`, or `state` keys raise `ValueError`
-3. **Version checking**: Mismatched versions trigger a warning
-4. **Type-specific restoration**: Each model type has a dedicated restoration function with explicit construction
-
-```python
-# Safe pattern (IMPLEMENTED):
-if model_type not in {"OrchidRecommender", "TwoTowerRecommender"}:
-    raise ValueError(f"Unknown model type: {model_type}")
-```
+Orchid's public adaptive-learning package root does not expose a generic
+`load_model()` helper. If an application adds its own checkpoint loading, it
+should validate format, provenance, and artifact size before loading, and
+prefer non-pickle formats when artifacts cross trust boundaries.
 
 ### Recommendations for Deployers
 

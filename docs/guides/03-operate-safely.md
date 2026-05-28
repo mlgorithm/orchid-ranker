@@ -68,24 +68,22 @@ guardrail = ProgressionGuardrail(monitor, cfg)
 ## The fallback pattern
 
 Before every rank call, ask the guardrail whether the adaptive policy is still
-safe. If it has tripped, fall back to the frozen baseline from Guide 1.
-Keep that baseline in a separate `baseline_rec` object so the adaptive
-learner and fallback model have clear responsibilities.
+safe. If it has tripped, fall back to a reviewed non-adaptive learning policy:
+for example prerequisite order plus difficulty fit. Keep that fallback in a
+separate object so the adaptive learner and reviewed policy have clear
+responsibilities.
 
 ```python
 if guardrail.evaluate():
     # Adaptive path -- KT, progression reward, and live competence updates
     top = rec.rank(user_id=42, candidate_item_ids=candidates, top_k=10)
 else:
-    # Guardrail fired -- serve the frozen batch baseline
-    top = [(r.item_id, r.score)
-           for r in baseline_rec.baseline_rank(user_id=42, top_k=10,
-                                               candidate_item_ids=candidates)]
+    # Guardrail fired -- serve the reviewed prerequisite/difficulty policy
+    top = reviewed_policy.rank(user_id=42, candidate_item_ids=candidates, top_k=10)
 ```
 
-`baseline_rank` is identical to `recommend` but named explicitly for the
-safety pattern so the intent is clear in code review. Pass the same candidate
-pool to both paths when you need the fallback to rank the same eligible items.
+Pass the same candidate pool to both paths when you need the fallback to rank
+the same eligible learning items.
 
 ## Start the Prometheus metrics server
 
@@ -134,4 +132,4 @@ control group if you run one.
 
 Your recommender is now adaptive, live, and safe. If any metric drops below
 your configured floor, the system automatically falls back to the frozen
-baseline.
+reviewed learning policy.

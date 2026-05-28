@@ -1,5 +1,19 @@
 # Changelog
 
+## Unreleased
+
+### Adaptive-First Cleanup
+
+- Removed the old generic catalog-recommendation API surface from public
+  exports, docs, examples, CI, and benchmarks.
+- Retired batch recommendation, strategy-search, generic tuning,
+  checkpoint-helper, catalog cold-start, curated-feed, taste-progression, and
+  movie/music/e-commerce benchmark artifacts.
+- Re-centered the package contract on adaptive learning: knowledge tracing,
+  learner state, prerequisite-aware progression, offline policy evaluation,
+  semantic new-exercise ranking, differential privacy, and safe rollout
+  guardrails.
+
 ## 0.5.0 - 2026-05-11
 
 ### Adaptive Learning Focus
@@ -51,7 +65,7 @@
 - Fixed offline evaluation correctness so cross-validation uses in-user holdouts, explicit ratings flow into training, and missing users count as zero in aggregate ranking metrics.
 - Tightened security and serialization by requiring HTTPS for JWT issuer/JWKS configuration, preserving encrypted audit-log verification, and removing unsafe pickle-based model loading.
 - Corrected agentic and DP runtime behavior across `TwoTowerRecommender`, `AdaptiveAgent`, and safety-gating paths, including feedback ID normalization, DP budget enforcement, and boundary-probability handling.
-- Serialized shared mutable state in `OrchidRecommender`, `BigQueryConnector`, and MLflow tracking flows to eliminate mixed-state races under concurrent use.
+- Serialized shared mutable state in adaptive-serving, `BigQueryConnector`, and MLflow tracking flows to eliminate mixed-state races under concurrent use.
 - Aligned the published support contract and docs with the tested runtime matrix (Python 3.11–3.13), repaired the docs landing page quick start, and restored changelog coverage for the current release.
 
 ## 0.3.1 - 2026-04-11
@@ -75,7 +89,7 @@ All renamed symbols emit `DeprecationWarning` when accessed via their old name. 
 
 - **Functions renamed**:
   - `learning_gain()` → `progression_gain()`
-  - `knowledge_coverage()` → `proficiency_coverage()`
+  - `knowledge_coverage()` → `category_coverage()`
   - `curriculum_adherence()` → `sequence_adherence()`
 
 - **Parameter renames** (old keyword-only aliases still accepted):
@@ -124,19 +138,6 @@ All renamed symbols emit `DeprecationWarning` when accessed via their old name. 
   - `PrerequisiteGraph` — DAG-based skill dependency graph with cycle detection (DFS), Kahn's topological sort, learning path planning, and serialization.
   - `CurriculumRecommender` — ZPD-aware recommendations respecting prerequisite ordering and difficulty targeting.
 
-- **Model Selection** (`orchid_ranker.model_selection`):
-  - `train_test_split` — Per-user stratified or global train/test splitting.
-  - `cross_validate` — K-fold cross-validation with configurable metrics.
-  - `compare_models` — Side-by-side strategy comparison returning a DataFrame.
-  - `evaluate_on_holdout` — Held-out evaluation for fitted models.
-
-- **Hyperparameter Tuning** (`orchid_ranker.tuning`):
-  - `GridSearchCV` — Exhaustive search over parameter grid with cross-validation scoring.
-  - `RandomSearchCV` — Randomized search with reproducible results.
-
-- **Model Serialization** (`orchid_ranker.serialization`):
-  - `save_model` / `load_model` — Versioned checkpoint save/restore for OrchidRecommender and TwoTowerRecommender with corruption detection and unfitted-model guards.
-
 - **Educational Metrics** (`orchid_ranker.evaluation`):
   - `learning_gain` — Normalized learning gain (pre/post).
   - `knowledge_coverage` — Fraction of skills mastered.
@@ -145,13 +146,12 @@ All renamed symbols emit `DeprecationWarning` when accessed via their old name. 
   - `engagement_score` — Interaction ratio.
   - `EducationalReport` — Structured evaluation report dataclass.
 
-### Recommender Improvements
+### Adaptive Recommender Improvements
 
-- Added `explicit_mf` (FunkSVD-style explicit matrix factorization) to `OrchidRecommender`.
-- Extended `NeuralMatrixFactorizationBaseline` with `loss="bpr"` and `loss="softmax"` for stronger implicit ranking.
-- Added `STRATEGY_GUIDE` dict with human-readable descriptions for all 9 strategies.
-- Added `available_strategies()` classmethod and "did you mean?" typo suggestions via `difflib.get_close_matches`.
-- Added `.save(path)` / `.load(path)` convenience methods on `OrchidRecommender`.
+- Added explicit matrix-factorization and neural-ranking baselines for internal
+  adaptive experiments and teacher/student warm starts.
+- Extended neural baselines with `loss="bpr"` and `loss="softmax"` for stronger
+  implicit ranking inside adaptive simulations.
 
 ### Agentic Improvements
 
@@ -162,34 +162,32 @@ All renamed symbols emit `DeprecationWarning` when accessed via their old name. 
 
 ### Production Hardening
 
-- Replaced global `np.random.seed()` with `np.random.RandomState` instances throughout model_selection and tuning.
+- Replaced global `np.random.seed()` with `np.random.RandomState` instances throughout offline evaluation helpers.
 - Replaced `print()` with `logging.getLogger(__name__)` in production modules.
 - Added input validation for empty DataFrames, invalid fold counts, and empty parameter grids.
 - Narrowed exception handling from broad `Exception` to specific `(ValueError, RuntimeError, KeyError)`.
-- Added checkpoint validation in serialization (unfitted check, required keys, corrupted file detection).
+- Added checkpoint validation for internal PyTorch state persistence.
 - Connector fix: `_require_lib()` calls before retry logic so ImportError is raised immediately.
 
 ### Testing
 
 - 440+ tests across 25 test files including 84 stress tests.
-- Stress test coverage: concurrency (20 threads), numerical stability (81 BKT param combos), scale (200k interactions), mutation safety, serialization roundtrips.
-- New test files: `test_knowledge_tracing.py`, `test_curriculum.py`, `test_educational_metrics.py`, `test_model_selection.py`, `test_tuning.py`, `test_serialization.py`, `test_stress.py`.
+- Stress test coverage: concurrency (20 threads), numerical stability (81 BKT param combos), scale (200k interactions), and mutation safety.
+- New test files covered knowledge tracing, curriculum, educational metrics, and stress behavior.
 
 ### Benchmarks
 
-- `benchmarks/eval_implicit.py` (multi-seed implicit apples-to-apples).
-- `benchmarks/run_agentic_adaptive.py` (fixed vs adaptive with warmup/scheduling, optional Funk).
-- `benchmarks/run_agentic_sklearn_digits.py` (CPU-safe agentic bench on sklearn digits).
+- Added adaptive fixed-vs-online, warmup, scheduling, and CPU-safe agentic benchmarks.
 
 ### Documentation
 
-- Complete README rewrite with 6 quick-start examples, strategy reference, and full module documentation.
+- Complete README rewrite with quick-start examples and full module documentation.
 - `docs/api_reference.md` — Complete API reference for all public classes and functions.
 - Updated docs for new strategy list, benchmarking instructions, and agentic knobs.
 
 ## 0.2.0 - 2025-02-15
 
-- Expanded OrchidRecommender with `user_knn` strategy and formal SUPPORTED_STRATEGIES constant.
+- Expanded the early experimental ranking stack with nearest-neighbor strategy support.
 - Added DP accountant factory with Opacus support; introduced AuditLogger and RBAC enforcement.
 - Delivered deployment assets: Dockerfile, Helm chart skeleton, Terraform reference.
 - Introduced connectors (Snowflake, BigQuery, S3 streaming, MLflow) and Prometheus observability helpers.

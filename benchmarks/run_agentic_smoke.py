@@ -25,7 +25,7 @@ if SRC_PATH.is_dir() and str(SRC_PATH) not in sys.path:
 import numpy as np
 import torch
 
-from orchid_ranker import MultiConfig, MultiUserOrchestrator, StudentAgentFactory, UserCtx
+from orchid_ranker import AdaptiveAgentFactory, MultiConfig, MultiUserOrchestrator, UserCtx
 from orchid_ranker.agents.recommender_agent import TwoTowerRecommender
 from orchid_ranker.utils import select_device
 
@@ -34,7 +34,7 @@ def _build_students(num_users: int, knowledge_dim: int, device: torch.device) ->
     user_vecs = torch.rand(num_users, knowledge_dim, device=device)
     users: list[UserCtx] = []
     for idx in range(num_users):
-        agent = StudentAgentFactory.create("zpd", user_id=idx, seed=idx + 7, verbose=False)
+        agent = AdaptiveAgentFactory.create("zpd", user_id=idx, seed=idx + 7, verbose=False)
         users.append(UserCtx(user_id=idx, user_idx=idx, student=agent, user_vec=user_vecs[idx : idx + 1]))
     return users, user_vecs
 

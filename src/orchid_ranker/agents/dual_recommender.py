@@ -86,7 +86,7 @@ class DualRecommender:
 
     def _sync_student_teacher_anchor(self):
         """Keep a wrapped student's internal KL anchor aligned with the wrapper teacher."""
-        anchor = getattr(self.student, "teacher", None)
+        anchor = getattr(self.student, "anchor", None)
         if anchor is None or not hasattr(anchor, "parameters"):
             return
         try:

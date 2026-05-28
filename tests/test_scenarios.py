@@ -43,15 +43,28 @@ def test_recommend_scenarios_selects_safe_rollout_for_guardrails():
     assert "evaluate_logged_policy" in matches[0].scenario.entrypoints
 
 
-def test_recommend_scenarios_selects_generic_streaming_without_learning_metadata():
+def test_recommend_scenarios_does_not_offer_generic_streaming_without_learning_metadata():
     matches = recommend_scenarios(
         has_interactions=True,
         needs_live_adaptation=True,
         use_case="streaming online recommender",
     )
 
-    assert matches[0].scenario.id == "generic_streaming_recommender"
-    assert any("learning metadata is missing" in reason for reason in matches[0].reasons)
+    assert matches[0].scenario.id == "adaptive_learning_next_item"
+    assert "generic_streaming_recommender" not in {fit.scenario.id for fit in matches}
+
+
+def test_recommend_scenarios_selects_semantic_cold_start_for_new_exercises():
+    matches = recommend_scenarios(
+        has_item_features=True,
+        has_concepts=True,
+        has_difficulty=True,
+        has_new_users=True,
+        use_case="new exercise cold start for adaptive practice",
+    )
+
+    assert matches[0].scenario.id == "new_user_cold_start"
+    assert "AdaptiveRanker.fit_semantic_items" in matches[0].scenario.entrypoints
 
 
 def test_recommend_scenarios_validates_top_k():

@@ -10,12 +10,12 @@ prerequisites, and live re-ranking after an outcome.
 python -m venv .venv
 source .venv/bin/activate  # Windows: .venv\\Scripts\\activate
 pip install --upgrade pip
-pip install 'orchid-ranker[ml]'
+pip install 'orchid-ranker[adaptive]'
 ```
 
 The base `pip install orchid-ranker` package is for torch-free progression
 utilities. `AdaptiveLearningEngine` uses PyTorch-backed tracing, so install
-the adaptive/ML extra for the primary workflow.
+the adaptive extra for the primary workflow.
 
 ## 2. Fit, Rank, Observe
 
@@ -52,27 +52,22 @@ for predicted-correctness ranking from learner sequences,
 `examples/akt_quickstart.py` for difficulty-aware tracing, and
 `examples/kt_policy_quickstart.py` for KT-guided next-item ranking.
 
-## 3. CLI Evaluation
+## 3. Evaluate Adaptive Policies
 
 ```bash
 python examples/adaptive_learning_quickstart.py
-
-orchid-evaluate \
-  --train examples/data/quickstart_train.csv \
-  --test examples/data/quickstart_test.csv \
-  --strategy "als,epochs=3" \
-  --top-k 5
 ```
 
-The CLI outputs Precision@5, Recall@5, MAP@10, and NDCG@10 for compatibility
-benchmarking. Adaptive-learning policy evaluation should additionally use OPE,
-progression reward, calibration, and chronological splits.
+Adaptive-learning policy evaluation should use progression reward,
+calibration, chronological splits, and OPE from logged decisions. Start with
+`examples/offline_policy_evaluation_quickstart.py` and
+`docs/benchmarks/credibility.md`.
 
 ## 4. Optional Extras
 
 - Prometheus metrics: `orchid_ranker.start_metrics_server()`.
 - Differential privacy: pass `dp_cfg` with engine `"opacus"` or `"per_sample"` (see `docs/privacy.md`).
-- Agentic simulations: install `[agentic]` extra and see the examples in `examples/`.
+- Agentic simulations: install `[agentic]` extra and use them as adaptive-learning test harnesses.
 
 ## Next Steps
 
@@ -81,4 +76,4 @@ progression reward, calibration, and chronological splits.
 - Browse `docs/scenarios.md` for practical deployment recipes.
 - Browse `docs/algorithm-roadmap.md` for planned KT and policy-learning algorithms.
 - Use `docs/guides/01-fit-offline.md` for batch usage.
-- Use `docs/guides/02-serve-streaming.md` when you need live adaptation.
+- Use `docs/guides/02-serve-streaming.md` when you need live learner-state adaptation.

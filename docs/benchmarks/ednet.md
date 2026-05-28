@@ -100,8 +100,7 @@ activity streams (OULAD) and dense, homogeneous question-response logs
 
 More importantly, EdNet tests the adaptive-learning pieces Orchid now leads
 with: learner-state tracing, difficulty-aware ranking, and chronological replay
-without leakage. MovieLens and music remain specialty/fallback benchmarks, not
-the core proof point.
+without leakage.
 
 ## Reproducibility
 
@@ -141,6 +140,4 @@ specified in `configs/ednet.yaml`; all seeds are fixed for reproducibility.
 
 - [Case study: OULAD](oulad.md) — the companion education case study, focused
   on VLE activity ranking.
-- [MovieLens-1M benchmark](movielens-1m.md) — generic recommender fallback
-  comparison outside the adaptive-learning core.
 - [Benchmarking guide](../benchmarking.md) — how to run all benchmarks.

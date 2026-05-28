@@ -50,7 +50,7 @@ def require_torch(feature: str = "This feature") -> None:
     if not torch_available():
         raise ImportError(
             f"{feature} requires PyTorch. "
-            "Install it with: pip install orchid-ranker[ml]  "
+            "Install it with: pip install orchid-ranker[adaptive]  "
             "or: pip install torch>=2.0"
         )
 

@@ -38,12 +38,6 @@ engineers can locate entry points quickly.
 - `orchid_ranker.pykt_bridge`: export Orchid interactions to pyKT sequence
   format and reuse pyKT prediction tables behind Orchid policies and OPE.
 
-## Compatibility Namespace
-
-`orchid_ranker.legacy` contains the historical generic recommender API for old
-experiments and migration. It is intentionally outside the main adaptive
-workflow and should not be used for new adaptive-learning features.
-
 ## Streaming and Safety
 - `orchid_ranker.streaming.StreamingAdaptiveRanker`: lower-level streaming
   runtime for custom towers.
@@ -94,17 +88,13 @@ workflow and should not be used for new adaptive-learning features.
 
 ## Automation helpers
 - `tests/`: run `pytest` for quick regressions (see `requirements-dev.txt`).
-- `benchmarks/compare_surprise.py`: fit Orchid ALS and Surprise SVD side by side
-  on your dataset to compare RMSE.
-- `benchmarks/compare_implicit.py`: benchmark Orchid ALS against the
-  `implicit` library on identical train/test splits.
-- `benchmarks/compare_reclab.py`: evaluate Orchid versus ReCLaB's TopPop
-  baseline using dense ratings generated from ReCLaB environments.
+- `benchmarks/adaptive_efficiency_benchmark.py`: generate the adaptive-learning
+  credibility report and JSON metrics artifact.
+- `benchmarks/kt_policy_ope_benchmark.py`: evaluate KT-guided next-item
+  policies with logged-policy estimators.
 - `benchmarks/run_agentic_smoke.py`: execute a synthetic multi-round agentic
   simulation to ensure orchestrator wiring works end-to-end.
 - `orchid_ranker.logging.configure_logging`: centralise logs for deployment.
-- `OrchidRecommender(validate_inputs=True)`: enforce schema validation on
-  incoming interaction data.
 
 Refer to the README quickstart for runnable examples and the `examples/`
 folder for scripts that can be copied into notebooks. For product-specific

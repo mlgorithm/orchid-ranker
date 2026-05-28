@@ -32,7 +32,7 @@ from orchid_ranker.agents.recommender_agent import (
     JSONLLogger,
     TwoTowerRecommender,
 )
-from orchid_ranker.agents.student_agent import AdaptiveAgent as StudentAgent
+from orchid_ranker.agents.student_agent import AdaptiveAgent
 
 logger = logging.getLogger(__name__)
 if not logger.handlers:
@@ -90,7 +90,7 @@ class MultiConfig:
 class UserCtx:
     user_id: int           # external user ID
     user_idx: int          # internal index into user_matrix
-    student: Any           # StudentAgent instance
+    student: Any           # AdaptiveAgent instance
     user_vec: torch.Tensor # [1, Du] — dense side-features row for the user
     profile: Optional[str] = None  # profile tag used for fairness stats
 
@@ -207,7 +207,7 @@ class MultiUserOrchestrator:
         self._hist_centroid: Dict[int, torch.Tensor] = {}
 
         # Handy handles
-        self._core = rec.teacher if hasattr(rec, "teacher") else rec
+        self._core = rec.teacher if isinstance(rec, DualRecommender) else rec
         self._device = self.device
         self._user_hist = defaultdict(lambda: {"seen": set(), "mean_diff": 0.5, "n": 0})
 
@@ -424,7 +424,7 @@ class MultiUserOrchestrator:
         )
 
 
-    def _update_user_state_from_sim(self, uid: int, student: StudentAgent) -> None:
+    def _update_user_state_from_sim(self, uid: int, student: AdaptiveAgent) -> None:
         prev = self.state.get(uid)
         prev_k = float(prev.get("knowledge", 0.5)) if prev else 0.5
         prev_eng = float(prev.get("engagement", 0.6)) if prev else 0.6
@@ -640,7 +640,7 @@ class MultiUserOrchestrator:
         """
         # ---------- setup ----------
         rounds = int(self.cfg.rounds)
-        is_adaptive = hasattr(self.rec, "teacher") and hasattr(self.rec, "student")
+        is_adaptive = isinstance(self.rec, DualRecommender)
         mode_label = "adaptive (teacher+student)" if is_adaptive else "fixed (single model)"
 
         # DP owner: student if adaptive, otherwise the single model

@@ -7,8 +7,7 @@ import numpy as np
 import pandas as pd
 import torch
 
-from orchid_ranker import TwoTowerRecommender
-from orchid_ranker.agents.recommender_agent import DualRecommender
+from orchid_ranker.agents.recommender_agent import DualRecommender, TwoTowerRecommender
 from orchid_ranker.baselines import (
     ALSBaseline,
     LinUCBBaseline,

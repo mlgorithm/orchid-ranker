@@ -466,8 +466,17 @@ class DatasetLoader:
 
     @staticmethod
     def _infer_schema(df: pd.DataFrame) -> Tuple[list[str], list[str]]:
-        cat = df.select_dtypes(include=["object", "category"]).columns.tolist()
-        num = df.select_dtypes(exclude=["object", "category"]).columns.tolist()
+        cat: list[str] = []
+        num: list[str] = []
+        for col, dtype in df.dtypes.items():
+            if (
+                pd.api.types.is_object_dtype(dtype)
+                or pd.api.types.is_string_dtype(dtype)
+                or isinstance(dtype, pd.CategoricalDtype)
+            ):
+                cat.append(str(col))
+            else:
+                num.append(str(col))
         for rid in ("u", "i", "id"):
             if rid in cat:
                 cat.remove(rid)

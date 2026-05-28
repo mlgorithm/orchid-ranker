@@ -5,20 +5,19 @@
 - Breaking API changes are introduced only in MAJOR releases, with deprecation notices provided at least one MINOR release beforehand.
 - Public interfaces center on `AdaptiveRanker`, `AdaptiveLearningEngine`,
   `AdaptiveLearningRecommender`, adaptive algorithm helpers, scenario-selection
-  helpers, experiment runners, benchmarking scripts, and documented extras.
-  Historical generic recommenders are compatibility APIs under
-  `orchid_ranker.legacy`, not the primary product surface.
+  helpers, adaptive-learning benchmark scripts, and documented extras. Generic
+  recommender model-zoo APIs are not part of the supported public surface.
 
 ## Supported Runtime Matrix
 - Python: 3.11 – 3.13 (verified in CI across CPython builds).
-- PyTorch: 2.x for torch-backed extras (`ml`, `torch`, `implicit`, `streaming`, `enterprise`, `agentic`, `benchmarks`).
+- PyTorch: 2.x for torch-backed extras (`adaptive`, `torch`, `offline_rl`, `bandits`, `streaming`, `enterprise`, `agentic`, `benchmarks`).
 - Operating systems: Ubuntu 22.04 LTS, macOS 14+, Windows Server 2022 (CPU paths).
 
 ## Typing Support
 - The package ships inline type hints with a partial `py.typed` marker.
 - CI runs `mypy src/orchid_ranker` with repository-owned overrides that keep the
-  hardened public core checked: recommender, model selection, evaluation, and
-  serialization.
+  hardened public core checked: adaptive learning, learner-state tracing,
+  progression evaluation, and safe-rollout utilities.
 - Experimental, benchmark, connector, and agentic modules remain import- and
   runtime-tested, but are not yet covered by the typed-core guarantee.
 
@@ -35,4 +34,4 @@
 - GitHub issues for bug reports and feature requests.
 - Enterprise subscribers gain access to dedicated support SLAs, onboarding sessions, and private roadmap briefings.
 
-Updated: 2026-05-08
+Updated: 2026-05-28

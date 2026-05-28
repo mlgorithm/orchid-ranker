@@ -1,378 +1,133 @@
-"""
-End-to-end integration tests for Orchid Ranker.
-
-These tests validate complete workflows from raw data through
-fit → evaluate → save → load → recommend → knowledge trace → curriculum.
-"""
+"""End-to-end adaptive-learning workflows."""
+from __future__ import annotations
 
 import math
-import os
-import tempfile
 
 import numpy as np
 import pandas as pd
-
-# ════════════════════════════════════════════════════════════════════════
-# 1.  FULL RECOMMENDER PIPELINE
-# ════════════════════════════════════════════════════════════════════════
-
-class TestRecommenderPipeline:
-    """Raw data → split → fit → evaluate → save → load → recommend."""
-
-    def test_full_pipeline_popularity(self):
-        from orchid_ranker import (
-            OrchidRecommender,
-            evaluate_on_holdout,
-            load_model,
-            save_model,
-            train_test_split,
-        )
-
-        # 1. Generate raw data
-        rng = np.random.RandomState(42)
-        interactions = pd.DataFrame({
-            "user_id": rng.randint(0, 20, size=500),
-            "item_id": rng.randint(0, 30, size=500),
-            "rating":  rng.uniform(1, 5, size=500).round(1),
-        })
-
-        # 2. Split
-        train, test = train_test_split(
-            interactions,
-            test_size=0.2,
-            by_user=True,
-            random_state=42,
-            allow_random_within_user=True,
-        )
-        assert len(train) > 0
-        assert len(test) > 0
-        assert len(train) + len(test) == len(interactions)
-
-        # 3. Fit
-        rec = OrchidRecommender(strategy="popularity")
-        rec.fit(train)
-
-        # 4. Evaluate
-        metrics = evaluate_on_holdout(rec, test)
-        assert isinstance(metrics, dict)
-        assert len(metrics) > 0
-
-        # 5. Recommend
-        uid = train["user_id"].iloc[0]
-        recs = rec.recommend(user_id=uid, top_k=5)
-        assert isinstance(recs, list)
-        assert len(recs) <= 5
-
-        # 6. Save
-        with tempfile.NamedTemporaryFile(suffix=".orchid", delete=False) as f:
-            path = f.name
-        try:
-            save_model(rec, path)
-            assert os.path.exists(path)
-            assert os.path.getsize(path) > 0
-
-            # 7. Load
-            loaded = load_model(path)
-
-            # 8. Loaded model produces same recommendations
-            recs_loaded = loaded.recommend(user_id=uid, top_k=5)
-            assert recs == recs_loaded
-        finally:
-            os.unlink(path)
-
-    def test_full_pipeline_als(self):
-        from orchid_ranker import (
-            OrchidRecommender,
-            load_model,
-            save_model,
-            train_test_split,
-        )
-
-        rng = np.random.RandomState(7)
-        interactions = pd.DataFrame({
-            "user_id": rng.randint(0, 15, size=300),
-            "item_id": rng.randint(0, 25, size=300),
-            "rating":  rng.uniform(1, 5, size=300).round(1),
-        })
-
-        train, test = train_test_split(interactions, test_size=0.2, allow_random_within_user=True)
-        rec = OrchidRecommender(strategy="legacy_binary_mf", epochs=3)
-        rec.fit(train)
-
-        uid = train["user_id"].iloc[0]
-        recs = rec.recommend(user_id=uid, top_k=5)
-        assert len(recs) <= 5
-
-        with tempfile.NamedTemporaryFile(suffix=".orchid", delete=False) as f:
-            path = f.name
-        try:
-            save_model(rec, path)
-            loaded = load_model(path)
-            recs2 = loaded.recommend(user_id=uid, top_k=5)
-            assert recs == recs2
-        finally:
-            os.unlink(path)
-
-
-# ════════════════════════════════════════════════════════════════════════
-# 2.  CROSS-VALIDATION + TUNING PIPELINE
-# ════════════════════════════════════════════════════════════════════════
-
-class TestCVTuningPipeline:
-    """Cross-validate → compare → tune → best model."""
-
-    def test_cross_validate_and_compare(self):
-        from orchid_ranker import compare_models, cross_validate
-
-        rng = np.random.RandomState(42)
-        interactions = pd.DataFrame({
-            "user_id": rng.randint(0, 15, size=400),
-            "item_id": rng.randint(0, 20, size=400),
-            "rating":  rng.uniform(1, 5, size=400).round(1),
-        })
-
-        # Cross-validate a single strategy
-        cv_results = cross_validate(interactions, strategy="popularity", k=3, allow_random_within_user=True)
-        assert isinstance(cv_results, dict)
-
-        # Compare multiple strategies
-        comparison = compare_models(
-            interactions,
-            strategies=["popularity"],
-            k=2,
-            allow_random_within_user=True,
-        )
-        assert isinstance(comparison, pd.DataFrame)
-
-    def test_grid_search_pipeline(self):
-        from orchid_ranker import GridSearchCV
-
-        rng = np.random.RandomState(42)
-        interactions = pd.DataFrame({
-            "user_id": rng.randint(0, 15, size=400),
-            "item_id": rng.randint(0, 20, size=400),
-            "rating":  rng.uniform(1, 5, size=400).round(1),
-        })
-
-        gs = GridSearchCV(
-            strategy="popularity",
-            param_grid={"n_recommendations": [5, 10]},
-            cv=2,
-            allow_random_within_user=True,
-        )
-        gs.fit(interactions)
-        assert gs.best_params_ is not None
-        assert gs.best_score_ is not None
-
-
-# ════════════════════════════════════════════════════════════════════════
-# 3.  KNOWLEDGE TRACING PIPELINE
-# ════════════════════════════════════════════════════════════════════════
-
-class TestKnowledgeTracingPipeline:
-    """BKT → MasteryTracker → ForgettingCurve → educational metrics."""
-
-    def test_bkt_to_mastery_to_metrics(self):
-        from orchid_ranker import (
-            ForgettingCurve,
-            MasteryTracker,
-            knowledge_coverage,
-            learning_gain,
-        )
-
-        # 1. Track mastery across skills
-        skills = ["algebra", "geometry", "calculus"]
-        tracker = MasteryTracker(skills=skills)
-
-        # 2. Simulate student attempts
-        rng = np.random.RandomState(42)
-        for _ in range(100):
-            skill = rng.choice(skills)
-            correct = rng.random() > 0.3
-            tracker.update(skill, correct=correct)
-
-        # 3. Check mastery
-        mastered = tracker.mastered_skills()
-        assert isinstance(mastered, (set, list, frozenset))
-
-        # 4. Compute educational metrics
-        coverage = knowledge_coverage(set(mastered), set(skills))
-        assert 0.0 <= coverage <= 1.0
-
-        gain = learning_gain(pre_score=0.3, post_score=0.7)
-        assert gain > 0.0
-
-        # 5. Forgetting curve
-        fc = ForgettingCurve()
-        fc.review()
-        retention = fc.retention_at(3600.0)
-        assert 0.0 <= retention <= 1.0
-        assert fc.should_review(threshold=0.5) in (True, False)
-
-    def test_bkt_numerical_stability_pipeline(self):
-        from orchid_ranker import BayesianKnowledgeTracing
-
-        bkt = BayesianKnowledgeTracing(p_init=0.05, p_transit=0.05, p_slip=0.15, p_guess=0.25)
-
-        # Run through a realistic student trajectory
-        trajectory = [True, False, True, True, False, True, True, True, True, True] * 10
-        for correct in trajectory:
-            bkt.update(correct=correct)
-
-        p = bkt.p_known
-        assert 0.0 <= p <= 1.0
-        assert not math.isnan(p)
-        assert not math.isinf(p)
-
-
-# ════════════════════════════════════════════════════════════════════════
-# 4.  CURRICULUM PIPELINE
-# ════════════════════════════════════════════════════════════════════════
-
-class TestCurriculumPipeline:
-    """Graph → topological order → recommend → advance mastery → recommend again."""
-
-    def test_full_curriculum_workflow(self):
-        from orchid_ranker import (
-            CurriculumRecommender,
-            PrerequisiteGraph,
-        )
-
-        # 1. Build prerequisite graph
-        graph = PrerequisiteGraph()
-        graph.add_edge("fractions", "algebra")
-        graph.add_edge("algebra", "calculus")
-        graph.add_edge("algebra", "statistics")
-        graph.add_edge("calculus", "differential_equations")
-
-        # 2. Verify topological order
-        order = graph.topological_order()
-        assert order.index("fractions") < order.index("algebra")
-        assert order.index("algebra") < order.index("calculus")
-
-        # 3. Create recommender
-        all_skills = ["fractions", "algebra", "calculus", "statistics", "differential_equations"]
-        cr = CurriculumRecommender(
-            graph=graph,
-            difficulty_map={s: 0.2 + 0.15 * i for i, s in enumerate(all_skills)},
-        )
-
-        # 4. Start with nothing mastered
-        recs = cr.recommend(student_mastery=set(), n=5)
-        assert "fractions" in recs
-        assert "calculus" not in recs  # prerequisite not met
-
-        # 5. Master fractions → algebra becomes available
-        recs = cr.recommend(student_mastery={"fractions"}, n=5)
-        assert "algebra" in recs
-
-        # 6. Master algebra → calculus and statistics become available
-        recs = cr.recommend(student_mastery={"fractions", "algebra"}, n=5)
-        assert "calculus" in recs or "statistics" in recs
-        assert "differential_equations" not in recs  # needs calculus first
-
-        # 7. Serialize and restore graph
-        data = graph.to_dict()
-        graph2 = PrerequisiteGraph.from_dict(data)
-        assert graph2.topological_order() == graph.topological_order()
-
-
-# ════════════════════════════════════════════════════════════════════════
-# 5.  EDUCATIONAL METRICS PIPELINE
-# ════════════════════════════════════════════════════════════════════════
-
-class TestEducationalMetricsPipeline:
-    """Full evaluation pipeline combining ranking and educational metrics."""
-
-    def test_combined_evaluation(self):
-        from orchid_ranker import (
-            OrchidRecommender,
-            difficulty_appropriateness,
-            engagement_score,
-            knowledge_coverage,
-            learning_gain,
-            train_test_split,
-        )
-
-        rng = np.random.RandomState(42)
-        interactions = pd.DataFrame({
-            "user_id": rng.randint(0, 20, size=500),
-            "item_id": rng.randint(0, 30, size=500),
-            "rating":  rng.uniform(1, 5, size=500).round(1),
-        })
-
-        train, test = train_test_split(interactions, test_size=0.2, allow_random_within_user=True)
-        rec = OrchidRecommender(strategy="popularity")
-        rec.fit(train)
-
-        uid = train["user_id"].iloc[0]
-        rec.recommend(user_id=uid, top_k=10)
-
-        # Educational metrics
-        gain = learning_gain(0.3, 0.75)
-        assert 0.0 < gain <= 1.0
-
-        coverage = knowledge_coverage({"a", "b"}, {"a", "b", "c", "d"})
-        assert coverage == 0.5
-
-        appropriateness = difficulty_appropriateness([0.5, 0.55, 0.6], 0.5, 0.25)
-        assert 0.0 <= appropriateness <= 1.0
-
-        eng = engagement_score([1, 2, 3, 4, 5], 10)
-        assert 0.0 <= eng <= 1.0
-
-
-# ════════════════════════════════════════════════════════════════════════
-# RUNNER
-# ════════════════════════════════════════════════════════════════════════
-def run_all():
-    """Simple test runner for E2E tests."""
-    test_classes = [
-        TestRecommenderPipeline,
-        TestCVTuningPipeline,
-        TestKnowledgeTracingPipeline,
-        TestCurriculumPipeline,
-        TestEducationalMetricsPipeline,
+import pytest
+
+
+def _events() -> pd.DataFrame:
+    rng = np.random.RandomState(42)
+    rows = []
+    catalog = [
+        (101, "number-sense", 0.20),
+        (102, "number-sense", 0.25),
+        (201, "fractions", 0.45),
+        (202, "fractions", 0.52),
+        (301, "ratios", 0.65),
     ]
-
-    total = 0
-    passed = 0
-    failed = 0
-    errors = 0
-    failures = []
-
-    for cls in test_classes:
-        instance = cls()
-        methods = [m for m in dir(instance) if m.startswith("test_")]
-        print(f"\n--- {cls.__name__} ---")
-        for method_name in sorted(methods):
-            total += 1
-            test_id = f"{cls.__name__}.{method_name}"
-            try:
-                getattr(instance, method_name)()
-                passed += 1
-                print(f"  PASS  {test_id}")
-            except AssertionError as e:
-                failed += 1
-                failures.append((test_id, "FAIL", str(e)))
-                print(f"  FAIL  {test_id}: {e}")
-            except Exception as e:
-                errors += 1
-                failures.append((test_id, "ERROR", f"{type(e).__name__}: {e}"))
-                print(f"  ERROR {test_id}: {type(e).__name__}: {e}")
-
-    print(f"\n{'='*60}")
-    print(f"E2E RESULTS: {passed} passed, {failed} failed, {errors} errors / {total} total")
-    print(f"{'='*60}")
-
-    if failures:
-        print("\nFAILURES:")
-        for test_id, status, msg in failures:
-            print(f"  [{status}] {test_id}")
-            print(f"         {msg[:200]}")
-
-    return passed, failed, errors, total
+    for learner in range(8):
+        ability = 0.35 + learner * 0.07
+        for item_id, concept, difficulty in catalog:
+            p_correct = float(np.clip(0.65 + ability - difficulty, 0.05, 0.95))
+            rows.append(
+                {
+                    "learner_id": f"learner-{learner}",
+                    "item_id": item_id,
+                    "correct": int(rng.binomial(1, p_correct)),
+                    "ts": len(rows),
+                    "concept_id": concept,
+                    "difficulty": difficulty,
+                    "item_text": f"{concept} exercise {item_id}",
+                }
+            )
+    return pd.DataFrame(rows)
 
 
-if __name__ == "__main__":
-    run_all()
+def test_adaptive_ranker_fit_recommend_observe_and_diagnostics() -> None:
+    pytest.importorskip("torch")
+    from orchid_ranker import AdaptiveRanker
+
+    events = _events()
+    catalog = events.drop_duplicates("item_id")[["item_id", "concept_id", "difficulty", "item_text"]]
+    ranker = AdaptiveRanker(
+        kt_backbone="akt",
+        policy="auto",
+        epochs=1,
+        d_model=8,
+        n_heads=2,
+        batch_size=8,
+        device="cpu",
+    ).fit_kt(
+        events,
+        learner_col="learner_id",
+        item_col="item_id",
+        correct_col="correct",
+        timestamp_col="ts",
+        concept_col="concept_id",
+        item_difficulty_col="difficulty",
+        prerequisite_by_concept={"fractions": ["number-sense"], "ratios": ["fractions"]},
+    )
+    ranker.fit_semantic_items(catalog, text_col="item_text", metadata_cols=["concept_id", "difficulty"])
+
+    ranked = ranker.recommend("learner-1", [101, 201, 202, 301], top_k=3)
+    assert ranked
+    observed_item = catalog.set_index("item_id").loc[ranked[0].item_id]
+    ranker.observe(
+        learner_id="learner-1",
+        ts=99,
+        item_id=ranked[0].item_id,
+        concept_id=observed_item["concept_id"],
+        correct=1,
+    )
+
+    diagnostics = ranker.diagnostics()
+    assert diagnostics["policy"] == "progression"
+    assert diagnostics["adaptive_ranker"]["kt_backbone"] == "akt"
+
+
+def test_knowledge_tracing_to_progression_metrics_pipeline() -> None:
+    from orchid_ranker import (
+        BayesianKnowledgeTracing,
+        ForgettingCurve,
+        ProficiencyTracker,
+        category_coverage,
+        progression_gain,
+        stretch_fit,
+    )
+
+    tracker = ProficiencyTracker(skills=["number-sense", "fractions", "ratios"])
+    for skill, correct in [
+        ("number-sense", True),
+        ("number-sense", True),
+        ("fractions", False),
+        ("fractions", True),
+        ("ratios", False),
+    ]:
+        tracker.update(skill, correct=correct)
+
+    mastered = tracker.succeeded()
+    assert isinstance(mastered, (set, list, frozenset))
+    assert 0.0 <= category_coverage(set(mastered), {"number-sense", "fractions", "ratios"}) <= 1.0
+    assert progression_gain(pre_score=0.3, post_score=0.7) > 0.0
+    assert 0.0 <= stretch_fit([0.45, 0.55], 0.50, 0.20) <= 1.0
+
+    bkt = BayesianKnowledgeTracing(p_init=0.05, p_transit=0.05, p_slip=0.15, p_guess=0.25)
+    for correct in [True, False, True, True, False, True] * 5:
+        bkt.update(correct=correct)
+    assert 0.0 <= bkt.p_known <= 1.0
+    assert not math.isnan(bkt.p_known)
+
+    fc = ForgettingCurve()
+    fc.review()
+    assert 0.0 <= fc.retention_at(3600.0) <= 1.0
+
+
+def test_curriculum_pipeline() -> None:
+    from orchid_ranker import DependencyGraph, ProgressionRecommender
+
+    graph = DependencyGraph()
+    graph.add_edge("number-sense", "fractions")
+    graph.add_edge("fractions", "ratios")
+
+    recommender = ProgressionRecommender(
+        graph=graph,
+        difficulty_map={"number-sense": 0.2, "fractions": 0.45, "ratios": 0.65},
+    )
+    assert recommender.recommend(set(), n=3) == ["number-sense"]
+    assert "fractions" in recommender.recommend({"number-sense"}, n=3)
+
+    restored = DependencyGraph.from_dict(graph.to_dict())
+    assert restored.topological_order() == graph.topological_order()

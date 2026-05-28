@@ -1,4 +1,4 @@
-"""Comprehensive tests for StudentAgent and StudentAgentFactory."""
+"""Comprehensive tests for AdaptiveAgent and AdaptiveAgentFactory."""
 import sys
 
 sys.path.insert(0, "src")
@@ -7,9 +7,9 @@ import numpy as np
 import pytest
 
 from orchid_ranker.agents.student_agent import (
+    AdaptiveAgent,
+    AdaptiveAgentFactory,
     ItemMeta,
-    StudentAgent,
-    StudentAgentFactory,
 )
 
 
@@ -21,12 +21,12 @@ class _ZeroNoiseRng:
         return np.zeros(size if size is not None else (), dtype=float)
 
 
-class TestStudentAgentInitialization:
-    """Test StudentAgent initialization with different modes."""
+class TestAdaptiveAgentInitialization:
+    """Test AdaptiveAgent initialization with different modes."""
 
     def test_init_scalar_knowledge(self):
         """Test initialization with scalar knowledge mode."""
-        agent = StudentAgent(user_id=1, knowledge_mode="scalar", seed=42)
+        agent = AdaptiveAgent(user_id=1, knowledge_mode="scalar", seed=42)
         assert agent.user_id == 1
         assert agent.knowledge_mode == "scalar"
         assert isinstance(agent.knowledge, float)
@@ -34,7 +34,7 @@ class TestStudentAgentInitialization:
 
     def test_init_vector_knowledge(self):
         """Test initialization with vector knowledge mode."""
-        agent = StudentAgent(
+        agent = AdaptiveAgent(
             user_id=2,
             knowledge_dim=5,
             knowledge_mode="vector",
@@ -47,7 +47,7 @@ class TestStudentAgentInitialization:
 
     def test_init_default_latents(self):
         """Test default initialization of latent variables."""
-        agent = StudentAgent(user_id=1)
+        agent = AdaptiveAgent(user_id=1)
         assert 0.0 <= agent.fatigue <= 1.0
         assert 0.0 <= agent.trust <= 1.0
         assert 0.0 <= agent.engagement <= 1.0
@@ -55,28 +55,27 @@ class TestStudentAgentInitialization:
         assert agent.trust == 0.5  # default
 
     def test_init_custom_params(self):
-        """Test initialization with custom parameters (deprecated aliases)."""
-        with pytest.warns(DeprecationWarning, match="deprecated"):
-            agent = StudentAgent(
-                user_id=1,
-                lr=0.3,
-                decay=0.2,
-                base_topk=5,
-                act_mode="MIRT",
-                seed=99,
-            )
+        """Test initialization with custom stable parameters."""
+        agent = AdaptiveAgent(
+            user_id=1,
+            learning_rate=0.3,
+            decay=0.2,
+            base_topk=5,
+            ability_model="MIRT",
+            seed=99,
+        )
         assert agent.lr == 0.3
         assert agent.decay == 0.2
         assert agent.base_topk == 5
         assert agent.act_mode == "MIRT"
 
 
-class TestStudentAgentProfile:
+class TestAdaptiveAgentProfile:
     """Test profile() method."""
 
     def test_profile_scalar(self):
         """Test profile returns correct structure for scalar mode."""
-        agent = StudentAgent(user_id=42, knowledge_mode="scalar", seed=42)
+        agent = AdaptiveAgent(user_id=42, knowledge_mode="scalar", seed=42)
         prof = agent.profile()
 
         assert isinstance(prof, dict)
@@ -90,7 +89,7 @@ class TestStudentAgentProfile:
 
     def test_profile_vector(self):
         """Test profile returns correct structure for vector mode."""
-        agent = StudentAgent(
+        agent = AdaptiveAgent(
             user_id=42,
             knowledge_dim=3,
             knowledge_mode="vector",
@@ -108,7 +107,7 @@ class TestSetInitialLatents:
 
     def test_clamps_scalar_knowledge(self):
         """Test that scalar knowledge is clamped to [0,1]."""
-        agent = StudentAgent(user_id=1, knowledge_mode="scalar")
+        agent = AdaptiveAgent(user_id=1, knowledge_mode="scalar")
         agent.set_initial_latents(knowledge=1.5)
         assert agent.knowledge == 1.0
         agent.set_initial_latents(knowledge=-0.5)
@@ -116,13 +115,13 @@ class TestSetInitialLatents:
 
     def test_clamps_vector_knowledge(self):
         """Test that vector knowledge is clamped to [0,1]."""
-        agent = StudentAgent(user_id=1, knowledge_dim=3, knowledge_mode="vector")
+        agent = AdaptiveAgent(user_id=1, knowledge_dim=3, knowledge_mode="vector")
         agent.set_initial_latents(knowledge=[1.5, -0.5, 0.5])
         assert agent.knowledge == [1.0, 0.0, 0.5]
 
     def test_clamps_fatigue(self):
         """Test that fatigue is clamped to [0,1]."""
-        agent = StudentAgent(user_id=1)
+        agent = AdaptiveAgent(user_id=1)
         agent.set_initial_latents(fatigue=1.5)
         assert agent.fatigue == 1.0
         agent.set_initial_latents(fatigue=-0.1)
@@ -130,7 +129,7 @@ class TestSetInitialLatents:
 
     def test_clamps_trust(self):
         """Test that trust is clamped to [0,1]."""
-        agent = StudentAgent(user_id=1)
+        agent = AdaptiveAgent(user_id=1)
         agent.set_initial_latents(trust=1.5)
         assert agent.trust == 1.0
         agent.set_initial_latents(trust=-0.1)
@@ -138,7 +137,7 @@ class TestSetInitialLatents:
 
     def test_clamps_engagement(self):
         """Test that engagement is clamped to [0,1.0]."""
-        agent = StudentAgent(user_id=1)
+        agent = AdaptiveAgent(user_id=1)
         agent.set_initial_latents(engagement=1.5)
         assert agent.engagement == 1.0
         agent.set_initial_latents(engagement=-0.1)
@@ -146,7 +145,7 @@ class TestSetInitialLatents:
 
     def test_partial_update(self):
         """Test that set_initial_latents only updates specified values."""
-        agent = StudentAgent(user_id=1, knowledge_mode="scalar")
+        agent = AdaptiveAgent(user_id=1, knowledge_mode="scalar")
         original_trust = agent.trust
         agent.set_initial_latents(knowledge=0.8)
         assert agent.knowledge == 0.8
@@ -158,7 +157,7 @@ class TestProbCorrect3PL:
 
     def test_returns_in_range(self):
         """Test that probability is always in [0,1]."""
-        agent = StudentAgent(user_id=1)
+        agent = AdaptiveAgent(user_id=1)
         for theta in [0.0, 0.5, 1.0]:
             for diff in [0.0, 0.5, 1.0]:
                 p = agent._prob_correct_3pl(theta, diff)
@@ -166,7 +165,7 @@ class TestProbCorrect3PL:
 
     def test_increases_with_ability(self):
         """Test that probability increases with ability (holding difficulty constant)."""
-        agent = StudentAgent(user_id=1)
+        agent = AdaptiveAgent(user_id=1)
         difficulty = 0.5
         p_low = agent._prob_correct_3pl(0.2, difficulty)
         p_mid = agent._prob_correct_3pl(0.5, difficulty)
@@ -175,7 +174,7 @@ class TestProbCorrect3PL:
 
     def test_decreases_with_fatigue(self):
         """Test that probability decreases when fatigue increases."""
-        agent = StudentAgent(user_id=1)
+        agent = AdaptiveAgent(user_id=1)
         agent.fatigue = 0.0
         p_no_fatigue = agent._prob_correct_3pl(0.5, 0.5)
         agent.fatigue = 0.8
@@ -188,7 +187,7 @@ class TestZPDMatchScore:
 
     def test_highest_at_target(self):
         """Test that ZPD score is highest when difficulty matches target."""
-        agent = StudentAgent(user_id=1, zpd_delta=0.1, zpd_width=0.1)
+        agent = AdaptiveAgent(user_id=1, zpd_delta=0.1, zpd_width=0.1)
         theta = 0.5
         target = theta + agent.zpd_delta  # 0.6
 
@@ -202,7 +201,7 @@ class TestZPDMatchScore:
 
     def test_bell_shaped(self):
         """Test that ZPD score is bell-shaped around target."""
-        agent = StudentAgent(user_id=1, zpd_delta=0.1, zpd_width=0.2)
+        agent = AdaptiveAgent(user_id=1, zpd_delta=0.1, zpd_width=0.2)
         theta = 0.5
 
         score_center = agent._zpd_match_score(theta, theta + agent.zpd_delta)
@@ -213,7 +212,7 @@ class TestZPDMatchScore:
 
     def test_returns_in_range(self):
         """Test that ZPD score is in reasonable range."""
-        agent = StudentAgent(user_id=1)
+        agent = AdaptiveAgent(user_id=1)
         for theta in np.linspace(0, 1, 5):
             for diff in np.linspace(0, 1, 5):
                 score = agent._zpd_match_score(theta, diff)
@@ -225,7 +224,7 @@ class TestPositionBias:
 
     def test_decreases_with_rank(self):
         """Test that position bias decreases with rank."""
-        agent = StudentAgent(user_id=1, pos_eta=0.85)
+        agent = AdaptiveAgent(user_id=1, position_bias=0.85)
         bias_0 = agent._position_bias(0)
         bias_1 = agent._position_bias(1)
         bias_5 = agent._position_bias(5)
@@ -235,7 +234,7 @@ class TestPositionBias:
 
     def test_exponential_decay(self):
         """Test that position bias decays exponentially."""
-        agent = StudentAgent(user_id=1, pos_eta=0.5)
+        agent = AdaptiveAgent(user_id=1, position_bias=0.5)
         agent._position_bias(0)
         bias_1 = agent._position_bias(1)
         bias_2 = agent._position_bias(2)
@@ -250,13 +249,13 @@ class TestNovelty:
 
     def test_unseen_item_novelty(self):
         """Test that unseen items have novelty 1.0."""
-        agent = StudentAgent(user_id=1)
+        agent = AdaptiveAgent(user_id=1)
         novelty = agent._novelty(999)
         assert novelty == 1.0
 
     def test_recent_item_novelty(self):
         """Test that recently seen items have novelty 0.2."""
-        agent = StudentAgent(user_id=1)
+        agent = AdaptiveAgent(user_id=1)
         agent.recent.append(123)
         novelty = agent._novelty(123)
         assert novelty == 0.2
@@ -267,7 +266,7 @@ class TestBaseRelevance:
 
     def test_returns_in_range(self):
         """Test that relevance is in (0,1)."""
-        agent = StudentAgent(user_id=1)
+        agent = AdaptiveAgent(user_id=1)
         for theta in [0.0, 0.5, 1.0]:
             for diff in [0.0, 0.5, 1.0]:
                 rel = agent._base_relevance(theta, diff)
@@ -275,7 +274,7 @@ class TestBaseRelevance:
 
     def test_increases_with_ability(self):
         """Test that relevance increases with ability."""
-        agent = StudentAgent(user_id=1)
+        agent = AdaptiveAgent(user_id=1)
         rel_low = agent._base_relevance(0.2, 0.5)
         rel_mid = agent._base_relevance(0.5, 0.5)
         rel_high = agent._base_relevance(0.8, 0.5)
@@ -287,7 +286,7 @@ class TestInteractEmptySlate:
 
     def test_empty_slate_returns_empty_result(self):
         """Test that empty slate returns empty accepted/skipped."""
-        agent = StudentAgent(user_id=1)
+        agent = AdaptiveAgent(user_id=1)
         result = agent.interact([])
 
         assert result["accepted_ids"] == []
@@ -302,7 +301,7 @@ class TestInteractNormalSlate:
 
     def test_returns_accepted_and_skipped(self):
         """Test that interact returns accepted and skipped items."""
-        agent = StudentAgent(user_id=1, base_topk=3)
+        agent = AdaptiveAgent(user_id=1, base_topk=3)
         items = [1, 2, 3, 4, 5]
         result = agent.interact(items)
 
@@ -317,7 +316,7 @@ class TestInteractNormalSlate:
 
     def test_feedback_only_for_accepted(self):
         """Test that feedback only includes accepted items."""
-        agent = StudentAgent(user_id=1)
+        agent = AdaptiveAgent(user_id=1)
         items = [1, 2, 3, 4, 5]
         result = agent.interact(items)
 
@@ -327,7 +326,7 @@ class TestInteractNormalSlate:
 
     def test_feedback_binary(self):
         """Test that feedback values are 0 or 1."""
-        agent = StudentAgent(user_id=1)
+        agent = AdaptiveAgent(user_id=1)
         items = [1, 2, 3, 4, 5]
         result = agent.interact(items)
 
@@ -340,7 +339,7 @@ class TestLearningDynamics:
 
     def test_knowledge_changes_after_interaction(self):
         """Test that knowledge is updated after interaction."""
-        agent = StudentAgent(user_id=1, knowledge_mode="scalar", lr=0.3)
+        agent = AdaptiveAgent(user_id=1, knowledge_mode="scalar", learning_rate=0.3)
         initial_k = agent.knowledge
 
         # Interact multiple times with items of known difficulty
@@ -355,11 +354,11 @@ class TestLearningDynamics:
 
     def test_vector_knowledge_updates(self):
         """Test that vector knowledge is updated per skill."""
-        agent = StudentAgent(
+        agent = AdaptiveAgent(
             user_id=1,
             knowledge_dim=2,
             knowledge_mode="vector",
-            lr=0.3,
+            learning_rate=0.3,
         )
         initial_k = list(agent.knowledge)
 
@@ -379,7 +378,7 @@ class TestFatigueAndEngagement:
 
     def test_fatigue_increases_after_interaction(self):
         """Test that fatigue increases after interaction."""
-        agent = StudentAgent(user_id=1, fatigue_growth=0.1)
+        agent = AdaptiveAgent(user_id=1, fatigue_growth=0.1)
         initial_fatigue = agent.fatigue
 
         items_meta = {i: ItemMeta(difficulty=0.5) for i in range(5)}
@@ -390,7 +389,7 @@ class TestFatigueAndEngagement:
 
     def test_engagement_updates(self):
         """Test that engagement is updated based on feedback."""
-        agent = StudentAgent(user_id=1, trust_influence=True)
+        agent = AdaptiveAgent(user_id=1, trust_influence=True)
 
         items_meta = {i: ItemMeta(difficulty=0.3) for i in range(2)}
         agent.interact([1, 2], items_meta=items_meta)
@@ -404,7 +403,7 @@ class TestReward:
 
     def test_reward_in_valid_range(self):
         """Test that reward is in [0, 1.2]."""
-        agent = StudentAgent(user_id=1)
+        agent = AdaptiveAgent(user_id=1)
 
         for feedback in [{}, {1: 0}, {1: 1}, {1: 0, 2: 1}]:
             r = agent.reward(feedback)
@@ -412,7 +411,7 @@ class TestReward:
 
     def test_perfect_feedback_higher_reward(self):
         """Test that perfect feedback gives higher reward."""
-        agent = StudentAgent(user_id=1)
+        agent = AdaptiveAgent(user_id=1)
         agent.fatigue = 0.2
         agent.engagement = 1.0
 
@@ -425,34 +424,34 @@ class TestReward:
         assert r_perfect >= r_mixed
 
 
-class TestStudentAgentFactory:
-    """Test StudentAgentFactory."""
+class TestAdaptiveAgentFactory:
+    """Test AdaptiveAgentFactory."""
 
     def test_create_irt_mode(self):
         """Test creating agent with IRT mode."""
-        agent = StudentAgentFactory.create("irt", user_id=1, seed=42)
+        agent = AdaptiveAgentFactory.create("irt", user_id=1, seed=42)
         assert agent.act_mode == "IRT"
         assert agent.knowledge_mode == "scalar"
 
     def test_create_zpd_mode(self):
         """Test creating agent with ZPD mode."""
-        agent = StudentAgentFactory.create("zpd", user_id=1, seed=42)
+        agent = AdaptiveAgentFactory.create("zpd", user_id=1, seed=42)
         assert agent.act_mode == "ZPD"
 
     def test_create_mirt_mode(self):
         """Test creating agent with MIRT mode."""
-        agent = StudentAgentFactory.create("mirt", user_id=1, seed=42)
+        agent = AdaptiveAgentFactory.create("mirt", user_id=1, seed=42)
         assert agent.act_mode == "MIRT"
         assert agent.knowledge_mode == "vector"
 
     def test_create_contextual_zpd_mode(self):
         """Test creating agent with ContextualZPD mode."""
-        agent = StudentAgentFactory.create("contextual_zpd", user_id=1, seed=42)
+        agent = AdaptiveAgentFactory.create("contextual_zpd", user_id=1, seed=42)
         assert agent.act_mode == "ContextualZPD"
 
     def test_available_returns_list(self):
         """Test that available() returns expected list."""
-        available = StudentAgentFactory.available()
+        available = AdaptiveAgentFactory.available()
         assert isinstance(available, list)
         assert "irt" in available
         assert "zpd" in available
@@ -461,7 +460,7 @@ class TestStudentAgentFactory:
 
     def test_create_with_initial_latents(self):
         """Test creating agent and setting initial latents."""
-        agent = StudentAgentFactory.create("irt", user_id=1, seed=42)
+        agent = AdaptiveAgentFactory.create("irt", user_id=1, seed=42)
         agent.set_initial_latents(
             knowledge=0.8,
             trust=0.9,
@@ -476,7 +475,7 @@ class TestStudentAgentFactory:
     def test_create_invalid_mode_raises(self):
         """Test that creating with invalid mode raises ValueError."""
         with pytest.raises(ValueError):
-            StudentAgentFactory.create("invalid_mode", user_id=1)
+            AdaptiveAgentFactory.create("invalid_mode", user_id=1)
 
 
 class TestLegacyAPI:
@@ -484,7 +483,7 @@ class TestLegacyAPI:
 
     def test_act_returns_feedback(self):
         """Test that act() returns feedback dict."""
-        agent = StudentAgent(user_id=1)
+        agent = AdaptiveAgent(user_id=1)
         decision = {"accepted_ids": [1, 2, 3]}
         feedback = agent.act(decision)
 
@@ -495,7 +494,7 @@ class TestLegacyAPI:
 
     def test_act_with_legacy_accepted_key(self):
         """Test act() with legacy 'accepted' key."""
-        agent = StudentAgent(user_id=1)
+        agent = AdaptiveAgent(user_id=1)
         decision = {"accepted": [1, 2]}
         feedback = agent.act(decision)
 
@@ -504,7 +503,7 @@ class TestLegacyAPI:
 
     def test_update_modifies_knowledge(self):
         """Test that update() modifies knowledge."""
-        agent = StudentAgent(user_id=1, knowledge_mode="scalar", seed=42)
+        agent = AdaptiveAgent(user_id=1, knowledge_mode="scalar", seed=42)
         initial_k = agent.knowledge
 
         feedback = {1: 1, 2: 0}
@@ -520,7 +519,7 @@ class TestLegacyAPI:
 
     def test_empty_update_does_not_replay_stale_actions(self):
         """Test that empty feedback is treated as an idle round, not stale actions."""
-        agent = StudentAgent(
+        agent = AdaptiveAgent(
             user_id=1,
             knowledge_mode="scalar",
             forgetting_rate=0.0,
@@ -559,11 +558,11 @@ class TestItemMeta:
 
     def test_skill_index_lists_are_not_treated_as_masks(self):
         """Test that explicit skill indices select the intended dimensions."""
-        agent = StudentAgent(
+        agent = AdaptiveAgent(
             user_id=1,
             knowledge_dim=6,
             knowledge_mode="vector",
-            lr=1.0,
+            learning_rate=1.0,
             decay=0.0,
             seed=42,
         )

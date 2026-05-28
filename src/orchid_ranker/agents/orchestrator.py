@@ -16,7 +16,7 @@ logger = logging.getLogger(__name__)
 from orchid_ranker.agents.config import MultiConfig, OnlineState, PolicyState, UserCtx
 from orchid_ranker.agents.dual_recommender import DualRecommender
 from orchid_ranker.agents.logging_util import JSONLLogger
-from orchid_ranker.agents.student_agent import AdaptiveAgent as StudentAgent
+from orchid_ranker.agents.student_agent import AdaptiveAgent
 from orchid_ranker.agents.timing import _TimingRecorder
 from orchid_ranker.agents.two_tower import TwoTowerRecommender
 
@@ -108,7 +108,7 @@ class MultiUserOrchestrator:
         self._hist_centroid: Dict[int, torch.Tensor] = {}
 
         # Handy handles
-        self._core = rec.teacher if hasattr(rec, "teacher") else rec
+        self._core = rec.teacher if isinstance(rec, DualRecommender) else rec
         self._device = self.device
         self._user_hist = defaultdict(lambda: {"seen": set(), "mean_diff": 0.5, "n": 0})
 
@@ -278,7 +278,7 @@ class MultiUserOrchestrator:
         ps.knowledge_delta_ma = (1.0 - beta) * ps.knowledge_delta_ma + beta * knowledge_delta
         ps.rounds += 1
 
-    def _update_user_state_from_sim(self, uid: int, student: StudentAgent) -> None:
+    def _update_user_state_from_sim(self, uid: int, student: AdaptiveAgent) -> None:
         prev = self.state.get(uid)
         prev_k = float(prev.get("knowledge", 0.5)) if prev else 0.5
         prev_eng = float(prev.get("engagement", 0.6)) if prev else 0.6
@@ -530,7 +530,7 @@ class MultiUserOrchestrator:
 
         # ---------- setup ----------
         rounds = int(self.cfg.rounds)
-        is_adaptive = hasattr(self.rec, "teacher") and hasattr(self.rec, "student")
+        is_adaptive = isinstance(self.rec, DualRecommender)
         mode_label = "adaptive (teacher+student)" if is_adaptive else "fixed (single model)"
         if self._safe_gate and not is_adaptive:
             logger.info("Safe gate requested but recommender is not adaptive; disabling gate.")
@@ -570,7 +570,7 @@ class MultiUserOrchestrator:
                 # scale down diversity during preloop
                 scale = float(self.cfg.warmup_diversity_scale)
                 scale = max(0.0, min(scale, 1.0))
-                core = self.rec.teacher if hasattr(self.rec, "teacher") else self.rec
+                core = self.rec.teacher if isinstance(self.rec, DualRecommender) else self.rec
                 mmr_saved = float(getattr(core, "mmr_lambda", 0.25)) if hasattr(core, "mmr_lambda") else None
                 nov_saved = float(getattr(core, "novelty_bonus", 0.10)) if hasattr(core, "novelty_bonus") else None
                 if hasattr(core, "mmr_lambda"):
@@ -660,7 +660,7 @@ class MultiUserOrchestrator:
                 if nov_saved is not None and hasattr(core, "novelty_bonus"):
                     core.novelty_bonus = nov_saved
                 with torch.no_grad():
-                    if hasattr(self.rec, "teacher") and hasattr(self.rec, "student"):
+                    if isinstance(self.rec, DualRecommender):
                         for t_param, s_param in zip(self.rec.teacher.parameters(), self.rec.student.parameters()):
                             t_param.data.copy_(s_param.data)
             except Exception:
@@ -877,7 +877,7 @@ class MultiUserOrchestrator:
                         except Exception:
                             scale = 1.0
                         try:
-                            core = self.rec.teacher if hasattr(self.rec, "teacher") else self.rec
+                            core = self.rec.teacher if isinstance(self.rec, DualRecommender) else self.rec
                             if hasattr(core, "mmr_lambda"):
                                 core.mmr_lambda = float(getattr(core, "mmr_lambda", 0.25)) * scale
                             if hasattr(core, "novelty_bonus"):

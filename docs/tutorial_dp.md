@@ -1,51 +1,73 @@
 # Differential Privacy Tutorial
 
-## 1. Quick start (TwoTowerRecommender)
+Differential privacy is an opt-in safety layer for adaptive-learning deployments
+that update learner models from sensitive interaction data. It belongs beside
+knowledge tracing, progression metrics, and rollout guardrails; it is not a
+generic recommender benchmark feature.
+
+## 1. Choose a DP preset
 
 ```python
-dp_cfg = {
-    "enabled": True,
-    "engine": "opacus",
-    "noise_multiplier": 1.0,
-    "sample_rate": 0.02,
-    "max_grad_norm": 1.0,
-    "delta": 1e-5,
-}
-model = TwoTowerRecommender(..., dp_cfg=dp_cfg)
+from orchid_ranker.dp import get_dp_config
+
+dp_cfg = get_dp_config("eps_1")
+dp_cfg["engine"] = "per_sample"  # use "opacus" when opacus is installed
 ```
 
-## 2. Enabling via CLI
+The preset expands to the fields consumed by the PyTorch-backed adaptive
+components: `enabled`, `noise_multiplier`, `sample_rate`, `delta`, and
+`max_grad_norm`.
 
-```bash
-PYTHONPATH=src python benchmarks/run_agentic_ml100k.py \
-  --rounds 20 --dp-enabled --dp-noise 1.0 --dp-sample-rate 0.02 \
-  --safe-eb --safe-eb-dr --log-dir runs/dp-safe
+## 2. Attach DP to an adaptive model
+
+```python
+from orchid_ranker.agents import TwoTowerRecommender
+
+model = TwoTowerRecommender(
+    num_users=500,
+    num_items=2_000,
+    user_dim=16,
+    item_dim=32,
+    dp_cfg=dp_cfg,
+)
 ```
 
-See `benchmarks/run_agentic_ml100k.py --help` for all DP-related switches.
+DP is disabled unless `dp_cfg["enabled"]` is true. Private updates clip
+per-example gradients, add calibrated Gaussian noise, and return
+`epsilon_delta` and `epsilon_cum` telemetry from `update()`.
 
-## 3. Monitoring epsilon
+## 3. Monitor the privacy budget
 
-- Each round summary includes `dp.epsilon_cum`.
-- Plot epsilon vs rounds to ensure you remain under target budget.
+```python
+from orchid_ranker.agents.simple_dp import SimpleDPConfig
+from orchid_ranker.dp_accountant import build_accountant
 
-## 4. Using SafeSwitch + DP
+cfg = SimpleDPConfig(
+    enabled=True,
+    noise_multiplier=1.2,
+    sample_rate=0.02,
+    max_grad_norm=1.0,
+    delta=1e-5,
+)
+accountant = build_accountant("per_sample", cfg)
+epsilon_delta, epsilon_total = accountant.step(10)
+```
 
-Combine `--safe-eb` flags with DP configs to guarantee both privacy and non-regression.
+Store the cumulative epsilon alongside adaptive rollout metrics so operators can
+verify that learner updates remain inside the approved privacy budget.
+
+## 4. Combine DP with adaptive guardrails
+
+Use DP for privacy and `SafeSwitchDR` or progression guardrails for outcome
+safety. The two mechanisms answer different questions: DP limits what training
+can reveal about a learner, while guardrails decide whether the adaptive policy
+is improving learning outcomes enough to keep serving.
 
 ## 5. Tuning tips
 
 | Parameter | Effect |
 | --- | --- |
-| `noise_multiplier` | Higher noise => stronger privacy, lower accuracy |
-| `sample_rate` | Should match batch_size / dataset_size |
-| `max_grad_norm` | Clip per-sample gradients to reduce sensitivity |
-
-## 6. Accountant utilities
-
-```python
-from orchid_ranker.dp import build_accountant
-acc = build_accountant(noise_multiplier=1.0, sample_rate=0.02, delta=1e-5)
-acc.step(10)
-print(acc.epsilon)
-```
+| `noise_multiplier` | Higher noise gives stronger privacy and lower update signal |
+| `sample_rate` | Should match batch size divided by the update population |
+| `max_grad_norm` | Clips per-example gradients before noise is added |
+| `delta` | Failure probability for the chosen privacy guarantee |

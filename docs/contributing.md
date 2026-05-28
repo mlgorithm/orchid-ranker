@@ -6,7 +6,7 @@ For local development:
 
 ```bash
 python -m pip install -e ".[dev]"
-python -m pytest tests/test_recommender.py
+python -m pytest tests/test_adaptive_learning_recommender.py tests/test_knowledge_tracing.py
 python -m ruff check src/
 ```
 

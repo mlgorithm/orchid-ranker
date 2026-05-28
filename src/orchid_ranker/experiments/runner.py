@@ -14,10 +14,10 @@ logger = logging.getLogger(__name__)
 
 from itertools import product
 
-from orchid_ranker import (
+from orchid_ranker.agents import (
+    AdaptiveAgentFactory,
     MultiConfig,
     MultiUserOrchestrator,
-    StudentAgentFactory,
     TwoTowerRecommender,
 )
 from orchid_ranker.agents.agentic import UserCtx
@@ -85,7 +85,7 @@ class RankingExperiment:
         self.side_users = bundle["side_information_users"].copy()
         self.side_items = bundle["side_information_items"].copy()
 
-        # --- Repair/derive item difficulty for StudentAgent ---
+        # --- Repair/derive item difficulty for AdaptiveAgent ---
         si = self.side_items.copy()
 
         def _derive_difficulty_from_side(si: pd.DataFrame) -> Optional[pd.Series]:
@@ -466,7 +466,7 @@ class RankingExperiment:
             zpd_delta = self.student_zpd_delta
             zpd_width = self.student_zpd_width
 
-            student = StudentAgentFactory.create(
+            student = AdaptiveAgentFactory.create(
                 method,
                 user_id=uid_ext,
                 zpd_delta=zpd_delta,

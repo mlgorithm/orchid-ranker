@@ -54,7 +54,6 @@ nav:
   - Literature notes: adaptive-recommender-literature.md
   - Why Orchid: why-orchid.md
   - Competitors: competitors.md
-  - Application scenarios: application-scenarios.md
   - Usage scenarios: scenarios.md
   - Core vs. specialty: core-vs-specialty.md
   - Getting started:
@@ -64,30 +63,20 @@ nav:
     - Offline policy evaluation: offline-policy-evaluation.md
     - Progression policy: progression-policy.md
     - pyKT integration: pykt-integration.md
-    - "Guide 2: Serve streaming": guides/02-serve-streaming.md
+    - "Guide 2: Serve adaptive recommendations": guides/02-serve-streaming.md
     - "Guide 3: Operate safely": guides/03-operate-safely.md
-    - Migration (0.4 to 0.5): guides/migration-0.4-to-0.5.md
   - Benchmarks:
     - "Credibility protocol": benchmarks/credibility.md
     - "ASSISTments KT": benchmarks/assistments-kt.md
     - "KT policy OPE": benchmarks/kt-policy-ope.md
     - "Case study: EdNet": benchmarks/ednet.md
     - "Case study: OULAD": benchmarks/oulad.md
-    - "End-to-end pipeline": benchmarks/end-to-end.md
-    - MovieLens-1M: benchmarks/movielens-1m.md
-    - Music discovery: benchmarks/music.md
     - "Scaling (specialty)": benchmarks/scaling.md
-    - "Cold-start (specialty)": benchmarks/cold-start.md
-    - "Taste progression (specialty)": benchmarks/taste-progression.md
-    - "Curated feed (specialty)": benchmarks/curated-feed.md
   - Reference:
     - API overview: api_reference.md
     - Enterprise runbook: enterprise_runbook.md
     - Security threat model: security/threat_model.md
     - FERPA / GDPR alignment: compliance/ferpa_gdpr_alignment.md
-  - Tutorials:
-    - Library walkthrough: tutorials/library_walkthrough.md
-    - Safe mode: tutorial_safe_mode.md
   - Contributing: contributing.md
 
 markdown_extensions:

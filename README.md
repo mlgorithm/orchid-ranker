@@ -51,17 +51,10 @@ adaptive learning today. Delayed-gain and support-constrained delayed-gain
 policies are available as explicit opt-ins when you have the logged support and
 reward-model diagnostics to justify them.
 
-### Compatibility note
-
-Orchid's public product surface is adaptive learning. Historical generic
-recommender APIs are kept under `orchid_ranker.legacy` only for migration and
-old experiment replay.
-
 ## Try it
 
 Get up and running in under 5 minutes:
 
-- [Quickstart example](examples/quickstart.py) --- full working script
 - [Adaptive learning quickstart](examples/adaptive_learning_quickstart.py) --- learner state + prerequisites + live re-ranking
 - [Scenario selection quickstart](examples/scenario_selection.py) --- choose the right Orchid workflow from product/data signals
 - [Knowledge tracing quickstart](examples/knowledge_tracing_quickstart.py) --- SAKT-style predicted correctness
@@ -80,7 +73,7 @@ Get up and running in under 5 minutes:
 
 Go from adaptive-learning fit to monitored rollout:
 
-- [Serve streaming](docs/guides/02-serve-streaming.md) --- generic live adaptation when learning metadata is unavailable
+- [Serve adaptive recommendations](docs/guides/02-serve-streaming.md) --- log decisions, observe outcomes, and rerank from learner state
 - [Operate safely](docs/guides/03-operate-safely.md) --- add progression guardrails, Prometheus metrics, Grafana dashboards
 
 ## Evaluate it
@@ -92,7 +85,6 @@ Understand what makes Orchid different:
 - [Benchmark credibility protocol](docs/benchmarks/credibility.md) --- one-command JSON + Markdown evidence artifact
 - [ASSISTments KT benchmark](docs/benchmarks/assistments-kt.md) --- adaptive-learning correctness and policy evidence
 - [KT policy OPE benchmark](docs/benchmarks/kt-policy-ope.md) --- evaluate KT-guided next-item policies before rollout
-- [Specialty benchmarks](docs/benchmarks/end-to-end.md) --- cold-start, MovieLens, music, and adjacent progression modules
 - [Progression policy](docs/progression-policy.md) --- transparent reward design for adaptive sequencing
 - [pyKT integration](docs/pykt-integration.md) --- use Orchid around research KT model zoos
 
@@ -110,7 +102,7 @@ Understand what makes Orchid different:
 8. **Retention scheduling.** `FSRSScheduler` adds FSRS-style review urgency for forgetting-aware practice.
 9. **Sketch mode.** Count-Min, Bloom-filter, reservoir, and exact-vector utilities shrink candidate generation before final reranking.
 10. **Offline policy evaluation.** IPS, SNIPS, direct-method, doubly robust, bootstrap, rollout gates, and tabular FQE test adaptive policies before rollout.
-11. **Safe operation.** Guardrails and frozen fallback rankings keep adaptive rollouts reviewable.
+11. **Safe operation.** Guardrails and reviewed fallback policies keep adaptive rollouts reviewable.
 12. **Privacy hooks.** Opt-in DP-SGD presets, RBAC, HMAC audit chains, and hashed event IDs support regulated deployments.
 
 ## Adaptive algorithm collection
@@ -140,9 +132,6 @@ traffic before serving it, `bootstrap_logged_policy` when rollout decisions
 need row-resampled confidence intervals, and `evaluate_rollout_gate` to enforce
 minimum support/coverage/clipping thresholds before live learners see a policy. Modern KT and policy-learning
 algorithms are tracked in the [algorithm roadmap](docs/algorithm-roadmap.md).
-
-`orchid_ranker.legacy.OrchidRecommender` remains available for old generic
-recommender experiments, but it is not the main library surface.
 
 ## Status
 

@@ -24,8 +24,8 @@ ranked = ranker.recommend("learner-7", [10, 20, 30], top_k=3)
 ranker.observe(learner_id="learner-7", ts=10, item_id=ranked[0].item_id, concept_id=None, correct=1)
 ```
 
-Historical generic recommender APIs live under `orchid_ranker.legacy` for
-compatibility. New work should start from the adaptive APIs below.
+New work should start from the adaptive APIs below. Generic recommender APIs
+are not part of Orchid's public package-root surface.
 
 ---
 
@@ -167,14 +167,6 @@ delayed-gain prior coverage, and reward-model report.
 
 `AdaptiveLearningEngine` is a top-level alias for
 `AdaptiveLearningRecommender`; use whichever name is clearer in your codebase.
-
----
-
-## Legacy compatibility
-
-The historical generic recommender API is intentionally not part of the main
-adaptive API reference. It remains importable as `orchid_ranker.legacy` for old
-experiments and migration work only.
 
 ---
 
@@ -574,123 +566,6 @@ class ProgressionRecommender:
 
 ---
 
-## orchid_ranker.model_selection
-
-### train_test_split
-
-```python
-def train_test_split(
-    interactions: pd.DataFrame,
-    test_size: float = 0.2,
-    by_user: bool = True,
-    random_state: int = 42,
-    time_col: Optional[str] = "timestamp",
-    chronological: Optional[bool] = None,
-) -> Tuple[pd.DataFrame, pd.DataFrame]
-```
-
-Split interactions into train/test. When `by_user=True` and a timestamp column is present, each user's future events are held out chronologically. Legacy random within-user splitting now requires both `chronological=False` and `allow_random_within_user=True`.
-
-### chronological_user_split
-
-```python
-def chronological_user_split(
-    interactions: pd.DataFrame,
-    *,
-    test_size: float = 0.2,
-    user_col: str = "user_id",
-    time_col: str = "timestamp",
-) -> Tuple[pd.DataFrame, pd.DataFrame]
-```
-
-Leak-free per-user split for sequential KT/adaptive-learning evaluation.
-
-### cross_validate
-
-```python
-def cross_validate(
-    interactions: pd.DataFrame,
-    strategy: str,
-    k: int = 5,
-    metrics: Optional[List[str]] = None,
-    strategy_kwargs: Optional[Dict] = None,
-    random_state: int = 42,
-    time_col: Optional[str] = "timestamp",
-    chronological: Optional[bool] = None,
-) -> Dict[str, Dict[str, float]]
-```
-
-K-fold cross-validation with per-user stratification. If timestamp data is present, folds use train-before-test chronological cutoffs per user. Returns dict of `{metric_name: {"mean": float, "std": float}}`.
-
-### compare_models
-
-```python
-def compare_models(
-    interactions: pd.DataFrame,
-    strategies: List[str],
-    k: int = 5,
-    **kwargs,
-) -> pd.DataFrame
-```
-
-Side-by-side comparison of multiple strategies via cross-validation.
-
-### evaluate_on_holdout
-
-```python
-def evaluate_on_holdout(
-    model: OrchidRecommender,
-    test_interactions: pd.DataFrame,
-    metrics: Optional[List[str]] = None,
-    k: int = 10,
-) -> Dict[str, float]
-```
-
-Evaluate a fitted model on held-out test data.
-
----
-
-## orchid_ranker.tuning
-
-### GridSearchCV
-
-```python
-class GridSearchCV:
-    def __init__(
-        self,
-        strategy: str,
-        param_grid: Dict[str, List[Any]],
-        cv: int = 3,
-        scoring: str = "ndcg@10",
-        random_state: int = 42,
-        verbose: int = 0,
-    )
-```
-
-Exhaustive search over all combinations in `param_grid`.
-
-**Attributes (after fit):** `best_params_`, `best_score_`, `results_` (DataFrame), `best_model_`, `n_iter_`.
-
-### RandomSearchCV
-
-```python
-class RandomSearchCV:
-    def __init__(
-        self,
-        strategy: str,
-        param_distributions: Dict[str, List[Any]],
-        n_iter: int = 10,
-        cv: int = 3,
-        scoring: str = "ndcg@10",
-        random_state: int = 42,
-        verbose: int = 0,
-    )
-```
-
-Samples `n_iter` random combinations from `param_distributions`. Same attributes as `GridSearchCV` after fit.
-
----
-
 ## orchid_ranker.evaluation
 
 ### Ranking Metrics
@@ -735,20 +610,6 @@ class ProgressionReport:
 
 ---
 
-## orchid_ranker.serialization
-
-```python
-def save_model(model: Any, path: str | Path) -> None
-    # Save OrchidRecommender or TwoTowerRecommender to a versioned checkpoint.
-    # Raises ValueError if the model hasn't been fitted.
-
-def load_model(path: str | Path) -> Any
-    # Load and restore a saved model.
-    # Raises FileNotFoundError, ValueError (corrupted), RuntimeError.
-```
-
----
-
 ## orchid_ranker.dp
 
 ### get_dp_config
@@ -789,19 +650,22 @@ class AdaptiveAgent:
         user_id: int,
         knowledge_dim: int = 10,
         knowledge_mode: str = "scalar",
-        lr: float = 0.2,
+        learning_rate: float = 0.2,
         decay: float = 0.1,
         trust_influence: bool = True,
         fatigue_growth: float = 0.05,
         fatigue_recovery: float = 0.02,
+        ability_model: str = "ZPD",
         seed: int = 42,
-        zpd_delta: float = 0.10,  # legacy internal name for stretch-zone offset
-        zpd_width: float = 0.25,  # legacy internal name for stretch-zone width
-        pos_eta: float = 0.85,
+        zpd_delta: float = 0.10,
+        zpd_width: float = 0.25,
+        position_bias: float = 0.85,
     )
 ```
 
-`StudentAgent` remains as a deprecated compatibility alias while the simulation internals are migrated.
+`StudentAgent`, `lr`, `act_mode`, and `pos_eta` remain as deprecated
+compatibility aliases; new code should use `AdaptiveAgent`, `learning_rate`,
+`ability_model`, and `position_bias`.
 
 **Key methods:** `accept(item_id, difficulty, correct, dwell_time, feedback)`, `get_knowledge()`, `get_fatigue()`, `get_engagement()`, `get_trust()`.
 

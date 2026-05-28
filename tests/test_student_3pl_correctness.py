@@ -1,4 +1,4 @@
-"""Correctness tests for StudentAgent 3PL model and learning dynamics.
+"""Correctness tests for AdaptiveAgent 3PL model and learning dynamics.
 
 Tests with known expected values for:
 - 3PL formula: p = c + (1-c-s)*sigmoid(a*(theta-difficulty) - 0.5*fatigue)
@@ -18,8 +18,8 @@ import numpy as np
 import pytest
 
 from orchid_ranker.agents.student_agent import (
+    AdaptiveAgent,
     ItemMeta,
-    StudentAgent,
 )
 
 
@@ -28,7 +28,7 @@ class Test3PLFormula:
 
     def test_3pl_bounds(self):
         """Test that 3PL probability is always in [c, 1-s]."""
-        agent = StudentAgent(user_id=1, seed=42)
+        agent = AdaptiveAgent(user_id=1, seed=42)
         # With known c and s
         c, s = agent.c, agent.s
         expected_min = c
@@ -43,7 +43,7 @@ class Test3PLFormula:
 
     def test_3pl_no_fatigue_vs_with_fatigue(self):
         """Test that higher fatigue decreases P(correct)."""
-        agent = StudentAgent(user_id=2, seed=42)
+        agent = AdaptiveAgent(user_id=2, seed=42)
         theta, diff = 0.6, 0.4
 
         # Compute with no fatigue
@@ -59,7 +59,7 @@ class Test3PLFormula:
 
     def test_3pl_higher_ability_increases_probability(self):
         """Test that higher ability theta increases P(correct)."""
-        agent = StudentAgent(user_id=3, seed=42)
+        agent = AdaptiveAgent(user_id=3, seed=42)
         agent.fatigue = 0.3  # moderate fatigue
         diff = 0.5
 
@@ -72,7 +72,7 @@ class Test3PLFormula:
 
     def test_3pl_higher_difficulty_decreases_probability(self):
         """Test that higher difficulty decreases P(correct)."""
-        agent = StudentAgent(user_id=4, seed=42)
+        agent = AdaptiveAgent(user_id=4, seed=42)
         agent.fatigue = 0.2
         theta = 0.5
 
@@ -85,7 +85,7 @@ class Test3PLFormula:
 
     def test_3pl_formula_explicit(self):
         """Test 3PL formula matches explicit computation."""
-        agent = StudentAgent(user_id=5, seed=42)
+        agent = AdaptiveAgent(user_id=5, seed=42)
         theta, diff = 0.6, 0.4
         agent.fatigue = 0.3
 
@@ -103,7 +103,7 @@ class Test3PLFormula:
 
     def test_3pl_guessing_floor(self):
         """Test that P(correct) >= c even with very low ability."""
-        agent = StudentAgent(user_id=6, seed=42)
+        agent = AdaptiveAgent(user_id=6, seed=42)
         c = agent.c
 
         # Even with very low ability and high difficulty
@@ -113,7 +113,7 @@ class Test3PLFormula:
 
     def test_3pl_slip_ceiling(self):
         """Test that P(correct) <= 1-s even with very high ability."""
-        agent = StudentAgent(user_id=7, seed=42)
+        agent = AdaptiveAgent(user_id=7, seed=42)
         s = agent.s
 
         # Even with very high ability and low difficulty
@@ -127,7 +127,7 @@ class TestMonotonicityProperties:
 
     def test_monotonicity_ability_increases_p_correct(self):
         """Test that increasing ability monotonically increases P(correct)."""
-        agent = StudentAgent(user_id=10, seed=42)
+        agent = AdaptiveAgent(user_id=10, seed=42)
         agent.fatigue = 0.2
         diff = 0.5
 
@@ -141,7 +141,7 @@ class TestMonotonicityProperties:
 
     def test_monotonicity_fatigue_decreases_p_correct(self):
         """Test that increasing fatigue monotonically decreases P(correct)."""
-        agent = StudentAgent(user_id=11, seed=42)
+        agent = AdaptiveAgent(user_id=11, seed=42)
         theta, diff = 0.6, 0.4
 
         fatigues = np.linspace(0.0, 1.0, 11)
@@ -157,7 +157,7 @@ class TestMonotonicityProperties:
 
     def test_monotonicity_difficulty_decreases_p_correct(self):
         """Test that increasing difficulty monotonically decreases P(correct)."""
-        agent = StudentAgent(user_id=12, seed=42)
+        agent = AdaptiveAgent(user_id=12, seed=42)
         agent.fatigue = 0.3
         theta = 0.5
 
@@ -175,10 +175,10 @@ class TestLearningDynamicsConvergence:
 
     def test_repeated_correct_increases_knowledge(self):
         """Test that repeated correct answers increase knowledge toward 1.0."""
-        agent = StudentAgent(
+        agent = AdaptiveAgent(
             user_id=20,
             knowledge_mode="scalar",
-            lr=0.3,
+            learning_rate=0.3,
             decay=0.0,  # disable decay for this test
             seed=42,
         )
@@ -201,10 +201,10 @@ class TestLearningDynamicsConvergence:
 
     def test_learning_formula_scalar(self):
         """Test scalar learning update formula: knowledge = (1-decay)*k + lr*(correct - p_correct)."""
-        agent = StudentAgent(
+        agent = AdaptiveAgent(
             user_id=21,
             knowledge_mode="scalar",
-            lr=0.2,
+            learning_rate=0.2,
             decay=0.1,
             seed=42,
         )
@@ -231,11 +231,11 @@ class TestLearningDynamicsConvergence:
 
     def test_learning_vector_mode(self):
         """Test vector mode learning applies per-skill updates."""
-        agent = StudentAgent(
+        agent = AdaptiveAgent(
             user_id=22,
             knowledge_dim=3,
             knowledge_mode="vector",
-            lr=0.3,
+            learning_rate=0.3,
             decay=0.05,
             seed=42,
         )
@@ -265,7 +265,7 @@ class TestFatigueGrowthFormula:
 
     def test_fatigue_growth_with_single_item(self):
         """Test fatigue growth with one item."""
-        agent = StudentAgent(
+        agent = AdaptiveAgent(
             user_id=30,
             fatigue_growth=0.05,
             fatigue_recovery=0.0,  # disable recovery
@@ -287,7 +287,7 @@ class TestFatigueGrowthFormula:
 
     def test_fatigue_growth_multiple_items(self):
         """Test fatigue growth with multiple items."""
-        agent = StudentAgent(
+        agent = AdaptiveAgent(
             user_id=31,
             fatigue_growth=0.05,
             fatigue_recovery=0.0,
@@ -312,14 +312,14 @@ class TestFatigueGrowthFormula:
 
     def test_fatigue_growth_with_trust_influence(self):
         """Test fatigue growth factor depends on trust when trust_influence=True."""
-        agent1 = StudentAgent(
+        agent1 = AdaptiveAgent(
             user_id=32,
             fatigue_growth=0.05,
             fatigue_recovery=0.0,
             trust_influence=True,
             seed=42,
         )
-        agent2 = StudentAgent(
+        agent2 = AdaptiveAgent(
             user_id=33,
             fatigue_growth=0.05,
             fatigue_recovery=0.0,
@@ -353,7 +353,7 @@ class TestTrustUpdateFormula:
 
     def test_trust_increases_with_high_accuracy(self):
         """Test trust increases when accuracy > 0.5."""
-        agent = StudentAgent(user_id=40, trust_influence=False, seed=42)
+        agent = AdaptiveAgent(user_id=40, trust_influence=False, seed=42)
         agent.trust = 0.5
 
         # All correct
@@ -366,7 +366,7 @@ class TestTrustUpdateFormula:
 
     def test_trust_decreases_with_low_accuracy(self):
         """Test trust decreases when accuracy < 0.5."""
-        agent = StudentAgent(user_id=41, trust_influence=False, seed=42)
+        agent = AdaptiveAgent(user_id=41, trust_influence=False, seed=42)
         agent.trust = 0.5
 
         # All incorrect
@@ -379,7 +379,7 @@ class TestTrustUpdateFormula:
 
     def test_trust_stays_same_with_50_percent_accuracy(self):
         """Test trust unchanged when accuracy = 0.5."""
-        agent = StudentAgent(user_id=42, trust_influence=False, seed=42)
+        agent = AdaptiveAgent(user_id=42, trust_influence=False, seed=42)
         agent.trust = 0.5
 
         # One correct, one incorrect
@@ -390,7 +390,7 @@ class TestTrustUpdateFormula:
 
     def test_trust_clamped_to_bounds(self):
         """Test trust is clamped to [0, 1]."""
-        agent = StudentAgent(user_id=43, trust_influence=False, seed=42)
+        agent = AdaptiveAgent(user_id=43, trust_influence=False, seed=42)
 
         # Start near 1, try to increase
         agent.trust = 0.99
@@ -413,7 +413,7 @@ class TestEngagementUpdateFormula:
 
         Formula: engagement += 0.1*(acc-0.5) - 0.05*fatigue, clamped to [0.2, 1.2]
         """
-        agent = StudentAgent(user_id=50, trust_influence=False, seed=42)
+        agent = AdaptiveAgent(user_id=50, trust_influence=False, seed=42)
         agent.engagement = 0.8
         agent.fatigue = 0.2
 
@@ -431,7 +431,7 @@ class TestEngagementUpdateFormula:
 
         Formula: engagement += 0.1*(acc-0.5) - 0.05*fatigue + 0.05*(trust-0.5)
         """
-        agent = StudentAgent(user_id=51, trust_influence=True, seed=42)
+        agent = AdaptiveAgent(user_id=51, trust_influence=True, seed=42)
         agent.engagement = 0.8
         agent.fatigue = 0.2
         agent.trust = 0.7
@@ -448,7 +448,7 @@ class TestEngagementUpdateFormula:
 
     def test_engagement_clamped_to_bounds(self):
         """Test engagement is clamped to [0.0, 1.0]."""
-        agent = StudentAgent(user_id=52, trust_influence=False, seed=42)
+        agent = AdaptiveAgent(user_id=52, trust_influence=False, seed=42)
 
         # Try to go below 0.0
         agent.engagement = 0.05
@@ -470,7 +470,7 @@ class TestRewardFormula:
 
     def test_reward_formula_explicit(self):
         """Test reward formula matches explicit calculation."""
-        agent = StudentAgent(user_id=60, seed=42)
+        agent = AdaptiveAgent(user_id=60, seed=42)
         agent.fatigue = 0.3
         agent.engagement = 0.9
 
@@ -489,7 +489,7 @@ class TestRewardFormula:
 
     def test_reward_empty_feedback(self):
         """Test reward with empty feedback (acc=0)."""
-        agent = StudentAgent(user_id=61, seed=42)
+        agent = AdaptiveAgent(user_id=61, seed=42)
         agent.fatigue = 0.4
         agent.engagement = 1.0
 
@@ -504,7 +504,7 @@ class TestRewardFormula:
 
     def test_reward_perfect_conditions(self):
         """Test reward with perfect accuracy, zero fatigue, high engagement."""
-        agent = StudentAgent(user_id=62, seed=42)
+        agent = AdaptiveAgent(user_id=62, seed=42)
         agent.fatigue = 0.0
         agent.engagement = 1.0
 
@@ -516,7 +516,7 @@ class TestRewardFormula:
 
     def test_reward_poor_conditions(self):
         """Test reward with poor accuracy, high fatigue, low engagement."""
-        agent = StudentAgent(user_id=63, seed=42)
+        agent = AdaptiveAgent(user_id=63, seed=42)
         agent.fatigue = 1.0
         agent.engagement = 0.2
 
@@ -536,7 +536,7 @@ class TestZPDMatchScore:
 
     def test_zpd_peak_at_target(self):
         """Test ZPD score peaks at target difficulty (theta + delta)."""
-        agent = StudentAgent(user_id=70, zpd_delta=0.1, zpd_width=0.25, seed=42)
+        agent = AdaptiveAgent(user_id=70, zpd_delta=0.1, zpd_width=0.25, seed=42)
         theta = 0.5
         delta = agent.zpd_delta
 
@@ -556,7 +556,7 @@ class TestZPDMatchScore:
 
     def test_zpd_symmetric_falloff(self):
         """Test ZPD score falls off symmetrically around target."""
-        agent = StudentAgent(user_id=71, zpd_delta=0.1, zpd_width=0.25, seed=42)
+        agent = AdaptiveAgent(user_id=71, zpd_delta=0.1, zpd_width=0.25, seed=42)
         theta = 0.5
         target = theta + agent.zpd_delta
 
@@ -569,7 +569,7 @@ class TestZPDMatchScore:
 
     def test_zpd_far_from_target_low_score(self):
         """Test ZPD score is low far from target."""
-        agent = StudentAgent(user_id=72, zpd_delta=0.1, zpd_width=0.25, seed=42)
+        agent = AdaptiveAgent(user_id=72, zpd_delta=0.1, zpd_width=0.25, seed=42)
         theta = 0.5
         target = theta + agent.zpd_delta
 
@@ -582,7 +582,7 @@ class TestZPDMatchScore:
 
     def test_zpd_custom_delta_and_width(self):
         """Test ZPD with custom delta and width parameters."""
-        agent = StudentAgent(user_id=73, zpd_delta=0.2, zpd_width=0.3, seed=42)
+        agent = AdaptiveAgent(user_id=73, zpd_delta=0.2, zpd_width=0.3, seed=42)
         theta = 0.4
 
         # With delta=0.2, width=0.3
@@ -596,7 +596,7 @@ class TestKnowledgeDecay:
 
     def test_scalar_knowledge_decays(self):
         """Test scalar knowledge decays by forgetting_rate each round."""
-        agent = StudentAgent(
+        agent = AdaptiveAgent(
             user_id=80,
             knowledge_mode="scalar",
             forgetting_rate=0.1,
@@ -611,7 +611,7 @@ class TestKnowledgeDecay:
 
     def test_vector_knowledge_decays(self):
         """Test vector knowledge decays element-wise."""
-        agent = StudentAgent(
+        agent = AdaptiveAgent(
             user_id=81,
             knowledge_dim=3,
             knowledge_mode="vector",
@@ -628,7 +628,7 @@ class TestKnowledgeDecay:
 
     def test_forgetting_bounded_at_zero(self):
         """Test that knowledge doesn't go below 0."""
-        agent = StudentAgent(
+        agent = AdaptiveAgent(
             user_id=82,
             knowledge_mode="scalar",
             forgetting_rate=0.5,
@@ -642,7 +642,7 @@ class TestKnowledgeDecay:
 
     def test_forgetting_over_multiple_rounds(self):
         """Test cumulative effect of forgetting over multiple rounds."""
-        agent = StudentAgent(
+        agent = AdaptiveAgent(
             user_id=83,
             knowledge_mode="scalar",
             forgetting_rate=0.1,
@@ -663,7 +663,7 @@ class TestFatigueRecovery:
 
     def test_fatigue_recovers_with_no_feedback(self):
         """Test fatigue decreases when no items are engaged."""
-        agent = StudentAgent(
+        agent = AdaptiveAgent(
             user_id=90,
             fatigue_recovery=0.02,
             seed=42,
@@ -677,7 +677,7 @@ class TestFatigueRecovery:
 
     def test_fatigue_bounded_at_zero(self):
         """Test fatigue doesn't go below 0 during recovery."""
-        agent = StudentAgent(
+        agent = AdaptiveAgent(
             user_id=91,
             fatigue_recovery=0.1,
             seed=42,
@@ -694,7 +694,7 @@ class TestAbilityScalarComputation:
 
     def test_scalar_knowledge_returns_knowledge(self):
         """Test that scalar mode returns the knowledge value."""
-        agent = StudentAgent(
+        agent = AdaptiveAgent(
             user_id=100,
             knowledge_mode="scalar",
             seed=42,
@@ -706,7 +706,7 @@ class TestAbilityScalarComputation:
 
     def test_vector_knowledge_mean(self):
         """Test that vector mode returns mean knowledge."""
-        agent = StudentAgent(
+        agent = AdaptiveAgent(
             user_id=101,
             knowledge_dim=3,
             knowledge_mode="vector",
@@ -720,7 +720,7 @@ class TestAbilityScalarComputation:
 
     def test_vector_knowledge_with_skills(self):
         """Test vector mode uses skill subset when available."""
-        agent = StudentAgent(
+        agent = AdaptiveAgent(
             user_id=102,
             knowledge_dim=4,
             knowledge_mode="vector",
@@ -742,14 +742,14 @@ class TestPositionBias:
 
     def test_position_bias_rank_zero(self):
         """Test position bias at rank 0."""
-        agent = StudentAgent(user_id=110, pos_eta=0.85, seed=42)
+        agent = AdaptiveAgent(user_id=110, position_bias=0.85, seed=42)
 
         bias = agent._position_bias(0)
         assert bias == pytest.approx(1.0, abs=1e-10)
 
     def test_position_bias_decreases_with_rank(self):
         """Test position bias decreases with increasing rank."""
-        agent = StudentAgent(user_id=111, pos_eta=0.85, seed=42)
+        agent = AdaptiveAgent(user_id=111, position_bias=0.85, seed=42)
 
         biases = [agent._position_bias(r) for r in range(5)]
 
@@ -759,7 +759,7 @@ class TestPositionBias:
 
     def test_position_bias_formula(self):
         """Test position bias follows eta^rank formula."""
-        agent = StudentAgent(user_id=112, pos_eta=0.8, seed=42)
+        agent = AdaptiveAgent(user_id=112, position_bias=0.8, seed=42)
 
         for rank in [0, 1, 2, 3]:
             bias = agent._position_bias(rank)
@@ -772,7 +772,7 @@ class TestBaseRelevance:
 
     def test_base_relevance_zero_to_one(self):
         """Test base relevance returns value in (0, 1)."""
-        agent = StudentAgent(user_id=120, seed=42)
+        agent = AdaptiveAgent(user_id=120, seed=42)
 
         for theta in [0.0, 0.3, 0.5, 0.7, 1.0]:
             for diff in [0.0, 0.3, 0.5, 0.7, 1.0]:
@@ -782,7 +782,7 @@ class TestBaseRelevance:
 
     def test_base_relevance_increases_with_ability(self):
         """Test base relevance increases with ability."""
-        agent = StudentAgent(user_id=121, seed=42)
+        agent = AdaptiveAgent(user_id=121, seed=42)
         diff = 0.5
 
         rel_low = agent._base_relevance(0.2, diff)
@@ -793,7 +793,7 @@ class TestBaseRelevance:
 
     def test_base_relevance_decreases_with_difficulty(self):
         """Test base relevance decreases with difficulty."""
-        agent = StudentAgent(user_id=122, seed=42)
+        agent = AdaptiveAgent(user_id=122, seed=42)
         theta = 0.5
 
         rel_easy = agent._base_relevance(theta, 0.1)

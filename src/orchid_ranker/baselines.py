@@ -730,7 +730,7 @@ class _ImplicitBase(BaseBaseline):
         if implicit is None:
             raise ImportError(
                 "The 'implicit' package is required for this strategy. "
-                "Install via `pip install orchid-ranker[implicit]`."
+                "Install the optional `implicit` package directly."
             )
         super().__init__(torch.device("cpu"))
         self.factors = int(factors)
@@ -872,7 +872,7 @@ class ImplicitALSBaseline(_ImplicitBase):
             Total number of items.
         """
         if implicit is None:
-            raise ImportError("implicit is required for ImplicitALSBaseline. Install via `pip install orchid-ranker[implicit]`.")
+            raise ImportError("implicit is required for ImplicitALSBaseline. Install the optional `implicit` package directly.")
         coo = self._coo_matrix(user_ids, item_ids, labels, num_users, num_items)
         model = implicit.als.AlternatingLeastSquares(
             factors=self.factors,
@@ -926,7 +926,7 @@ class ImplicitBPRBaseline(_ImplicitBase):
             Total number of items.
         """
         if implicit is None:
-            raise ImportError("implicit is required for ImplicitBPRBaseline. Install via `pip install orchid-ranker[implicit]`.")
+            raise ImportError("implicit is required for ImplicitBPRBaseline. Install the optional `implicit` package directly.")
         user_arr = np.asarray(list(user_ids), dtype=np.int32)
         item_arr = np.asarray(list(item_ids), dtype=np.int32)
         label_arr = np.asarray(list(labels), dtype=np.float32)

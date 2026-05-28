@@ -120,124 +120,29 @@ _SCENARIOS: tuple[ScenarioRecipe, ...] = (
     ),
     ScenarioRecipe(
         id="new_user_cold_start",
-        name="New-user cold start",
-        summary="Blend content and popularity until a user has enough history.",
-        use_when="New users need reasonable recommendations before collaborative signals exist.",
-        signals=(
-            "item features",
-            "optional popularity prior",
-            "seed items",
-            "early interactions",
-        ),
-        algorithms=(
-            "content-similarity bridge",
-            "popularity prior",
-            "warmth-aware blend",
-        ),
-        entrypoints=(
-            "ColdStartBridge",
-            "ColdStartConfig",
-        ),
-        docs_anchor="new-user-cold-start",
-        tags=("cold-start", "catalog"),
-    ),
-    ScenarioRecipe(
-        id="batch_catalog_recommendation",
-        name="Batch catalog recommendation",
-        summary="Fit a standard recommender from historical interactions.",
-        use_when="The product needs offline recommendations or a simple service endpoint.",
-        signals=(
-            "user_id",
-            "item_id",
-            "optional rating or binary label",
-        ),
-        algorithms=(
-            "ALS or explicit matrix factorization",
-            "NeuralMF when PyTorch is available",
-            "baseline ranking",
-        ),
-        entrypoints=(
-            "OrchidRecommender.from_interactions",
-            "OrchidRecommender.recommend",
-            "OrchidRecommender.baseline_rank",
-        ),
-        docs_anchor="batch-catalog-recommendations",
-        tags=("batch", "catalog"),
-    ),
-    ScenarioRecipe(
-        id="generic_streaming_recommender",
-        name="Generic streaming recommender",
-        summary="Adapt quickly from live feedback when learning metadata is not available.",
+        name="New learner or new exercise cold start",
+        summary="Use semantic exercise metadata while learner-state evidence is still sparse.",
         use_when=(
-            "The system needs online updates but does not have concepts, difficulty, "
-            "or prerequisites."
+            "A learner or exercise has little history, but the catalog has text, "
+            "concept, difficulty, or prerequisite metadata."
         ),
         signals=(
-            "historical interactions",
-            "live interaction events",
-            "candidate item set",
+            "exercise text",
+            "concept labels",
+            "difficulty metadata",
+            "early learner outcomes",
         ),
         algorithms=(
-            "streaming NeuralMF",
-            "rolling progression monitor when category labels exist",
-            "batch baseline fallback",
+            "semantic exercise retrieval",
+            "progression-aware cold-start prior",
+            "prerequisite gating",
         ),
         entrypoints=(
-            "OrchidRecommender.as_streaming",
-            "StreamingRecommender.rank",
-            "StreamingRecommender.observe",
+            "AdaptiveRanker.fit_semantic_items",
+            "AdaptiveRanker.recommend",
         ),
-        docs_anchor="generic-streaming-recommender",
-        tags=("streaming", "fallback"),
-    ),
-    ScenarioRecipe(
-        id="expertise_commerce",
-        name="Expertise-driven commerce",
-        summary="Recommend products along a user's taste or expertise curve.",
-        use_when="Users progress from beginner to advanced preferences inside a product category.",
-        signals=(
-            "purchases",
-            "returns",
-            "ratings",
-            "product category",
-            "sophistication score",
-        ),
-        algorithms=(
-            "taste progression",
-            "stretch-fit scoring",
-            "momentum and exploration",
-        ),
-        entrypoints=(
-            "SophisticationMapper",
-            "TasteProgressionRanker",
-        ),
-        docs_anchor="expertise-driven-commerce",
-        tags=("commerce", "expertise"),
-    ),
-    ScenarioRecipe(
-        id="curated_publication_feed",
-        name="Curated publication feed",
-        summary="Rank content by relevance, freshness, topic growth, and difficulty.",
-        use_when="Readers should build topic competence instead of only maximizing clicks.",
-        signals=(
-            "topic",
-            "difficulty",
-            "publication time",
-            "meaningful engagement",
-        ),
-        algorithms=(
-            "freshness scoring",
-            "topic competence",
-            "stretch-fit ranking",
-            "topic diversity",
-        ),
-        entrypoints=(
-            "FeedItem",
-            "FeedRanker",
-            "FreshnessScorer",
-        ),
-        docs_anchor="curated-publication-feed",
-        tags=("feed", "content", "progression"),
+        docs_anchor="new-learner-or-new-exercise-cold-start",
+        tags=("adaptive", "learning", "cold-start"),
     ),
 )
 
@@ -265,27 +170,11 @@ _SIGNAL_RULES: dict[str, tuple[tuple[str, float, str], ...]] = {
         ("needs_safe_rollout", 1.0, "Guardrails fit regulated deployment requirements."),
     ),
     "new_user_cold_start": (
-        ("has_new_users", 3.0, "New users need recommendations before history exists."),
-        ("has_item_features", 1.5, "Item features can power content similarity."),
-        ("has_interactions", 0.5, "Existing interactions provide a baseline once users warm up."),
-    ),
-    "batch_catalog_recommendation": (
-        ("has_interactions", 2.0, "Historical interactions are enough for a batch recommender."),
-        ("has_item_features", 0.5, "Item features can help later cold-start extensions."),
-    ),
-    "generic_streaming_recommender": (
-        ("needs_live_adaptation", 1.5, "Live feedback should update the recommender."),
-        ("has_interactions", 1.0, "Historical interactions can initialize the streaming model."),
-    ),
-    "expertise_commerce": (
-        ("has_expertise_curve", 3.0, "The category has a real beginner-to-expert trajectory."),
-        ("has_interactions", 1.0, "Purchases or ratings can initialize taste estimates."),
-        ("has_item_features", 0.5, "Product attributes can support sophistication mapping."),
-    ),
-    "curated_publication_feed": (
-        ("has_fresh_content", 3.0, "Freshness is central to the ranking problem."),
-        ("has_concepts", 1.0, "Topics support competence-aware feed ranking."),
-        ("has_difficulty", 1.0, "Difficulty enables stretch-fit reading progression."),
+        ("has_new_users", 2.0, "Sparse learner history needs a cold-start prior."),
+        ("has_item_features", 2.0, "Exercise text or metadata can power semantic retrieval."),
+        ("has_concepts", 1.0, "Concept metadata keeps cold-start ranking learning-aware."),
+        ("has_difficulty", 1.0, "Difficulty supports target-correctness priors for new exercises."),
+        ("has_prerequisites", 0.5, "Prerequisites can still gate cold-start candidates."),
     ),
 }
 
@@ -314,31 +203,9 @@ _KEYWORDS: dict[str, tuple[tuple[str, float, str], ...]] = {
     ),
     "new_user_cold_start": (
         ("cold start", 1.0, "Cold-start wording maps directly to this bridge."),
-        ("new user", 1.0, "New users need cold-start behavior."),
-        ("onboarding", 0.5, "Onboarding often starts with sparse history."),
-    ),
-    "batch_catalog_recommendation": (
-        ("batch", 1.0, "Batch workflows map to standard recommendation."),
-        ("catalog", 1.0, "Catalog ranking maps to standard recommendation."),
-        ("rating", 0.5, "Ratings are direct recommender signals."),
-    ),
-    "generic_streaming_recommender": (
-        ("streaming", 1.0, "Streaming maps to online updates."),
-        ("online", 0.5, "Online feedback can use the streaming path."),
-    ),
-    "expertise_commerce": (
-        ("commerce", 1.0, "Commerce with expertise progression maps to this ranker."),
-        ("wine", 1.0, "Wine is a typical expertise-commerce category."),
-        ("coffee", 1.0, "Coffee is a typical expertise-commerce category."),
-        ("fashion", 0.5, "Fashion can have taste progression."),
-        ("taste", 1.0, "Taste evolution maps to expertise commerce."),
-    ),
-    "curated_publication_feed": (
-        ("feed", 1.0, "Feed language maps to curated publication ranking."),
-        ("newsletter", 1.0, "Newsletters are curated publication feeds."),
-        ("article", 0.5, "Articles can be ranked by topic progression."),
-        ("publication", 1.0, "Publication ranking maps to this scenario."),
-        ("reading", 0.5, "Reading progression fits curated feeds."),
+        ("new learner", 1.0, "New learners need cold-start behavior."),
+        ("new exercise", 1.0, "New exercises can enter through semantic metadata."),
+        ("catalog", 0.5, "Catalog metadata can support semantic exercise retrieval."),
     ),
 }
 
@@ -429,14 +296,6 @@ def _score_scenario(
         if signals[signal_name]:
             score += weight
             reasons.append(reason)
-
-    if (
-        scenario.id == "generic_streaming_recommender"
-        and signals["needs_live_adaptation"]
-        and not has_learning_metadata
-    ):
-        score += 2.0
-        reasons.append("Live adaptation is needed, but learning metadata is missing.")
 
     if use_case:
         keyword_score, keyword_reasons = _keyword_score(scenario.id, use_case)

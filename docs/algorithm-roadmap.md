@@ -21,9 +21,9 @@ item, evaluate safely, and explain why.
 | Semantic retrieval | `orchid_ranker.semantic` | Text/metadata candidate generation for sparse or new exercises |
 | Safety | progression monitors, guardrails, safe fallback | Stops harmful adaptive behavior before broad rollout |
 
-This is a strong product foundation, and the next modeling layer should keep
-removing the generic recommender fallback from the main narrative so Orchid is
-evaluated as an adaptive-learning engine.
+This is a strong product foundation. The next modeling layer should make
+Orchid easier to evaluate as an adaptive-learning engine, not as a generic
+recommender toolkit.
 
 ## Research direction
 
@@ -57,8 +57,8 @@ Add adaptive-learning algorithms under explicit, boring names:
 | `orchid_ranker.ope` | `evaluate_logged_policy`, `compare_logged_policies`, bootstrap variants | Evaluate adaptive policies before serving them |
 
 Keep `AdaptiveRanker` and `AdaptiveLearningEngine` as the beginner APIs for the
-primary adaptive-learning workflow. Historical generic recommenders stay under
-`orchid_ranker.legacy` only for compatibility and old experiment replay.
+primary adaptive-learning workflow. Generic recommender APIs should not appear
+in new docs, examples, benchmarks, or top-level exports.
 
 ## Implementation order
 

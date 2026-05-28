@@ -15,7 +15,7 @@ the next click. Unlike generic recommender systems, it ships with:
 - **Progression-native metrics** for competence, category coverage, and stretch fit
 - **Live adaptation** through `observe()` after each learner outcome
 - **Offline policy evaluation** through IPS, SNIPS, and doubly robust estimates
-- **Safety guardrails** that can fall back to a frozen baseline
+- **Safety guardrails** that can fall back to a reviewed learning policy
 - **Privacy and audit hooks** for regulated deployments
 
 ## Quick Start
@@ -23,7 +23,7 @@ the next click. Unlike generic recommender systems, it ships with:
 Install from PyPI:
 
 ```bash
-pip install 'orchid-ranker[ml]'
+pip install 'orchid-ranker[adaptive]'
 ```
 
 Create your first adaptive-learning recommender:
@@ -58,9 +58,9 @@ recommender.observe(user_id=1, item_id=ranked[0].item_id, correct=True)
 - [**Adaptive learning positioning**](adaptive-learning-positioning.md) - what Orchid is for, who it serves, and what it should not claim
 - [**Quickstart**](quickstart.md) - install, fit, recommend, evaluate
 - [**Algorithm roadmap**](algorithm-roadmap.md) - modern KT, semantic exercise recommendation, and policy-learning direction
-- [**Guide 1: Fit offline**](guides/01-fit-offline.md) - batch fallback workflow
+- [**Guide 1: Fit offline**](guides/01-fit-offline.md) - adaptive-learning fit workflow
 - [**Offline policy evaluation**](offline-policy-evaluation.md) - evaluate adaptive policies before rollout
-- [**Guide 2: Serve streaming**](guides/02-serve-streaming.md) - generic live adaptation
+- [**Guide 2: Serve adaptive recommendations**](guides/02-serve-streaming.md) - live learner-state adaptation
 - [**Guide 3: Operate safely**](guides/03-operate-safely.md) - guardrails and fallback
 - [**Usage scenarios**](scenarios.md) - practical recipes for common deployments
 - [**Why Orchid**](why-orchid.md) - product thesis and evidence
@@ -72,12 +72,11 @@ recommender.observe(user_id=1, item_id=ranked[0].item_id, correct=True)
 |---------|---------|
 | Learner-state tracking | Estimate competence from outcomes |
 | Prerequisite graphs | Build valid next-step candidate pools |
-| Scenario selector | Choose adaptive, safe rollout, cold-start, or fallback workflows |
+| Scenario selector | Choose adaptive learning, safe rollout, regulated, or cold-start workflows |
 | Candidate-pool ranking | Rank only the eligible learning items your service passes in |
-| Batch fallback | Use ordinary recommenders when learning metadata is missing |
 | Progression metrics | Evaluate growth, coverage, sequence adherence, and stretch fit |
 | Offline policy evaluation | Estimate adaptive-policy value from logged propensities |
-| Safety fallback | Serve a frozen baseline when adaptive metrics degrade |
+| Safety fallback | Serve a reviewed learning policy when adaptive metrics degrade |
 
 ---
 

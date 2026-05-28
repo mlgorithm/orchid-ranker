@@ -105,7 +105,7 @@ class UserCtx:
     user_idx : int
         Internal index into user feature matrix.
     student : Any
-        StudentAgent instance for adaptive personalization.
+        AdaptiveAgent instance for adaptive personalization.
     user_vec : torch.Tensor
         Shape (1, Du), user feature vector.
     profile : str, optional
@@ -115,7 +115,7 @@ class UserCtx:
     """
     user_id: int           # external user ID
     user_idx: int          # internal index into user_matrix
-    student: Any           # StudentAgent instance
+    student: Any           # AdaptiveAgent instance
     user_vec: torch.Tensor # [1, Du] — dense side-features row for the user
     profile: Optional[str] = None  # profile tag used for fairness stats
     name: Optional[str] = None
