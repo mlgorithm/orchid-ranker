@@ -12,7 +12,7 @@ authors = [
 ]
 license = "Apache-2.0"
 license-files = ["LICENSE"]
-requires-python = ">=3.11"
+requires-python = ">=3.11,<3.14"
 dependencies = [
   "numpy>=1.23.5",
   "pandas>=1.5.3",
@@ -131,6 +131,7 @@ dev = [
   "pytest-cov>=4.0,<6",
   "mypy>=1.4,<2",
   "ruff>=0.1.5,<1",
+  "types-PyYAML>=6.0,<7",
   "mkdocs>=1.5,<2",
   "mkdocs-material>=9.5,<10",
   "mkdocstrings[python]>=0.24,<1",
@@ -204,5 +205,30 @@ warn_return_any = true
 warn_unused_configs = true
 ignore_missing_imports = true
 
+[[tool.mypy.overrides]]
+module = [
+  "orchid_ranker.adaptive_learning",
+  "orchid_ranker.adaptive_ranker",
+  "orchid_ranker.agents.*",
+  "orchid_ranker.baselines",
+  "orchid_ranker.calibration",
+  "orchid_ranker.cli.evaluate",
+  "orchid_ranker.cold_start",
+  "orchid_ranker.connectors.*",
+  "orchid_ranker.contrib.*",
+  "orchid_ranker.curriculum",
+  "orchid_ranker.data.*",
+  "orchid_ranker.delayed_gain",
+  "orchid_ranker.experiments.*",
+  "orchid_ranker.learning_policy",
+  "orchid_ranker.native.fast_score",
+  "orchid_ranker.offline_policy",
+  "orchid_ranker.security.audit",
+  "orchid_ranker.streaming",
+  "orchid_ranker.taste_progression",
+]
+ignore_errors = true
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+pythonpath = ["src"]

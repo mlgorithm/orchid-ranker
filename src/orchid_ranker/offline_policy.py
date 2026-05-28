@@ -25,6 +25,9 @@ class CQLTrainingReport:
     epochs: int
     learning_rate: float
     conservative_weight: float
+    propensity_weighting: bool
+    max_update_weight: float
+    update_weight_mean: float
     reward_mean: float
     final_loss: float
 
@@ -50,6 +53,8 @@ class CQLDiscretePolicy:
         epochs: int = 50,
         random_state: Optional[int] = 42,
         unseen_penalty: float = 0.05,
+        propensity_weighting: bool = True,
+        max_update_weight: float = 20.0,
     ) -> None:
         if conservative_weight < 0.0:
             raise ValueError("conservative_weight must be non-negative")
@@ -59,11 +64,15 @@ class CQLDiscretePolicy:
             raise ValueError("epochs must be >= 1")
         if unseen_penalty < 0.0:
             raise ValueError("unseen_penalty must be non-negative")
+        if max_update_weight <= 0.0:
+            raise ValueError("max_update_weight must be positive")
         self.conservative_weight = float(conservative_weight)
         self.learning_rate = float(learning_rate)
         self.epochs = int(epochs)
         self.random_state = random_state
         self.unseen_penalty = float(unseen_penalty)
+        self.propensity_weighting = bool(propensity_weighting)
+        self.max_update_weight = float(max_update_weight)
         self.q_values_: dict[tuple[Any, Any], float] = {}
         self.global_action_values_: dict[Any, float] = {}
         self.actions_by_context_: dict[Any, set[Any]] = {}
@@ -93,17 +102,23 @@ class CQLDiscretePolicy:
             context_hash_col=context_col,
             reward_col=reward_col,
         ).reset_index(drop=True)
-        rows = []
+        raw_rows = []
         action_rewards: dict[Any, list[float]] = {}
-        for context, candidates_raw, action, reward in work[
-            [context_col, candidate_col, action_col, reward_col]
+        for context, candidates_raw, action, reward, propensity in work[
+            [context_col, candidate_col, action_col, reward_col, propensity_col]
         ].itertuples(index=False, name=None):
             candidates = parse_candidate_list(candidates_raw)
-            rows.append((context, candidates, action, float(reward)))
+            raw_rows.append((context, candidates, action, float(reward), float(propensity)))
             self.actions_by_context_.setdefault(context, set()).update(candidates)
             action_rewards.setdefault(action, []).append(float(reward))
             for candidate in candidates:
                 self.q_values_.setdefault((context, candidate), 0.0)
+
+        weights = self._update_weights([propensity for *_rest, propensity in raw_rows])
+        rows = [
+            (context, candidates, action, reward, float(weights[idx]))
+            for idx, (context, candidates, action, reward, _propensity) in enumerate(raw_rows)
+        ]
 
         self.default_value_ = float(work[reward_col].astype(float).mean())
         self.global_action_values_ = {
@@ -115,8 +130,8 @@ class CQLDiscretePolicy:
             order = rng.permutation(len(rows))
             losses = []
             for row_id in order:
-                context, candidates, action, reward = rows[int(row_id)]
-                losses.append(self._update_one(context, candidates, action, reward))
+                context, candidates, action, reward, update_weight = rows[int(row_id)]
+                losses.append(self._update_one(context, candidates, action, reward, update_weight=update_weight))
             final_loss = float(np.mean(losses)) if losses else 0.0
 
         all_actions = {action for actions in self.actions_by_context_.values() for action in actions}
@@ -127,6 +142,9 @@ class CQLDiscretePolicy:
             epochs=self.epochs,
             learning_rate=self.learning_rate,
             conservative_weight=self.conservative_weight,
+            propensity_weighting=self.propensity_weighting,
+            max_update_weight=self.max_update_weight,
+            update_weight_mean=float(np.mean(weights)) if weights.size else 1.0,
             reward_mean=self.default_value_,
             final_loss=final_loss,
         )
@@ -150,20 +168,41 @@ class CQLDiscretePolicy:
         assert self.report_ is not None
         return self.report_.to_dict()
 
-    def _update_one(self, context: Any, candidates: Sequence[Any], action: Any, reward: float) -> float:
+    def _update_one(
+        self,
+        context: Any,
+        candidates: Sequence[Any],
+        action: Any,
+        reward: float,
+        *,
+        update_weight: float = 1.0,
+    ) -> float:
         q_values = np.asarray([self.q_values_.get((context, candidate), 0.0) for candidate in candidates], dtype=float)
         action_index = list(candidates).index(action)
         q_sa = float(q_values[action_index])
         bellman_loss = (q_sa - reward) ** 2
         probs = _softmax(q_values)
         cql_loss = float(np.log(np.sum(np.exp(q_values - np.max(q_values)))) + np.max(q_values) - q_sa)
+        sample_weight = max(0.0, float(update_weight))
         for idx, candidate in enumerate(candidates):
             grad = self.conservative_weight * float(probs[idx])
             if idx == action_index:
                 grad += 2.0 * (q_sa - reward) - self.conservative_weight
             key = (context, candidate)
-            self.q_values_[key] = float(self.q_values_.get(key, 0.0) - self.learning_rate * grad)
-        return float(bellman_loss + self.conservative_weight * cql_loss)
+            self.q_values_[key] = float(self.q_values_.get(key, 0.0) - self.learning_rate * sample_weight * grad)
+        return float(sample_weight * (bellman_loss + self.conservative_weight * cql_loss))
+
+    def _update_weights(self, propensities: Sequence[float]) -> np.ndarray:
+        if not propensities:
+            return np.zeros((0,), dtype=float)
+        if not self.propensity_weighting:
+            return np.ones((len(propensities),), dtype=float)
+        inverse = np.asarray([1.0 / max(float(propensity), 1e-12) for propensity in propensities], dtype=float)
+        clipped = np.minimum(inverse, self.max_update_weight)
+        mean = float(np.mean(clipped))
+        if mean <= 0.0 or not np.isfinite(mean):
+            return np.ones(clipped.shape, dtype=float)
+        return clipped / mean
 
     def _score_one(self, context: Any, action: Any) -> float:
         if (context, action) in self.q_values_:

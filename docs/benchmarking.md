@@ -30,12 +30,16 @@ PYTHONPATH=src python benchmarks/adaptive_efficiency_benchmark.py \
     --candidate-size 20 \
     --max-events 10000 \
     --epochs 1 \
-    --output benchmarks/results_adaptive_efficiency_assistments.json
+    --output benchmarks/results_adaptive_efficiency_assistments.json \
+    --report-md benchmarks/results_adaptive_efficiency_assistments.md
 ```
 
-This produces one artifact with KT prediction quality, policy uplift, and
-runtime. Generic recommender benchmarks are still useful regression checks, but
-they are not Orchid's main product claim.
+This produces one machine-readable JSON artifact and one reviewer-friendly
+Markdown report with KT prediction quality, policy uplift, support diagnostics,
+and runtime. Start with the [benchmark credibility protocol](benchmarks/credibility.md)
+when you need a release, PR-review, or buyer-evaluation artifact. Generic
+recommender benchmarks are still useful regression checks, but they are not
+Orchid's main product claim.
 
 ## Agentic smoke run
 

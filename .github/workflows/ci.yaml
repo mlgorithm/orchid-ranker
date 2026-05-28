@@ -39,23 +39,16 @@ jobs:
           pip install ".[dev]"
 
       - name: Run ruff linting
-        run: python -m ruff check src/
+        run: python -m ruff check .
 
-      - name: Run mypy type checking on hardened core modules
-        run: |
-          python -m mypy \
-            src/orchid_ranker/recommender.py \
-            src/orchid_ranker/model_selection.py \
-            src/orchid_ranker/evaluation.py \
-            src/orchid_ranker/serialization.py \
-            --ignore-missing-imports \
-            --follow-imports=silent
+      - name: Run mypy type checking
+        run: python -m mypy src/orchid_ranker
 
       - name: Run full test suite with coverage
         run: |
           python -m pytest tests/ -x --tb=short \
-            --cov=orchid_ranker --cov-report=term-missing \
-            --cov-fail-under=37
+            --cov=src/orchid_ranker --cov-report=term-missing \
+            --cov-fail-under=70
 
       - name: Build documentation
         run: python -m mkdocs build --strict

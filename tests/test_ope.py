@@ -113,6 +113,35 @@ def test_bootstrap_compare_logged_policies_reports_uplift_interval():
     assert report.to_dict()["base"]["uplift"] == report.base.uplift
 
 
+def test_bootstrap_compare_logged_policies_supports_cluster_resampling():
+    report = bootstrap_compare_logged_policies(
+        _paired_uniform_log(),
+        reward_col="reward",
+        propensity_col="propensity",
+        target_probability_col="target_prob",
+        baseline_probability_col="baseline_prob",
+        n_bootstrap=25,
+        random_state=11,
+        cluster_col="context_id",
+    )
+
+    assert report.cluster_col == "context_id"
+    assert report.to_dict()["cluster_col"] == "context_id"
+    assert report.bootstrap_ci_low <= report.base.uplift <= report.bootstrap_ci_high
+
+
+def test_cluster_bootstrap_rejects_missing_cluster_column():
+    with pytest.raises(ValueError, match="cluster_col"):
+        bootstrap_logged_policy(
+            _paired_uniform_log(),
+            reward_col="reward",
+            propensity_col="propensity",
+            target_probability_col="target_prob",
+            n_bootstrap=5,
+            cluster_col="learner_id",
+        )
+
+
 def test_rollout_gate_allows_strong_bootstrap_comparison():
     report = bootstrap_compare_logged_policies(
         _paired_uniform_log(),

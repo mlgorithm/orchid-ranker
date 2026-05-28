@@ -51,21 +51,11 @@ adaptive learning today. Delayed-gain and support-constrained delayed-gain
 policies are available as explicit opt-ins when you have the logged support and
 reward-model diagnostics to justify them.
 
-### Legacy recommender fallback
+### Compatibility note
 
-Use `orchid_ranker.legacy.OrchidRecommender` when you need ordinary batch
-recommendations or old experiments without learning concepts, difficulty, or
-prerequisites:
-
-```python
-from orchid_ranker.legacy import OrchidRecommender
-
-rec = OrchidRecommender.from_interactions(interactions, strategy="neural_mf")
-streamer = rec.as_streaming(lr=0.05)
-
-streamer.observe(user_id=7, item_id=42, correct=True, category="onboarding")
-top5 = streamer.rank(user_id=7, candidate_item_ids=[1, 2, 3, 42, 99], top_k=5)
-```
+Orchid's public product surface is adaptive learning. Historical generic
+recommender APIs are kept under `orchid_ranker.legacy` only for migration and
+old experiment replay.
 
 ## Try it
 
@@ -99,6 +89,7 @@ Understand what makes Orchid different:
 
 - [Why Orchid](docs/why-orchid.md) --- the adaptive-learning thesis, five pillars, honest comparison
 - [Competitor comparison](docs/competitors.md) --- when to use Orchid vs RecBole, Merlin, implicit, LightFM, TFRS, Gorse
+- [Benchmark credibility protocol](docs/benchmarks/credibility.md) --- one-command JSON + Markdown evidence artifact
 - [ASSISTments KT benchmark](docs/benchmarks/assistments-kt.md) --- adaptive-learning correctness and policy evidence
 - [KT policy OPE benchmark](docs/benchmarks/kt-policy-ope.md) --- evaluate KT-guided next-item policies before rollout
 - [Specialty benchmarks](docs/benchmarks/end-to-end.md) --- cold-start, MovieLens, music, and adjacent progression modules
@@ -109,36 +100,36 @@ Understand what makes Orchid different:
 
 ## Adaptive-learning capabilities
 
-1. **Learner state.** SAINT+/SAINT, AKT/SAKT, and Bayesian tracing estimate competence from learner outcomes.
+1. **Learner state.** SAINT+/SAINT, AKT/SAKT, DKT/DKVMN-style, PFA/AFM, BKT, and IRT components estimate competence from learner outcomes.
 2. **Catalog structure.** Dependency graphs and difficulty metadata keep recommendations in the valid next-step set.
-3. **Semantic cold start.** `SemanticItemEncoder` retrieves new exercises from text and metadata before interaction support exists.
+3. **Semantic cold start.** Hashing and dense-adapter semantic encoders retrieve new exercises from text and metadata before interaction support exists.
 4. **Adaptive ranking.** Per-user online updates let the next recommendation change after each response.
-5. **Logged policy learning.** `AdaptiveRanker.fit_policy(..., algo="cql")` trains a conservative discrete policy from candidate sets, propensities, and rewards.
-6. **Sketch mode.** Count-Min, Bloom-filter, reservoir, and exact-vector utilities shrink candidate generation before final reranking.
-7. **Offline policy evaluation.** IPS, SNIPS, direct-method, doubly robust, and bootstrap reports test adaptive policies before rollout.
-8. **Safe operation.** Guardrails and frozen fallback rankings keep adaptive rollouts reviewable.
-9. **Privacy hooks.** Opt-in DP-SGD presets, RBAC, HMAC audit chains, and hashed event IDs support regulated deployments.
+5. **Adaptive testing.** `IRTAdaptiveSelector` supports Rasch/2PL/3PL-style placement and mastery-check item selection by information.
+6. **Logged policy learning.** `AdaptiveRanker.fit_policy(..., algo="cql")` trains a conservative CQL-style contextual-bandit policy from candidate sets, rewards, and normalized inverse-propensity update weights.
+7. **Personalized exploration.** `PersonalizedLinUCB` scores `phi(learner, item)` features instead of item-only bandit features.
+8. **Retention scheduling.** `FSRSScheduler` adds FSRS-style review urgency for forgetting-aware practice.
+9. **Sketch mode.** Count-Min, Bloom-filter, reservoir, and exact-vector utilities shrink candidate generation before final reranking.
+10. **Offline policy evaluation.** IPS, SNIPS, direct-method, doubly robust, bootstrap, rollout gates, and tabular FQE test adaptive policies before rollout.
+11. **Safe operation.** Guardrails and frozen fallback rankings keep adaptive rollouts reviewable.
+12. **Privacy hooks.** Opt-in DP-SGD presets, RBAC, HMAC audit chains, and hashed event IDs support regulated deployments.
 
-## Supported strategies
+## Adaptive algorithm collection
 
-| Strategy | Type | Best for |
-|----------|------|----------|
-| `auto` | Selector | Let Orchid choose `legacy_binary_mf` or `explicit_mf` |
-| `legacy_binary_mf` | Legacy binary MF | Backward-compatible Adam+BCE baseline |
-| `als` | Deprecated alias | Alias for `legacy_binary_mf`; use `implicit_als` for true ALS |
-| `explicit_mf` | Matrix factorization | Explicit rating scales |
-| `neural_mf` | Neural MF | Streaming adaptation through `as_streaming()` |
-| `linucb` | Contextual bandit | Cold-start exploration |
-| `user_knn` | Collaborative filtering | Small catalogs |
-| `popularity` | Non-personalized | Baseline comparison |
-| + 4 more | | See `OrchidRecommender.available_strategies()` |
-
-Install `orchid-ranker[implicit]` to use true `implicit_als` or `implicit_bpr`.
+| Family | Orchid APIs | Scenario |
+|--------|-------------|----------|
+| Transformer KT | `SAKTTracer`, `AKTTracer`, `SAINTTracer`, `SAINTPlusTracer` | Main next-correctness state models |
+| Recurrent / memory KT | `DKTTracer`, `DKVMNTracer` | Compact sequence baselines and ablations |
+| Classical EDM | `PFATracer`, `AFMTracer`, `fit_bkt_em`, `BayesianKnowledgeTracing` | Small-data, interpretable learner-state baselines |
+| Adaptive testing | `IRTAdaptiveSelector`, `IRTItem` | Placement, mastery checks, item-information selection |
+| Semantic retrieval | `SemanticItemEncoder`, `DenseSemanticItemEncoder`, `SemanticExerciseRanker` | Cold-start and metadata-aware exercise retrieval |
+| Policy learning | `CQLDiscretePolicy`, `TabularFQE`, `evaluate_logged_policy` | Logged-policy learning and rollout evidence |
+| Exploration | `PersonalizedLinUCB` | Safe personalized exploration with explicit feature maps |
+| Retention | `FSRSScheduler` | Review scheduling and forgetting-risk ranking |
 
 For adaptive learning, start with `AdaptiveRanker` when you want staged
 KT/reward/policy/OPE workflows, or `AdaptiveLearningEngine` when you only need
 fit/rank/observe. They compose
-SAINT+/SAINT, AKT/SAKT-style tracing, progression reward,
+SAINT+/SAINT, AKT/SAKT, DKT/DKVMN-style tracing, progression reward,
 difficulty/prerequisite metadata, semantic item retrieval, and live
 `observe()` updates into one fit/rank/observe API. Use lower-level
 pieces such as `BayesianKnowledgeTracing`, `DependencyGraph`,
@@ -150,15 +141,13 @@ need row-resampled confidence intervals, and `evaluate_rollout_gate` to enforce
 minimum support/coverage/clipping thresholds before live learners see a policy. Modern KT and policy-learning
 algorithms are tracked in the [algorithm roadmap](docs/algorithm-roadmap.md).
 
-For the legacy `OrchidRecommender` API, use `neural_mf` when you want to
-promote a fitted model into `StreamingAdaptiveRanker` with `as_streaming()`.
-`TwoTowerRecommender` remains available as a lower-level advanced model API, but
-it is not a `strategy=` value.
+`orchid_ranker.legacy.OrchidRecommender` remains available for old generic
+recommender experiments, but it is not the main library surface.
 
 ## Status
 
 ![Tests](https://img.shields.io/badge/tests-passing-brightgreen)
-![Python](https://img.shields.io/badge/python-3.11%2B-blue)
+![Python](https://img.shields.io/badge/python-3.11--3.13-blue)
 ![License](https://img.shields.io/badge/license-Apache%202.0-blue)
 
 ## License

@@ -173,13 +173,16 @@ class _FakeDelayedRewardModel:
 class _ReplayFeatureTracer:
     def __init__(self) -> None:
         self._histories = {}
+        self._history_times = {"existing": [123.0]}
 
     def predict_correct(self, user_id, item_id):
         del item_id
         return 0.10 + 0.10 * len(self._histories.get(user_id, []))
 
-    def observe(self, user_id, item_id, correct):
+    def observe(self, user_id, item_id, correct, timestamp=None):
         self._histories.setdefault(user_id, []).append((item_id, int(correct)))
+        if timestamp is not None:
+            self._history_times.setdefault(user_id, []).append(float(timestamp))
         return len(self._histories[user_id])
 
 
@@ -508,6 +511,7 @@ def test_delayed_gain_training_frame_can_use_tracer_replay_predictions():
 
     assert examples["p_correct"].round(6).tolist() == [0.1, 0.2]
     assert tracer._histories == {}
+    assert tracer._history_times == {"existing": [123.0]}
 
 
 def test_run_kt_policy_ope_benchmark_supports_delayed_gain_reward():
@@ -728,6 +732,7 @@ def test_kt_policy_ope_cli_seed_sweep_smoke(tmp_path):
 def test_adaptive_efficiency_benchmark_cli_smoke(tmp_path):
     data_path = tmp_path / "events.csv"
     output_path = tmp_path / "adaptive_efficiency.json"
+    report_path = tmp_path / "adaptive_efficiency.md"
     _delayed_gain_events().to_csv(data_path, index=False)
 
     result = subprocess.run(
@@ -771,6 +776,10 @@ def test_adaptive_efficiency_benchmark_cli_smoke(tmp_path):
             "cpu",
             "--output",
             str(output_path),
+            "--report-md",
+            str(report_path),
+            "--benchmark-name",
+            "Smoke credibility benchmark",
         ],
         capture_output=True,
         text=True,
@@ -782,6 +791,11 @@ def test_adaptive_efficiency_benchmark_cli_smoke(tmp_path):
     assert "akt" in metrics["quality"]["summary"]
     assert metrics["policy"]["summary"]["table"]
     assert metrics["summary"]["best_policy"]["policy"] in {"progression", "delayed_gain", "support_delayed_gain"}
+    report = report_path.read_text()
+    assert "# Smoke credibility benchmark" in report
+    assert "## KT Prediction Quality" in report
+    assert "## Policy OPE" in report
+    assert "research evidence" in report
 
 
 def test_delayed_gain_model_benchmark_cli_smoke(tmp_path):

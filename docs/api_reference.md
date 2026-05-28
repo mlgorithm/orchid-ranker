@@ -24,8 +24,8 @@ ranked = ranker.recommend("learner-7", [10, 20, 30], top_k=3)
 ranker.observe(learner_id="learner-7", ts=10, item_id=ranked[0].item_id, concept_id=None, correct=1)
 ```
 
-Use `orchid_ranker.legacy.OrchidRecommender` when you only have ordinary
-user-item interactions and need a batch/generic recommender fallback.
+Historical generic recommender APIs live under `orchid_ranker.legacy` for
+compatibility. New work should start from the adaptive APIs below.
 
 ---
 
@@ -44,21 +44,49 @@ class AdaptiveRanker:
     def ope_report(self, logged_decisions, *, reward_col="reward", propensity_col="propensity")
 ```
 
-`kt_backbone` accepts `"akt"`, `"sakt"`, `"saint"`, and `"saint+"`.
+`kt_backbone` accepts `"akt"`, `"sakt"`, `"dkt"`, `"dkvmn"`, `"saint"`, and `"saint+"`.
 `"saint+"` uses elapsed-time and lag-time features when timestamped events are
 available, and falls back to zero temporal features otherwise.
+`AdaptiveRanker.observe(...)` forwards `LearnerEvent.ts` to time-aware tracers
+so live SAINT+ state keeps using timestamp features after fit.
 
 `fit_policy(..., algo="cql")` implements a dependency-light tabular
-CQL-style learner over logged candidate sets. It is the first conservative
-offline policy path; deeper CQL/IQL/CRR implementations can slot behind the
-same facade later.
+CQL-style contextual-bandit learner over logged candidate sets and rewards.
+Logged propensities are validated by the decision schema and used as clipped,
+normalized inverse-propensity update weights. Deeper CQL/IQL/CRR
+implementations can slot behind the same facade later.
 
 `fit_semantic_items(...)` fits the built-in hashing-vectorizer semantic encoder
 for text/metadata cold start. Passing `item_query_text` to `recommend(...)`
 uses semantic retrieval to build the candidate set before KT/policy reranking.
+If a semantic candidate is not present in the fitted KT item universe, the
+facade can still return it with a `semantic_cold_start` score that blends text
+similarity, concept/difficulty metadata, and prior uncertainty.
 
 `mode="sketch"` uses an attached `SketchCandidateGenerator` to produce a
 bounded candidate set before final reranking.
+
+---
+
+## Adaptive Algorithm Collection
+
+Orchid intentionally exposes a curated adaptive-learning collection rather than
+a generic recommender model zoo.
+
+| Area | Public APIs |
+|------|-------------|
+| Transformer KT | `SAKTTracer`, `AKTTracer`, `SAINTTracer`, `SAINTPlusTracer` |
+| Recurrent / memory KT | `DKTTracer`, `DKVMNTracer` |
+| Classical EDM | `PFATracer`, `AFMTracer`, `BayesianKnowledgeTracing`, `fit_bkt_em` |
+| Calibration | `TemperatureScaler`, `IsotonicProbabilityCalibrator`, `expected_calibration_error`, `brier_score` |
+| Adaptive testing | `IRTAdaptiveSelector`, `IRTItem` |
+| Retention | `FSRSScheduler`, `FSRSReviewState` |
+| Exploration | `PersonalizedLinUCB` |
+| Policy evaluation | `evaluate_logged_policy`, `bootstrap_logged_policy`, `TabularFQE` |
+
+The compact KT implementations should be described as `SAKT-style`,
+`AKT-inspired`, `DKVMN-style`, etc. until a benchmark card validates exact
+paper-level reproduction.
 
 ---
 
@@ -142,65 +170,11 @@ delayed-gain prior coverage, and reward-model report.
 
 ---
 
-## orchid_ranker.legacy.recommender
+## Legacy compatibility
 
-### OrchidRecommender
-
-Batch/generic recommender supporting all built-in historical strategies. This
-is a legacy fallback path for ordinary user-item interactions without learning
-concepts, difficulty, prerequisites, or live outcome state.
-
-```python
-class OrchidRecommender:
-    def __init__(
-        self,
-        strategy: str = "als",
-        device: str | None = None,
-        validate_inputs: bool = True,
-        **strategy_kwargs,
-    )
-```
-
-**Parameters:**
-
-- `strategy` — One of: `"auto"`, `"legacy_binary_mf"`, `"als"`, `"explicit_mf"`, `"neural_mf"`, `"linucb"`, `"user_knn"`, `"popularity"`, `"random"`, `"implicit_als"`, `"implicit_bpr"`. The historical `"als"` strategy is a deprecated alias for the binary-MF/BCE baseline; use `"implicit_als"` for true alternating least squares. Typos produce a helpful "did you mean?" suggestion.
-- `device` — `"cpu"` or `"cuda"`. Defaults to auto-detect.
-- `validate_inputs` — When `True`, validates DataFrame schema before fitting. Set `False` for legacy pipeline integration.
-- `**strategy_kwargs` — Forwarded to the underlying strategy (e.g., `epochs=10`, `emb_dim=64`, `alpha=1.5`).
-
-**Methods:**
-
-| Method | Signature | Returns | Description |
-|--------|-----------|---------|-------------|
-| `fit` | `(interactions, user_col="user_id", item_col="item_id", rating_col=None, item_features=None)` | `self` | Fit the model on interaction data. |
-| `predict` | `(user_id, item_id)` | `float` | Predict a single score. |
-| `predict_many` | `(user_ids, item_ids)` | `np.ndarray` | Batch prediction for user-item pairs. |
-| `recommend` | `(user_id, top_k=10, filter_seen=True, candidate_item_ids=None)` | `List[Recommendation]` | Top-K recommendations for a user, optionally restricted to a candidate pool. |
-| `baseline_rank` | `(user_id, top_k=10, candidate_item_ids=None)` | `List[Recommendation]` | Frozen fallback ranking for guardrail and safe-mode flows. |
-| `as_streaming` | `(monitor=None, guardrail=None, lr=0.05, l2=1e-3, scaling_config=None)` | `StreamingAdaptiveRanker` | Promote a fitted `neural_mf` model into the streaming adapter. |
-| `save` | `(path)` | `None` | Save fitted model to disk. |
-| `load` | `(path)` | `OrchidRecommender` | Class method. Load a saved model. |
-| `available_strategies` | `()` | `str` | Class method. Return all strategies with descriptions. |
-
-`candidate_item_ids` accepts original item IDs from your DataFrame. Unknown
-candidate IDs are ignored, which makes it safe to pass a shared catalog pool
-while rolling models forward.
-
-### Recommendation
-
-```python
-@dataclass
-class Recommendation:
-    item_id: int
-    score: float
-```
-
-### STRATEGY_GUIDE
-
-```python
-STRATEGY_GUIDE: Dict[str, str]
-# Maps strategy name to human-readable description
-```
+The historical generic recommender API is intentionally not part of the main
+adaptive API reference. It remains importable as `orchid_ranker.legacy` for old
+experiments and migration work only.
 
 ---
 
@@ -286,8 +260,8 @@ def compare_logged_policies(
 ```
 
 ```python
-def bootstrap_logged_policy(..., n_bootstrap=500) -> BootstrapLoggedPolicyReport
-def bootstrap_compare_logged_policies(..., n_bootstrap=500) -> BootstrapPolicyComparisonReport
+def bootstrap_logged_policy(..., n_bootstrap=500, cluster_col=None) -> BootstrapLoggedPolicyReport
+def bootstrap_compare_logged_policies(..., n_bootstrap=500, cluster_col=None) -> BootstrapPolicyComparisonReport
 def evaluate_rollout_gate(report, *, min_effect=0.0, min_ess_fraction=0.05) -> OPERolloutGateReport
 ```
 
@@ -295,6 +269,8 @@ Reports include IPS, SNIPS, direct-method and doubly robust estimates when the
 required columns are supplied, plus coverage, effective sample size, weight
 diagnostics, and confidence intervals. Bootstrap reports add row-resampled
 percentile intervals for rollout gates where normal approximation is too weak.
+Pass `cluster_col` to resample learners, classrooms, or courses as whole units
+when logged outcomes are clustered rather than row-independent.
 `evaluate_rollout_gate(...)` converts a single-policy or policy-comparison
 report into an allow/block decision using lower confidence bounds, effective
 sample size fraction, coverage, and clipped-weight fraction.
@@ -306,7 +282,7 @@ sample size fraction, coverage, and clipped-weight fraction.
 Semantic item retrieval for new exercises or sparse catalogs.
 
 ```python
-from orchid_ranker import SemanticItemEncoder
+from orchid_ranker import DenseSemanticItemEncoder, SemanticItemEncoder
 
 encoder = SemanticItemEncoder(n_features=2**14).fit(
     catalog,
@@ -316,12 +292,39 @@ encoder = SemanticItemEncoder(n_features=2**14).fit(
 )
 
 candidate_ids = encoder.similar_items("add fractions with common denominators", top_k=50)
+
+dense = DenseSemanticItemEncoder(my_embedding_fn).fit(catalog)
 ```
 
 `SemanticItemEncoder` uses deterministic hashed text/metadata features, so it
 does not require model downloads or external embedding services. Use it for
 candidate generation and cold start, then let the KT/policy layer perform final
-adaptive reranking.
+adaptive reranking. `DenseSemanticItemEncoder` exposes the same retrieval API
+for sentence-transformer, e5/BGE, OpenAI-compatible, or in-house embedding
+providers supplied by the caller.
+
+---
+
+## orchid_ranker.irt
+
+Item-response-theory utilities for placement tests and mastery checks.
+
+```python
+from orchid_ranker import IRTAdaptiveSelector, IRTItem
+
+selector = IRTAdaptiveSelector(initial_theta=0.0).fit_items([
+    IRTItem("warmup", difficulty=-1.0, concept_id="basics"),
+    IRTItem("stretch", difficulty=0.5, discrimination=1.2, concept_id="fractions"),
+])
+
+next_item = selector.recommend(top_k=1)[0]
+selector.observe(next_item.item_id, correct=True)
+```
+
+`IRTAdaptiveSelector` ranks by item information at the learner's current
+ability estimate. It supports Rasch/1PL behavior by default, 2PL with per-item
+discrimination, and 3PL with a non-zero guessing parameter. Optional
+prerequisite constraints can filter items before selection.
 
 ---
 

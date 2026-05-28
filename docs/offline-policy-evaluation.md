@@ -30,6 +30,11 @@ and confidence intervals for the preferred estimate. Use
 intervals look fragile, then pass the result to `evaluate_rollout_gate` before
 serving the policy.
 
+For adaptive-learning logs, pass `cluster_col="learner_id"` or a classroom /
+course identifier to the bootstrap helpers when rows are correlated within a
+learner or cohort. Without `cluster_col`, Orchid uses row-level bootstrap
+resampling.
+
 ## Deterministic replay example
 
 ```python
@@ -80,6 +85,8 @@ assert gate.allowed, gate.reasons
 - Track effective sample size; high raw event count does not help if the target
   policy almost never matches the logged action.
 - Prefer doubly robust reports when a calibrated value model is available.
+- Use learner- or classroom-cluster bootstrap intervals for rollout decisions
+  when repeated outcomes come from the same learners.
 - Block rollout when the lower confidence bound is not positive, effective
   sample size is too low, coverage is too thin, or clipping is heavy.
 - Do not ship a learning policy from offline AUC alone. Pair KT prediction
