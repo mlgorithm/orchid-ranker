@@ -49,7 +49,7 @@ class TemperatureScaler:
         y = _labels(labels)
         if raw.shape[0] != y.shape[0]:
             raise ValueError("scores and labels must have the same length")
-        logits = raw if from_logits else _logit(_clip_probs(raw))
+        logits = raw if from_logits else _logit(_validate_probs(raw, "scores"))
         best_temp = min(self.temperatures, key=lambda temp: _log_loss(y, _sigmoid(logits / float(temp))))
         self.temperature_ = float(best_temp)
         self.from_logits_ = bool(from_logits)
@@ -62,7 +62,7 @@ class TemperatureScaler:
             raise RuntimeError("TemperatureScaler must be fitted before prediction")
         raw = _as_float_array(scores, "scores")
         use_logits = self.from_logits_ if from_logits is None else bool(from_logits)
-        logits = raw if use_logits else _logit(_clip_probs(raw))
+        logits = raw if use_logits else _logit(_validate_probs(raw, "scores"))
         return _sigmoid(logits / self.temperature_).astype(np.float64)
 
 
@@ -79,7 +79,7 @@ class IsotonicProbabilityCalibrator:
         return self.model_ is not None
 
     def fit(self, probabilities: Sequence[float], labels: Sequence[int | bool | float]) -> "IsotonicProbabilityCalibrator":
-        probs = _clip_probs(_as_float_array(probabilities, "probabilities"))
+        probs = _validate_probs(_as_float_array(probabilities, "probabilities"), "probabilities")
         y = _labels(labels)
         if probs.shape[0] != y.shape[0]:
             raise ValueError("probabilities and labels must have the same length")
@@ -91,7 +91,7 @@ class IsotonicProbabilityCalibrator:
     def predict_proba(self, probabilities: Sequence[float]) -> np.ndarray:
         if self.model_ is None:
             raise RuntimeError("IsotonicProbabilityCalibrator must be fitted before prediction")
-        probs = _clip_probs(_as_float_array(probabilities, "probabilities"))
+        probs = _validate_probs(_as_float_array(probabilities, "probabilities"), "probabilities")
         return np.asarray(self.model_.predict(probs), dtype=np.float64)
 
 
@@ -104,7 +104,7 @@ def expected_calibration_error(
     """Return equal-width expected calibration error."""
     if n_bins < 1:
         raise ValueError("n_bins must be >= 1")
-    probs = _clip_probs(_as_float_array(probabilities, "probabilities"))
+    probs = _validate_probs(_as_float_array(probabilities, "probabilities"), "probabilities")
     y = _labels(labels)
     if probs.shape[0] != y.shape[0]:
         raise ValueError("probabilities and labels must have the same length")
@@ -124,7 +124,7 @@ def expected_calibration_error(
 
 
 def brier_score(probabilities: Sequence[float], labels: Sequence[int | bool | float]) -> float:
-    probs = _clip_probs(_as_float_array(probabilities, "probabilities"))
+    probs = _validate_probs(_as_float_array(probabilities, "probabilities"), "probabilities")
     y = _labels(labels)
     if probs.shape[0] != y.shape[0]:
         raise ValueError("probabilities and labels must have the same length")
@@ -156,13 +156,27 @@ def _logit(values: np.ndarray) -> np.ndarray:
     return np.log(clipped / (1.0 - clipped))
 
 
+def _validate_probs(values: np.ndarray, name: str) -> np.ndarray:
+    arr = np.asarray(values, dtype=float)
+    if np.any(~np.isfinite(arr)):
+        raise ValueError(f"{name} must be finite")
+    if np.any((arr < 0.0) | (arr > 1.0)):
+        raise ValueError(f"{name} must be probabilities in [0, 1]")
+    return arr
+
+
 def _clip_probs(values: np.ndarray) -> np.ndarray:
-    return np.clip(values.astype(float), 1e-6, 1.0 - 1e-6)
+    arr = np.asarray(values, dtype=float)
+    if np.any(~np.isfinite(arr)):
+        raise ValueError("probabilities must be finite")
+    return np.clip(arr, 1e-6, 1.0 - 1e-6)
 
 
 def _labels(values: Sequence[int | bool | float]) -> np.ndarray:
     arr = _as_float_array(values, "labels")
-    return (arr >= 0.5).astype(float)
+    if np.any(~(np.isclose(arr, 0.0) | np.isclose(arr, 1.0))):
+        raise ValueError("labels must be binary values 0 or 1")
+    return np.rint(arr).astype(float)
 
 
 def _as_float_array(values: Sequence[float], name: str) -> np.ndarray:

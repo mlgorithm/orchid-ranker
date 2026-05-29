@@ -15,6 +15,7 @@ import numpy as np
 import torch
 import torch.nn as nn
 
+from orchid_ranker._labels import parse_binary_float
 from orchid_ranker.agents.policies import BootTS, LinUCBPolicy
 from orchid_ranker.agents.simple_dp import SimpleDPConfig
 from orchid_ranker.dp_accountant import build_accountant
@@ -38,6 +39,10 @@ def _d(*args) -> None:
     """Debug logging helper."""
     if _DEBUG_REC:
         logger.debug("%s", " ".join(str(a) for a in args))
+
+
+def _entropy_seed() -> int:
+    return int.from_bytes(os.urandom(8), "little") % (2**63 - 1)
 
 
 class TwoTowerRecommender(nn.Module):
@@ -135,6 +140,7 @@ class TwoTowerRecommender(nn.Module):
         self.state_dim = int(state_dim)
         self.mmr_lambda = float(mmr_lambda)
         self.novelty_bonus = float(novelty_bonus)
+        self.lr = float(lr)
         # paper-aligned knobs (configurable)
         self.zpd_width = float(max(1e-6, zpd_width))
         self.zpd_weight = float(max(0.0, zpd_weight))
@@ -294,6 +300,7 @@ class TwoTowerRecommender(nn.Module):
         self._adapted_nov: Optional[float] = None
 
         self.device = device
+        self._dp_noise_generators: Dict[str, torch.Generator] = {}
         self.per_user_only = False
         self._compiled = False
         self.to(self.device)
@@ -365,7 +372,7 @@ class TwoTowerRecommender(nn.Module):
             if local_idx is None:
                 continue
             idx.append(int(local_idx))
-            y.append(float(raw_val))
+            y.append(parse_binary_float(raw_val, name="feedback"))
 
         return idx, y
 
@@ -421,6 +428,11 @@ class TwoTowerRecommender(nn.Module):
                 return u
             return self.adapters[slot](u)
         return u
+
+    def _non_anchor_parameters(self) -> List[torch.nn.Parameter]:
+        anchor = getattr(self, "anchor", None)
+        anchor_ids = {id(p) for p in anchor.parameters()} if anchor is not None else set()
+        return [p for p in self.parameters() if id(p) not in anchor_ids]
 
     def _user_context_vec(self, x_u, user_ids, state_vec, cohort_ids=None) -> torch.Tensor:
         xu_cat = torch.cat([x_u, state_vec], dim=1)
@@ -497,6 +509,8 @@ class TwoTowerRecommender(nn.Module):
         item_ids: torch.Tensor,
         state_vec: Optional[torch.Tensor] = None,
         cohort_ids: Optional[torch.Tensor] = None,
+        *,
+        explore: bool = False,
         ) -> torch.Tensor:
         """Score candidate items with optional exploration bonuses.
 
@@ -568,7 +582,7 @@ class TwoTowerRecommender(nn.Module):
         phi = torch.cat([u_vec.expand_as(I), I, u_vec.unsqueeze(0) * I], dim=1)  # [K,3D]
         phi_np = phi.detach().cpu().numpy()
 
-        if self.training and torch.is_grad_enabled():
+        if explore:
             if self.use_linucb and self.linucb is not None:
                 bonuses = np.array([self.linucb.score(phi_np[j], base=0.0, i=int(iid))
                                     for j, iid in enumerate(self._last_item_ids)])
@@ -579,8 +593,7 @@ class TwoTowerRecommender(nn.Module):
                     _d(f"think: linUCB bonus applied alpha={self.linucb_alpha:.3f}")
 
             if self.use_bootts and self.bootts is not None:
-                bonuses = np.array([self.bootts.score_vec(phi_np[j])
-                                    for j in range(len(self._last_item_ids))])
+                bonuses = self.bootts.score_many(phi_np)
                 b = torch.from_numpy(bonuses).to(device=logits.device, dtype=logits.dtype)
                 b = (b - b.mean()) / (b.std(unbiased=False) + 1e-6)
                 logits = logits + b.unsqueeze(0) * self.ts_alpha
@@ -599,6 +612,46 @@ class TwoTowerRecommender(nn.Module):
             user_context=getattr(self, "_user_context_vec_cache", None),
         )
         return logits  # [1,K]
+
+    def _dp_noise(
+        self,
+        parameter: torch.nn.Parameter,
+        std: float,
+        *,
+        shape: Optional[torch.Size] = None,
+    ) -> torch.Tensor:
+        """Draw DP noise from an instance-private generator instead of global torch RNG."""
+        noise_shape = parameter.shape if shape is None else shape
+        key = str(parameter.device)
+        generators = getattr(self, "_dp_noise_generators", None)
+        if generators is None:
+            generators = {}
+            self._dp_noise_generators = generators
+        generator = generators.get(key)
+        if generator is None:
+            try:
+                generator = torch.Generator(device=parameter.device)
+            except RuntimeError:
+                generator = torch.Generator()
+            generator.manual_seed(_entropy_seed())
+            generators[key] = generator
+        try:
+            return torch.normal(
+                mean=0.0,
+                std=float(std),
+                size=noise_shape,
+                device=parameter.device,
+                dtype=parameter.dtype,
+                generator=generator,
+            )
+        except RuntimeError:
+            return torch.normal(
+                mean=0.0,
+                std=float(std),
+                size=noise_shape,
+                device=parameter.device,
+                dtype=parameter.dtype,
+            )
 
     # ---------------- uncertainty widths for policy mapping (paper §3.1) ----------------
     def uncertainty_widths(self, phi_np: np.ndarray, item_ids: List[int]) -> List[float]:
@@ -627,11 +680,10 @@ class TwoTowerRecommender(nn.Module):
                     if A is None:
                         A = l2 * I
                     try:
-                        A_reg = A + l2 * I
-                        Ax = np.linalg.solve(A_reg, x[j])
+                        Ax = np.linalg.solve(A, x[j])
                         conf = float(np.sqrt(max(0.0, float(x[j] @ Ax))))
                     except np.linalg.LinAlgError:
-                        A_pinv = np.linalg.pinv(A + l2 * I)
+                        A_pinv = np.linalg.pinv(A)
                         conf = float(np.sqrt(max(0.0, float(x[j] @ (A_pinv @ x[j])))))
                     widths[j] = max(widths[j], conf)
 
@@ -1020,7 +1072,7 @@ class TwoTowerRecommender(nn.Module):
         self.train()
 
         # freeze/unfreeze by scope
-        all_params = list(self.parameters())
+        all_params = self._non_anchor_parameters()
         if scope == "per_user":
             for p in all_params:
                 p.requires_grad_(False)
@@ -1080,15 +1132,21 @@ class TwoTowerRecommender(nn.Module):
         q = float(getattr(self.dp_settings, "sample_rate", 0.0) or 0.0)
         delta = float(getattr(self.dp_settings, "delta", 1e-5))
         C = float(getattr(self.dp_settings, "max_grad_norm", 1.0))
-        dp_enabled = bool(getattr(self.dp_settings, "enabled", False) and sigma > 0.0 and q > 0.0)
+        dp_enabled = bool(getattr(self.dp_settings, "enabled", False))
+        if dp_enabled and (sigma <= 0.0 or q <= 0.0 or C <= 0.0):
+            raise ValueError("DP updates require positive noise_multiplier, sample_rate, and max_grad_norm")
         requested_steps = max(0, int(epochs))
 
         float(getattr(self, "eps_cum", 0.0) or 0.0)
         bce = torch.nn.BCEWithLogitsLoss(reduction="mean")
 
         if dp_enabled:
-            steps_budget = max(0, int(getattr(self, "_dp_steps_budget", 0)))
-            steps_done = min(requested_steps, steps_budget)
+            if hasattr(self, "_dp_steps_budget"):
+                steps_budget = max(0, int(getattr(self, "_dp_steps_budget", 0)))
+                steps_done = min(requested_steps, steps_budget)
+            else:
+                steps_budget = requested_steps
+                steps_done = requested_steps
         else:
             steps_budget = requested_steps
             steps_done = requested_steps
@@ -1103,11 +1161,11 @@ class TwoTowerRecommender(nn.Module):
                 "sample_rate": (q if dp_enabled else None),
             }
 
-        if dp_enabled:
+        if dp_enabled and hasattr(self, "_dp_steps_budget"):
             self._dp_steps_budget = max(0, steps_budget - steps_done)
 
         executed_steps = 0
-        if dp_enabled and self.dp_engine == "per_sample":
+        if dp_enabled:
             loss_val = 0.0
             for step in range(steps_done):
                 loss_val = self._dp_update_per_sample(
@@ -1130,25 +1188,27 @@ class TwoTowerRecommender(nn.Module):
             for step in range(steps_done):
                 self._opt.zero_grad(set_to_none=True)
 
-                logits_all = self.think(
-                    user_vec=user_vec.to(device),
-                    item_matrix=item_matrix.to(device),
-                    user_ids=user_ids.to(device),
-                    item_ids=item_ids.to(device),
+                logits_all, _u, _I = self._scores_logits(
+                    user_vec.to(device),
+                    item_matrix.to(device),
+                    user_ids.to(device),
+                    item_ids.to(device),
                     state_vec=state_vec.to(device),
                     cohort_ids=None,
                 )
+                logits_all = torch.nan_to_num(logits_all, nan=-1e9, posinf=1e9, neginf=-1e9)
                 logits = logits_all[0, idx_t]
 
                 with torch.no_grad():
-                    t_logits_all = self.anchor.think(
-                        user_vec=user_vec.to(device),
-                        item_matrix=item_matrix.to(device),
-                        user_ids=user_ids.to(device),
-                        item_ids=item_ids.to(device),
+                    t_logits_all, _tu, _tI = self.anchor._scores_logits(
+                        user_vec.to(device),
+                        item_matrix.to(device),
+                        user_ids.to(device),
+                        item_ids.to(device),
                         state_vec=state_vec.to(device),
                         cohort_ids=None,
                     )
+                    t_logits_all = torch.nan_to_num(t_logits_all, nan=-1e9, posinf=1e9, neginf=-1e9)
                 log_p = torch.nn.functional.logsigmoid(logits_all[0, idx_t])
                 log_pt = torch.nn.functional.logsigmoid(t_logits_all[0, idx_t])
                 kl_stu = torch.exp(log_pt) * (log_pt - log_p) + torch.exp(log_p) * (log_p - log_pt)
@@ -1163,13 +1223,7 @@ class TwoTowerRecommender(nn.Module):
                         for p in trainable:
                             if p.grad is None:
                                 continue
-                            noise = torch.normal(
-                                mean=0.0,
-                                std=sigma * C,
-                                size=p.grad.shape,
-                                device=p.grad.device,
-                                dtype=p.grad.dtype,
-                            )
+                            noise = self._dp_noise(p, sigma * C, shape=p.grad.shape)
                             p.grad.add_(noise)
 
                 self._opt.step()
@@ -1259,14 +1313,15 @@ class TwoTowerRecommender(nn.Module):
     ) -> float:
         device = next(self.parameters()).device
 
-        logits_all = self.think(
-            user_vec=user_vec.to(device),
-            item_matrix=item_matrix.to(device),
-            user_ids=user_ids.to(device),
-            item_ids=item_ids.to(device),
+        logits_all, _u, _I = self._scores_logits(
+            user_vec.to(device),
+            item_matrix.to(device),
+            user_ids.to(device),
+            item_ids.to(device),
             state_vec=state_vec.to(device),
             cohort_ids=None,
         )
+        logits_all = torch.nan_to_num(logits_all, nan=-1e9, posinf=1e9, neginf=-1e9)
         teacher = self.anchor
         if teacher is not None:
             # ensure frozen anchor has runtime attributes expected by think()
@@ -1292,14 +1347,15 @@ class TwoTowerRecommender(nn.Module):
                     setattr(teacher, attr, val)
 
         with torch.no_grad():
-            t_logits_all = teacher.think(
-                user_vec=user_vec.to(device),
-                item_matrix=item_matrix.to(device),
-                user_ids=user_ids.to(device),
-                item_ids=item_ids.to(device),
+            t_logits_all, _tu, _tI = teacher._scores_logits(
+                user_vec.to(device),
+                item_matrix.to(device),
+                user_ids.to(device),
+                item_ids.to(device),
                 state_vec=state_vec.to(device),
                 cohort_ids=None,
             )
+            t_logits_all = torch.nan_to_num(t_logits_all, nan=-1e9, posinf=1e9, neginf=-1e9)
 
         logits = logits_all[0, idx_t]
         log_p = torch.nn.functional.logsigmoid(logits)
@@ -1326,7 +1382,7 @@ class TwoTowerRecommender(nn.Module):
 
         std = float(sigma) * float(C)
         for j, p in enumerate(trainable):
-            noise = torch.normal(mean=0.0, std=std, size=p.shape, device=p.device, dtype=p.dtype)
+            noise = self._dp_noise(p, std)
             p.grad = (sum_grads[j] + noise) / max(1, B)
 
         self._opt.step()
@@ -1419,6 +1475,17 @@ class TwoTowerRecommender(nn.Module):
             item_matrix=Xi,
         )
 
+        if getattr(self, "dp_settings", None) and self.dp_settings.enabled:
+            return self._dp_train_step_pairwise(
+                user_ids=user_ids,
+                item_ids=item_ids,
+                labels=labels,
+                item_matrix=Xi,
+                state_vec=state_vec,
+                distill=batch.get("distill_scores"),
+                distill_lambda=float(batch.get("distill_lambda", 0.0)) if "distill_lambda" in batch else 0.0,
+            )
+
         loss = torch.nn.functional.binary_cross_entropy_with_logits(logits, labels)
         # Optional Funk-style distillation: encourage tower scores to match auxiliary MF scores
         distill = batch.get("distill_scores")
@@ -1433,13 +1500,90 @@ class TwoTowerRecommender(nn.Module):
                 pass
         self.optimizer.zero_grad(set_to_none=True)
         loss.backward()
-        if getattr(self, "dp_settings", None) and self.dp_settings.enabled:
-            torch.nn.utils.clip_grad_norm_(self.parameters(), self.dp_settings.max_grad_norm)
         self.optimizer.step()
         out = {"loss": float(loss.item())}
         if _DEBUG_REC:
             _d(f"train_step: B={int(user_ids.numel())} loss={out['loss']:.4f}")
         return out
+
+    def _dp_train_step_pairwise(
+        self,
+        *,
+        user_ids: torch.Tensor,
+        item_ids: torch.Tensor,
+        labels: torch.Tensor,
+        item_matrix: torch.Tensor,
+        state_vec: torch.Tensor,
+        distill: Optional[torch.Tensor],
+        distill_lambda: float,
+    ) -> dict:
+        sigma = float(getattr(self.dp_settings, "noise_multiplier", 0.0) or 0.0)
+        q = float(getattr(self.dp_settings, "sample_rate", 0.0) or 0.0)
+        delta = float(getattr(self.dp_settings, "delta", 1e-5))
+        C = float(getattr(self.dp_settings, "max_grad_norm", 1.0) or 0.0)
+        if sigma <= 0.0 or q <= 0.0 or C <= 0.0:
+            raise ValueError("DP train_step requires positive noise_multiplier, sample_rate, and max_grad_norm")
+        if hasattr(self, "_dp_steps_budget") and int(getattr(self, "_dp_steps_budget", 0)) <= 0:
+            return {
+                "loss": 0.0,
+                "epsilon_delta": 0.0,
+                "epsilon_cum": float(getattr(self, "eps_cum", 0.0)),
+                "noise_multiplier": sigma,
+                "delta": delta,
+                "sample_rate": q,
+            }
+
+        trainable = [
+            p
+            for group in self.optimizer.param_groups
+            for p in group["params"]
+            if p.requires_grad
+        ]
+        logits = self._pairwise_logits(
+            user_ids=user_ids,
+            item_ids=item_ids,
+            state_vec=state_vec,
+            item_matrix=item_matrix,
+        )
+        per_sample_losses = torch.nn.functional.binary_cross_entropy_with_logits(logits, labels, reduction="none")
+        if distill is not None and distill_lambda > 0.0:
+            distill_t = distill.to(self.device).view_as(logits)
+            per_sample_losses = per_sample_losses + distill_lambda * (torch.sigmoid(logits) - distill_t).pow(2)
+
+        sum_grads = [torch.zeros_like(p, device=self.device) for p in trainable]
+        total_loss = 0.0
+        batch_size = int(per_sample_losses.numel())
+        self.optimizer.zero_grad(set_to_none=False)
+        for idx, loss_sample in enumerate(per_sample_losses):
+            for p in trainable:
+                if p.grad is not None:
+                    p.grad.zero_()
+            loss_sample.backward(retain_graph=idx < batch_size - 1)
+            grads = [p.grad.detach().clone() if p.grad is not None else torch.zeros_like(p, device=self.device) for p in trainable]
+            norm_sq = sum(float(torch.sum(g.pow(2))) for g in grads)
+            clip = min(1.0, C / math.sqrt(max(norm_sq, 1e-12)))
+            for j, grad in enumerate(grads):
+                sum_grads[j].add_(grad * clip)
+            total_loss += float(loss_sample.detach().item())
+
+        std = sigma * C
+        for j, p in enumerate(trainable):
+            noise = self._dp_noise(p, std)
+            p.grad = (sum_grads[j] + noise) / max(1, batch_size)
+        self.optimizer.step()
+        eps_delta, self.eps_cum = self._dp_accountant.step(1)
+        self._dp_steps_total += 1
+        self.eps_last = eps_delta
+        if hasattr(self, "_dp_steps_budget"):
+            self._dp_steps_budget = max(0, int(self._dp_steps_budget) - 1)
+        return {
+            "loss": float(total_loss / max(1, batch_size)),
+            "epsilon_delta": float(eps_delta),
+            "epsilon_cum": float(self.eps_cum),
+            "noise_multiplier": sigma,
+            "delta": delta,
+            "sample_rate": q,
+        }
 
 
 __all__ = [

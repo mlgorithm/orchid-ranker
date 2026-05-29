@@ -203,6 +203,7 @@ class JWTAuthenticator:
                 algorithms=self.algorithms,
                 audience=self.audience,
                 issuer=self.issuer,
+                options={"require": ["exp"]},
             )
 
         except jwt.ExpiredSignatureError as e:

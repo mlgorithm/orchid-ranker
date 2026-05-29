@@ -7,6 +7,8 @@ from typing import Any, Mapping, Optional, Sequence
 
 import pandas as pd
 
+from ._labels import parse_binary_label
+
 __all__ = [
     "IRTAdaptiveSelector",
     "IRTItem",
@@ -60,6 +62,8 @@ class IRTAdaptiveSelector:
         min_theta: float = -6.0,
         max_theta: float = 6.0,
     ) -> None:
+        if not all(math.isfinite(float(value)) for value in (initial_theta, learning_rate, min_theta, max_theta)):
+            raise ValueError("initial_theta, learning_rate, min_theta, and max_theta must be finite")
         if learning_rate <= 0.0:
             raise ValueError("learning_rate must be positive")
         if min_theta >= max_theta:
@@ -106,6 +110,8 @@ class IRTAdaptiveSelector:
         self._require_fitted()
         item = self._item(item_id)
         ability = self.theta if theta is None else float(theta)
+        if not math.isfinite(ability):
+            raise ValueError("theta must be finite")
         base = _sigmoid(item.discrimination * (ability - item.difficulty))
         return _clamp01(item.guessing + (1.0 - item.guessing) * base)
 
@@ -125,9 +131,13 @@ class IRTAdaptiveSelector:
         """Update ability from one response and return the new ``theta``."""
         self._require_fitted()
         item = self._item(item_id)
-        label = 1 if bool(correct) else 0
+        label = 1 if parse_binary_label(correct, name="correct") else 0
         p = self.probability(item_id)
-        grad = item.discrimination * (label - p)
+        if item.guessing > 0.0:
+            denom = max(p * (1.0 - item.guessing), 1e-12)
+            grad = item.discrimination * (label - p) * (p - item.guessing) / denom
+        else:
+            grad = item.discrimination * (label - p)
         self.theta = min(self.max_theta, max(self.min_theta, self.theta + self.learning_rate * grad))
         self.history_.append((item_id, label, self.theta))
         return self.theta

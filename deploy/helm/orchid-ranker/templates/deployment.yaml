@@ -21,20 +21,32 @@ spec:
           ports:
             - containerPort: {{ .Values.service.port }}
               name: http
+            {{- if .Values.metrics.enabled }}
             - containerPort: {{ .Values.metrics.port }}
               name: metrics
+            {{- end }}
             - containerPort: {{ .Values.health.port }}
               name: health
+          args:
+            - "--port={{ .Values.service.port }}"
+            - "--health-port={{ .Values.health.port }}"
+            {{- if .Values.metrics.enabled }}
+            - "--metrics-port={{ .Values.metrics.port }}"
+            {{- else }}
+            - "--no-metrics"
+            {{- end }}
           env:
             - name: ORCHID_LOG_LEVEL
               value: {{ .Values.env.ORCHID_LOG_LEVEL | quote }}
             - name: ORCHID_AUDIT_ENDPOINT
               value: {{ .Values.env.ORCHID_AUDIT_ENDPOINT | quote }}
+            {{- if or .Values.secrets.existingSecret .Values.secrets.auditApiKey }}
             - name: ORCHID_AUDIT_API_KEY
               valueFrom:
                 secretKeyRef:
-                  name: {{ include "orchid-ranker.fullname" . }}-secrets
+                  name: {{ default (printf "%s-secrets" (include "orchid-ranker.fullname" .)) .Values.secrets.existingSecret }}
                   key: auditApiKey
+            {{- end }}
           livenessProbe:
             {{- toYaml .Values.probes.liveness | nindent 12 }}
           readinessProbe:

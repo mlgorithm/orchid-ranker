@@ -195,7 +195,6 @@ class S3StreamConnector:
         RetryExhaustedError
             If all retry attempts are exhausted for transient errors.
         """
-        delays = [1, 2, 4]
         last_error = None
 
         for attempt in range(self.max_retries):
@@ -205,7 +204,7 @@ class S3StreamConnector:
                 last_error = e
                 if self._is_transient_error(e):
                     if attempt < self.max_retries - 1:
-                        delay = delays[attempt]
+                        delay = min(2 ** attempt, 30)
                         logger.warning(
                             f"Transient S3 error (attempt {attempt + 1}), retrying in {delay}s: {e}"
                         )

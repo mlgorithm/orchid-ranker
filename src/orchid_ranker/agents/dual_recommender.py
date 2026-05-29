@@ -113,6 +113,16 @@ class DualRecommender:
             return self._call_with_supported_args(fn, **kwargs)
         return self._call_with_supported_args(model.think, **kwargs)
 
+    @staticmethod
+    def _clone_batch(batch: dict) -> dict:
+        cloned = {}
+        for key, value in batch.items():
+            if torch.is_tensor(value):
+                cloned[key] = value.detach().clone()
+            else:
+                cloned[key] = value
+        return cloned
+
     def infer_policy(self, policy: str = "adaptive", **kwargs):
         pol = (policy or "adaptive").lower()
         if pol == "teacher":
@@ -185,12 +195,12 @@ class DualRecommender:
             logits_teacher = self._call_with_supported_args(self.teacher.think, **kwargs)
 
         weight = float(np.clip(getattr(self, "_student_weight", 0.0), 0.0, 1.0))
-        if weight <= 0.0 or not hasattr(self.student, "think"):
+        if weight <= 0.0:
             if os.getenv("ORCHID_DEBUG_REC", "").lower() in {"1", "true", "yes", "on"}:
                 _d("DualRec.infer: weight=0 -> teacher only")
             return logits_teacher
 
-        logits_student = self._call_with_supported_args(self.student.think, **kwargs)
+        logits_student = self._infer_component("student", **kwargs)
         try:
             out = torch.lerp(logits_teacher, logits_student, weight)
         except Exception:
@@ -284,7 +294,7 @@ class DualRecommender:
             # push to replay and perform extra small updates
             if self._replay_buf is not None:
                 try:
-                    self._replay_buf.append(batch)
+                    self._replay_buf.append(self._clone_batch(batch))
                 except Exception:
                     pass
                 for _ in range(max(0, self._replay_steps)):

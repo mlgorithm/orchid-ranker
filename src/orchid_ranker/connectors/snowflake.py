@@ -363,7 +363,6 @@ class SnowflakeConnector:
         RetryExhaustedError
             If all retry attempts are exhausted.
         """
-        delays = [1, 2, 4]
         last_error = None
 
         for attempt in range(self.max_retries):
@@ -380,7 +379,7 @@ class SnowflakeConnector:
                 if isinstance(e, _non_transient) or "auth" in err_msg or "syntax" in err_msg:
                     raise
                 if attempt < self.max_retries - 1:
-                    delay = delays[attempt] + _random.uniform(0, 0.5)
+                    delay = min(2 ** attempt, 30) + _random.uniform(0, 0.5)
                     logger.warning(
                         f"Attempt {attempt + 1} failed, retrying in {delay:.2f}s: {e}"
                     )
@@ -393,7 +392,7 @@ class SnowflakeConnector:
         ) from last_error
 
     @staticmethod
-    def _check_sql_injection(query: str) -> None:
+    def _check_sql_injection(query: str, *, strict: bool = False) -> None:
         """Heuristic SQL injection warning for dynamic queries.
 
         Logs a warning if the query contains suspicious patterns that may
@@ -404,6 +403,8 @@ class SnowflakeConnector:
         q_upper = query.upper()
         for pat in _suspicious:
             if pat.upper() in q_upper:
+                if strict:
+                    raise ValueError(f"Potential SQL injection pattern detected in query: {pat!r}")
                 logger.warning(
                     "Potential SQL injection pattern detected in query: %r. "
                     "Prefer parameterised queries to avoid injection attacks.",
@@ -411,7 +412,7 @@ class SnowflakeConnector:
                 )
                 break
 
-    def fetch_dataframe(self, query: str):
+    def fetch_dataframe(self, query: str, params: Optional[Dict[str, Any]] = None, *, strict_sql: bool = False):
         """Execute a query and return results as a DataFrame with retry support.
 
         Parameters
@@ -434,14 +435,17 @@ class SnowflakeConnector:
         import pandas as pd  # type: ignore
 
         self._require_lib()
-        self._check_sql_injection(query)
+        self._check_sql_injection(query, strict=strict_sql)
 
         def _fetch():
             conn = self._connect()
             try:
                 cur = conn.cursor()
                 try:
-                    cur.execute(query)
+                    if params is None:
+                        cur.execute(query)
+                    else:
+                        cur.execute(query, params)
                     data = cur.fetchall()
                     columns = [col[0] for col in cur.description]
                     return pd.DataFrame(data, columns=columns)

@@ -60,6 +60,16 @@ class SafeSwitchDR:
     _STATE_HALTED = "halted"
 
     def __init__(self, cfg: SafeSwitchDRConfig):
+        for name in ("delta", "p_min", "p_max", "step_up", "step_down", "u_max", "a_max", "accept_floor"):
+            value = float(getattr(cfg, name))
+            if not math.isfinite(value):
+                raise ValueError(f"{name} must be finite")
+        if not 0.0 < cfg.p_min <= cfg.p_max <= 1.0:
+            raise ValueError("p_min and p_max must satisfy 0 < p_min <= p_max <= 1")
+        if cfg.step_up < 0.0 or cfg.step_down < 0.0:
+            raise ValueError("step_up and step_down must be non-negative")
+        if cfg.u_max <= 0.0 or cfg.a_max <= 0.0:
+            raise ValueError("u_max and a_max must be positive")
         self.cfg = cfg
         self.p = cfg.p_min
         self.t = 0
@@ -103,7 +113,7 @@ class SafeSwitchDR:
             if self._state == self._STATE_HALTED:
                 self._last_decision = (False, 0.0)
                 return self._last_decision
-            if self.t >= 5 and self._acc_lcb() < self.cfg.accept_floor:
+            if self.t >= 5 and self.acc_mean < self.cfg.accept_floor and self._acc_lcb() < self.cfg.accept_floor:
                 self.p = 0.0
                 self._state = self._STATE_HALTED
                 self._last_decision = (False, 0.0)
@@ -139,8 +149,31 @@ class SafeSwitchDR:
             Logging probability used in this round.
         """
         with self._lock:
+            acc = float(accepts_per_user)
+            for name, value in (
+                ("reward", float(reward)),
+                ("accepts_per_user", acc),
+                ("Qa_pred", float(Qa_pred)),
+                ("Qf_pred", float(Qf_pred)),
+                ("p_used", float(p_used)),
+            ):
+                if not math.isfinite(value):
+                    raise ValueError(f"{name} must be finite")
+            if acc < 0.0:
+                raise ValueError("accepts_per_user must be non-negative")
+            p = float(p_used)
+            if not 0.0 <= p <= 1.0:
+                raise ValueError("p_used must be in [0, 1]")
+            if served_adaptive and p == 0.0:
+                raise ValueError("served_adaptive=True is impossible when p_used=0.0")
+            if (not served_adaptive) and p == 1.0:
+                raise ValueError("served_adaptive=False is impossible when p_used=1.0")
+            if served_adaptive and p < self.cfg.p_min:
+                raise ValueError(f"p_used={p} is below configured p_min={self.cfg.p_min}")
+            if (not served_adaptive) and (1.0 - p) < self.cfg.p_min:
+                raise ValueError(f"1 - p_used={1.0 - p} is below configured p_min={self.cfg.p_min}")
             self.t += 1
-            acc = max(0.0, min(self.cfg.a_max, float(accepts_per_user)))
+            acc = min(self.cfg.a_max, acc)
             prev = self.acc_mean
             self.acc_mean += (acc - self.acc_mean) / self.t
             self.acc_M2 += (acc - self.acc_mean) * (acc - prev)
@@ -150,7 +183,7 @@ class SafeSwitchDR:
             if self._state == self._STATE_HALTED:
                 return
 
-            if self.t >= 5 and self._acc_lcb() < self.cfg.accept_floor:
+            if self.t >= 5 and self.acc_mean < self.cfg.accept_floor and self._acc_lcb() < self.cfg.accept_floor:
                 self.p = 0.0
                 self._state = self._STATE_HALTED
                 return
@@ -202,4 +235,3 @@ __all__ = [
     "SafeSwitchDRConfig",
     "SafeSwitchDR",
 ]
-

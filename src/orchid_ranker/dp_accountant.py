@@ -68,7 +68,11 @@ class OpacusAccountant:
             )
         if not 0.0 < float(delta) < 1.0:
             raise ValueError(f"delta must be in (0, 1), got {delta}")
-        self.sample_rate = float(max(0.0, sample_rate))
+        if not 0.0 < float(sample_rate) <= 1.0:
+            raise ValueError(f"sample_rate must be in (0, 1], got {sample_rate}")
+        if float(noise_multiplier) <= 0.0:
+            raise ValueError(f"noise_multiplier must be > 0, got {noise_multiplier}")
+        self.sample_rate = float(sample_rate)
         self.noise_multiplier = float(noise_multiplier)
         self.delta = float(delta)
         self.orders: Tuple[float, ...] = tuple(orders or (1.25, 1.5, 2, 3, 5, 8, 10, 16, 32, 64, 128, 256))
@@ -94,7 +98,7 @@ class OpacusAccountant:
 
     def step(self, steps: int) -> Tuple[float, float]:
         steps = int(max(0, steps))
-        if steps == 0 or self.sample_rate <= 0.0 or self.noise_multiplier <= 0.0:
+        if steps == 0:
             return 0.0, float(self._eps)
 
         prev_rdp = self._rdp_cache

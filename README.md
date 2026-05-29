@@ -56,6 +56,7 @@ reward-model diagnostics to justify them.
 Get up and running in under 5 minutes:
 
 - [Adaptive learning quickstart](examples/adaptive_learning_quickstart.py) --- learner state + prerequisites + live re-ranking
+- [Use-case cookbook](examples/adaptive_learning_use_cases.py) --- compliance, language review, rehab, and safe rollout examples
 - [Scenario selection quickstart](examples/scenario_selection.py) --- choose the right Orchid workflow from product/data signals
 - [Knowledge tracing quickstart](examples/knowledge_tracing_quickstart.py) --- SAKT-style predicted correctness
 - [AKT quickstart](examples/akt_quickstart.py) --- difficulty-aware monotonic attention tracing
@@ -68,6 +69,7 @@ Get up and running in under 5 minutes:
 - [Algorithm roadmap](docs/algorithm-roadmap.md) --- KT, semantic exercise recommendation, and policy-learning direction
 - [Fit offline guide](docs/guides/01-fit-offline.md) --- train on a CSV, save, evaluate
 - [Usage scenarios](docs/scenarios.md) --- practical recipes for common Orchid deployments
+- [Use-case examples](docs/examples.md) --- domain examples that map Orchid APIs to concrete products
 
 ## Build with it
 
@@ -135,7 +137,7 @@ algorithms are tracked in the [algorithm roadmap](docs/algorithm-roadmap.md).
 
 ## Status
 
-![Tests](https://img.shields.io/badge/tests-passing-brightgreen)
+[![CI](https://github.com/mlgorithm/orchid-ranker/actions/workflows/ci.yaml/badge.svg)](https://github.com/mlgorithm/orchid-ranker/actions/workflows/ci.yaml)
 ![Python](https://img.shields.io/badge/python-3.11--3.13-blue)
 ![License](https://img.shields.io/badge/license-Apache%202.0-blue)
 
@@ -145,7 +147,10 @@ Apache 2.0. See [LICENSE](LICENSE).
 
 ## Contributing
 
-See [CONTRIBUTING.md](CONTRIBUTING.md). All contributions welcome.
+See [CONTRIBUTING.md](CONTRIBUTING.md) and
+[docs/coding-standards.md](docs/coding-standards.md). Contributions should keep
+Orchid focused on adaptive learning, knowledge tracing, progression ranking,
+safe rollout, and evidence-backed documentation.
 
 ## Citation
 

@@ -390,6 +390,11 @@ def run_kt_policy_ope_benchmark(
                 if logging_propensity_col is not None
                 else "synthetic_uniform_over_candidate_set"
             ),
+            "logging_support": (
+                "provided_propensity_with_synthetic_candidate_set"
+                if logging_propensity_col is not None
+                else "synthetic_candidate_set"
+            ),
             "baseline_policy": "random_uniform_candidate",
             "reward": _reward_name(reward_mode, correct_col),
             "reward_mode": reward_mode,
@@ -477,7 +482,6 @@ def estimate_delayed_gain_priors(
     train["__orchid_label__"] = _binary_labels(train[split.correct_col].tolist(), threshold=threshold)
     global_label_prior = float(train["__orchid_label__"].mean())
     concept_label_prior = train.groupby(concept_col)["__orchid_label__"].mean().to_dict()
-    user_concept_prior = train.groupby([split.user_col, concept_col])["__orchid_label__"].mean().to_dict()
 
     item_stats: Dict[Any, list[float]] = {}
     concept_stats: Dict[Any, list[float]] = {}
@@ -486,6 +490,8 @@ def estimate_delayed_gain_priors(
 
     for _user_id, group in train.groupby(split.user_col, sort=False):
         rows = group.to_dict("records")
+        prior_totals: Dict[Any, float] = {}
+        prior_counts: Dict[Any, int] = {}
         for pos, row in enumerate(rows):
             concept = row[concept_col]
             future = []
@@ -495,11 +501,13 @@ def estimate_delayed_gain_priors(
                     if len(future) >= future_window:
                         break
             if not future:
+                prior_totals[concept] = prior_totals.get(concept, 0.0) + float(row["__orchid_label__"])
+                prior_counts[concept] = prior_counts.get(concept, 0) + 1
                 continue
-            prior = user_concept_prior.get(
-                (row[split.user_col], concept),
-                concept_label_prior.get(concept, global_label_prior),
-            )
+            if prior_counts.get(concept, 0) > 0:
+                prior = prior_totals[concept] / float(prior_counts[concept])
+            else:
+                prior = concept_label_prior.get(concept, global_label_prior)
             reward = float(np.clip(0.5 + 0.5 * (float(np.mean(future)) - float(prior)), 0.0, 1.0))
             item_id = row[split.item_col]
             item_concept[item_id] = concept
@@ -510,6 +518,8 @@ def estimate_delayed_gain_priors(
             concept_stats[concept][0] += reward
             concept_stats[concept][1] += 1.0
             all_rewards.append(reward)
+            prior_totals[concept] = prior_totals.get(concept, 0.0) + float(row["__orchid_label__"])
+            prior_counts[concept] = prior_counts.get(concept, 0) + 1
 
     global_gain_prior = float(np.mean(all_rewards)) if all_rewards else 0.5
     concept_gain_prior = {

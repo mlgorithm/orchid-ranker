@@ -25,6 +25,9 @@ class FQEReport:
     learning_rate: float
     estimated_value: float
     final_loss: float
+    target_start_action_col: Optional[str] = None
+    target_start_action_supported_fraction: float = 0.0
+    target_start_action_is_explicit: bool = False
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
@@ -67,28 +70,40 @@ class TabularFQE:
         reward_col: str = "reward",
         next_context_col: str = "next_context_hash",
         target_action_col: str = "target_action_id",
+        target_start_action_col: Optional[str] = None,
         done_col: str = "done",
     ) -> "TabularFQE":
         """Fit Q values for a fixed target policy action per next context."""
         required = {context_col, action_col, reward_col, next_context_col, target_action_col, done_col}
+        if target_start_action_col is not None:
+            required.add(target_start_action_col)
         missing = required - set(transitions.columns)
         if missing:
             raise ValueError(f"transitions missing required columns: {sorted(missing)}")
         work = transitions.reset_index(drop=True)
+        self.q_values_ = {}
         rows = []
         contexts: set[Any] = set()
         actions: set[Any] = set()
-        for context, action, reward, next_context, target_action, done in work[
-            [context_col, action_col, reward_col, next_context_col, target_action_col, done_col]
-        ].itertuples(index=False, name=None):
+        start_actions: list[Any] = []
+        logged_pairs: set[tuple[Any, Any]] = set()
+        columns = [context_col, action_col, reward_col, next_context_col, target_action_col, done_col]
+        if target_start_action_col is not None:
+            columns.append(target_start_action_col)
+        for values in work[columns].itertuples(index=False, name=None):
+            context, action, reward, next_context, target_action, done = values[:6]
+            start_action = values[6] if target_start_action_col is not None else action
             reward_value = float(reward)
             if not np.isfinite(reward_value):
                 raise ValueError("reward values must be finite")
             done_value = bool(done)
             rows.append((context, action, reward_value, next_context, target_action, done_value))
+            start_actions.append(start_action)
+            logged_pairs.add((context, action))
             contexts.update([context, next_context])
-            actions.update([action, target_action])
+            actions.update([action, target_action, start_action])
             self.q_values_.setdefault((context, action), 0.0)
+            self.q_values_.setdefault((context, start_action), 0.0)
             self.q_values_.setdefault((next_context, target_action), 0.0)
 
         rng = np.random.RandomState(self.random_state)
@@ -105,7 +120,14 @@ class TabularFQE:
                 losses.append(error * error)
             final_loss = float(np.mean(losses)) if losses else 0.0
 
-        start_values = [self.q_values_.get((context, action), 0.0) for context, action, *_rest in rows]
+        start_values = [
+            self.q_values_.get((context, start_action), 0.0)
+            for (context, *_rest), start_action in zip(rows, start_actions)
+        ]
+        supported = [
+            1.0 if (context, start_action) in logged_pairs else 0.0
+            for (context, *_rest), start_action in zip(rows, start_actions)
+        ]
         self.report_ = FQEReport(
             n_transitions=int(len(rows)),
             n_contexts=int(len(contexts)),
@@ -115,6 +137,9 @@ class TabularFQE:
             learning_rate=self.learning_rate,
             estimated_value=float(np.mean(start_values)) if start_values else 0.0,
             final_loss=final_loss,
+            target_start_action_col=target_start_action_col,
+            target_start_action_supported_fraction=float(np.mean(supported)) if supported else 0.0,
+            target_start_action_is_explicit=target_start_action_col is not None,
         )
         return self
 

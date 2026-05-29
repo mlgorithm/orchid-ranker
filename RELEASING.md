@@ -19,7 +19,14 @@ Before releasing, ensure:
 3. Version is bumped in:
    - `pyproject.toml` (`version = "X.Y.Z"`)
    - `src/orchid_ranker/__init__.py` (`__version__ = "X.Y.Z"`)
-4. Code is committed and pushed to main
+4. Local quality gates pass:
+   - `python -m ruff check .`
+   - `python -m mypy src/orchid_ranker`
+   - `python -m pytest tests -q --cov=src/orchid_ranker --cov-report=term-missing --cov-fail-under=70`
+   - `python -m mkdocs build --strict`
+   - `python -m build`
+   - `python -m pytest tests/test_publish_readiness.py -q`
+5. Code is committed and pushed to main
 
 ## How to Release
 

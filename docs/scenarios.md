@@ -4,6 +4,8 @@ Orchid is an adaptive-learning engine. Every supported scenario should answer:
 what should this learner work on next, why is it appropriate now, and how will
 we know whether it improved progress?
 
+For copy-paste domain examples, see [Use-case examples](examples.md).
+
 ## Choosing In Code
 
 Use the scenario selector when you know your product shape but have not chosen

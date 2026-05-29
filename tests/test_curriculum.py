@@ -128,7 +128,7 @@ class TestDependencyGraph:
         """Test is_ready when skill has no prerequisites."""
         graph = DependencyGraph([('a', 'b')])
         assert graph.is_ready('a', set()) is True
-        assert graph.is_ready('c', set()) is True  # doesn't exist
+        assert graph.is_ready('c', set()) is False  # unknown candidate
 
     def test_is_ready_prerequisites_met(self):
         """Test is_ready when prerequisites are satisfied."""

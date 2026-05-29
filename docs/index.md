@@ -63,6 +63,7 @@ recommender.observe(user_id=1, item_id=ranked[0].item_id, correct=True)
 - [**Guide 2: Serve adaptive recommendations**](guides/02-serve-streaming.md) - live learner-state adaptation
 - [**Guide 3: Operate safely**](guides/03-operate-safely.md) - guardrails and fallback
 - [**Usage scenarios**](scenarios.md) - practical recipes for common deployments
+- [**Use-case examples**](examples.md) - compliance, language review, rehab, and safe rollout examples
 - [**Why Orchid**](why-orchid.md) - product thesis and evidence
 - [**Competitor comparison**](competitors.md) - when to use Orchid vs other stacks
 

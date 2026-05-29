@@ -94,6 +94,11 @@ class CQLDiscretePolicy:
         propensity_col: str = "propensity",
     ) -> "CQLDiscretePolicy":
         """Fit from logged decisions with rewards and propensities."""
+        self.q_values_ = {}
+        self.global_action_values_ = {}
+        self.actions_by_context_ = {}
+        self.default_value_ = 0.0
+        self.report_ = None
         work = validate_logged_decisions(
             decisions,
             candidate_col=candidate_col,

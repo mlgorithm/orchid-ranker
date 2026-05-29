@@ -16,8 +16,32 @@ jobs:
         with:
           python-version: "3.12"
 
-      - name: Install build tools
-        run: pip install build twine
+      - name: Install release dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install ".[dev]"
+
+      - name: Release preflight
+        run: |
+          python - <<'PY'
+          import importlib.metadata
+          import tomllib
+          from pathlib import Path
+
+          import orchid_ranker
+
+          tag_version = "${{ github.ref_name }}".removeprefix("v")
+          project_version = tomllib.loads(Path("pyproject.toml").read_text())["project"]["version"]
+          package_version = importlib.metadata.version("orchid-ranker")
+          versions = {tag_version, project_version, package_version, orchid_ranker.__version__}
+          if len(versions) != 1:
+              raise SystemExit(
+                  "release version mismatch: "
+                  f"tag={tag_version}, pyproject={project_version}, "
+                  f"metadata={package_version}, __version__={orchid_ranker.__version__}"
+              )
+          PY
+          python -m pytest tests/test_publish_readiness.py -q
 
       - name: Build sdist and wheel
         run: python -m build
@@ -94,4 +118,4 @@ jobs:
         run: |
           git fetch origin gh-pages --depth=1 || true
           VERSION=${GITHUB_REF_NAME#v}
-          mike deploy --push --update-aliases $VERSION latest || echo "Docs deploy skipped (gh-pages branch may not exist)"
+          mike deploy --push --update-aliases $VERSION latest

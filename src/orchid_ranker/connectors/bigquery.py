@@ -7,7 +7,7 @@ import random as _random
 import threading
 import time
 from dataclasses import dataclass
-from typing import Optional
+from typing import Any, Optional
 
 from .exceptions import RetryExhaustedError
 
@@ -159,7 +159,6 @@ class BigQueryConnector:
         RetryExhaustedError
             If all retry attempts are exhausted.
         """
-        delays = [1, 2, 4]
         last_error = None
 
         for attempt in range(self.max_retries):
@@ -176,7 +175,7 @@ class BigQueryConnector:
                 if isinstance(e, _non_transient) or "auth" in err_msg or "syntax" in err_msg:
                     raise
                 if attempt < self.max_retries - 1:
-                    delay = delays[attempt] + _random.uniform(0, 0.5)
+                    delay = min(2 ** attempt, 30) + _random.uniform(0, 0.5)
                     logger.warning(
                         f"Attempt {attempt + 1} failed, retrying in {delay:.2f}s: {e}"
                     )
@@ -188,7 +187,7 @@ class BigQueryConnector:
             f"Failed after {self.max_retries} attempts: {last_error}"
         ) from last_error
 
-    def query_dataframe(self, sql: str):
+    def query_dataframe(self, sql: str, *, job_config: Any = None, query_parameters: Optional[list[Any]] = None):
         """Execute a SQL query and return results as a DataFrame.
 
         Parameters
@@ -211,9 +210,19 @@ class BigQueryConnector:
 
         with self._client_lock:
             client = self._client()
+            effective_job_config = job_config
+            if query_parameters is not None:
+                if effective_job_config is None:
+                    if bigquery is None:
+                        raise ImportError("google-cloud-bigquery is required for query parameters")
+                    effective_job_config = bigquery.QueryJobConfig()
+                effective_job_config.query_parameters = query_parameters
 
             def _query():
-                job = client.query(sql, timeout=self.timeout)
+                if effective_job_config is None:
+                    job = client.query(sql, timeout=self.timeout)
+                else:
+                    job = client.query(sql, job_config=effective_job_config, timeout=self.timeout)
                 try:
                     result = job.result(timeout=self.timeout)
                 except TypeError:

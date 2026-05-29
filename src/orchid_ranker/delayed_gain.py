@@ -283,15 +283,31 @@ def fit_delayed_gain_reward_model_from_frame(
     estimator.fit(x_fit, y_fit, sample_weight=fit_weights)
     raw_fit = np.clip(estimator.predict(x_fit), 0.0, 1.0)
     raw_validation = np.clip(estimator.predict(x_validation), 0.0, 1.0)
-    calibrator = _fit_isotonic_calibrator(raw_validation, y_validation, sample_weight=validation_weights)
+    calibrator = None
+    validation_metric_pred = raw_validation
+    validation_metric_y = y_validation
+    validation_metric_weights = validation_weights
+    if len(validation_idx) >= 20:
+        calibration_local, report_local = _train_validation_indices(
+            len(validation_idx),
+            validation_fraction=0.5,
+            random_state=random_state,
+        )
+        calibrator = _fit_isotonic_calibrator(
+            raw_validation[calibration_local],
+            y_validation[calibration_local],
+            sample_weight=validation_weights[calibration_local],
+        )
+        validation_metric_pred = _apply_calibrator(raw_validation[report_local], calibrator)
+        validation_metric_y = y_validation[report_local]
+        validation_metric_weights = validation_weights[report_local]
     fit_pred = _apply_calibrator(raw_fit, calibrator)
-    validation_pred = _apply_calibrator(raw_validation, calibrator)
     rmse = float(np.sqrt(np.mean((fit_pred - y_fit) ** 2)))
-    validation_rmse = float(np.sqrt(np.mean((validation_pred - y_validation) ** 2)))
-    validation_mae = float(np.mean(np.abs(validation_pred - y_validation)))
-    validation_ece = _regression_ece(validation_pred, y_validation)
-    validation_weighted_rmse = _weighted_rmse(validation_pred, y_validation, validation_weights)
-    validation_weighted_mae = _weighted_mae(validation_pred, y_validation, validation_weights)
+    validation_rmse = float(np.sqrt(np.mean((validation_metric_pred - validation_metric_y) ** 2)))
+    validation_mae = float(np.mean(np.abs(validation_metric_pred - validation_metric_y)))
+    validation_ece = _regression_ece(validation_metric_pred, validation_metric_y)
+    validation_weighted_rmse = _weighted_rmse(validation_metric_pred, validation_metric_y, validation_metric_weights)
+    validation_weighted_mae = _weighted_mae(validation_metric_pred, validation_metric_y, validation_metric_weights)
     cross_fit_metrics = _cross_fit_metrics(
         x,
         y,

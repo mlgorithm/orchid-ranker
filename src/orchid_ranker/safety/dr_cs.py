@@ -37,11 +37,11 @@ class DRConfidenceSequence:
     """
 
     def __init__(self, cfg: DRCSConfig):
-        if not 0.0 < cfg.delta < 1.0:
+        if not math.isfinite(float(cfg.delta)) or not 0.0 < cfg.delta < 1.0:
             raise ValueError("delta must be in (0, 1)")
-        if cfg.u_max <= 0.0:
+        if not math.isfinite(float(cfg.u_max)) or cfg.u_max <= 0.0:
             raise ValueError("u_max must be > 0")
-        if not 0.0 < cfg.p_min < 1.0:
+        if not math.isfinite(float(cfg.p_min)) or not 0.0 < cfg.p_min < 1.0:
             raise ValueError("p_min must be in (0, 1)")
         self.cfg = cfg
         self.t = 0
@@ -90,11 +90,12 @@ class DRConfidenceSequence:
         p_used : float
             Logging probability mixture (proportion of adaptive deployment).
         """
-        self.t += 1
-        u = max(0.0, min(self.cfg.u_max, float(reward)))
-        Qa = max(0.0, min(self.cfg.u_max, float(Qa)))
-        Qf = max(0.0, min(self.cfg.u_max, float(Qf)))
+        u_raw = float(reward)
+        Qa_raw = float(Qa)
+        Qf_raw = float(Qf)
         p = float(p_used)
+        if not all(math.isfinite(value) for value in (u_raw, Qa_raw, Qf_raw, p)):
+            raise ValueError("reward, Qa, Qf, and p_used must be finite")
         if not 0.0 <= p <= 1.0:
             raise ValueError(f"p_used must be in [0, 1], got {p_used}")
         if served_adaptive and p == 0.0:
@@ -105,6 +106,10 @@ class DRConfidenceSequence:
             raise ValueError(f"p_used={p} is below configured p_min={self.cfg.p_min}")
         if (not served_adaptive) and (1.0 - p) < self.cfg.p_min:
             raise ValueError(f"1 - p_used={1.0 - p} is below configured p_min={self.cfg.p_min}")
+        u = max(0.0, min(self.cfg.u_max, u_raw))
+        Qa = max(0.0, min(self.cfg.u_max, Qa_raw))
+        Qf = max(0.0, min(self.cfg.u_max, Qf_raw))
+        self.t += 1
 
         if served_adaptive:
             if p == 1.0:

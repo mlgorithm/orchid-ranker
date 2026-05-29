@@ -38,6 +38,7 @@ from typing import (
     Set,
 )
 
+from orchid_ranker._labels import parse_binary_label
 from orchid_ranker.evaluation import (
     category_coverage,
     progression_gain,
@@ -312,7 +313,7 @@ class RollingProgressionMonitor:
         ev = _Event(
             user_id=int(user_id),
             item_id=int(item_id),
-            correct=bool(correct),
+            correct=parse_binary_label(correct, name="correct"),
             pre_competence=float(pre_competence),
             post_competence=float(post_competence),
             category=str(category),
@@ -326,8 +327,16 @@ class RollingProgressionMonitor:
             # competence crosses the threshold.
             if ev.correct or ev.post_competence >= self.success_threshold:
                 self._user_succeeded_items[ev.user_id].add(ev.item_id)
+            self._prune_succeeded_locked()
         if self.emit_prometheus:
             self._emit(self.snapshot())
+
+    def _prune_succeeded_locked(self) -> None:
+        rebuilt: Dict[int, Set[int]] = defaultdict(set)
+        for event in self._events:
+            if event.correct or event.post_competence >= self.success_threshold:
+                rebuilt[event.user_id].add(event.item_id)
+        self._user_succeeded_items = rebuilt
 
     # ------- computation -------
     def snapshot(self) -> ProgressionSnapshot:

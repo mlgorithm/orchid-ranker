@@ -217,8 +217,8 @@ def evaluate_logged_policy(
     target_probability_col: str,
     target_value_col: Optional[str] = None,
     logged_action_value_col: Optional[str] = None,
-    reward_min: Optional[float] = 0.0,
-    reward_max: Optional[float] = 1.0,
+    reward_min: Optional[float] = None,
+    reward_max: Optional[float] = None,
     min_propensity: float = 1e-6,
     max_weight: Optional[float] = None,
     ci: float = 0.95,
@@ -258,8 +258,8 @@ def compare_logged_policies(
     target_value_col: Optional[str] = None,
     baseline_value_col: Optional[str] = None,
     logged_action_value_col: Optional[str] = None,
-    reward_min: Optional[float] = 0.0,
-    reward_max: Optional[float] = 1.0,
+    reward_min: Optional[float] = None,
+    reward_max: Optional[float] = None,
     min_propensity: float = 1e-6,
     max_weight: Optional[float] = None,
     ci: float = 0.95,
@@ -315,8 +315,8 @@ def bootstrap_logged_policy(
     target_probability_col: str,
     target_value_col: Optional[str] = None,
     logged_action_value_col: Optional[str] = None,
-    reward_min: Optional[float] = 0.0,
-    reward_max: Optional[float] = 1.0,
+    reward_min: Optional[float] = None,
+    reward_max: Optional[float] = None,
     min_propensity: float = 1e-6,
     max_weight: Optional[float] = None,
     ci: float = 0.95,
@@ -386,8 +386,8 @@ def bootstrap_compare_logged_policies(
     target_value_col: Optional[str] = None,
     baseline_value_col: Optional[str] = None,
     logged_action_value_col: Optional[str] = None,
-    reward_min: Optional[float] = 0.0,
-    reward_max: Optional[float] = 1.0,
+    reward_min: Optional[float] = None,
+    reward_max: Optional[float] = None,
     min_propensity: float = 1e-6,
     max_weight: Optional[float] = None,
     ci: float = 0.95,
@@ -479,11 +479,14 @@ def evaluate_rollout_gate(
         raise ValueError("max_clipped_fraction must be in [0, 1]")
 
     effect, ci_low, ci_high, estimator, diagnostics = _rollout_gate_parts(report)
-    n_events = diagnostics.n_events
-    ess = diagnostics.effective_sample_size
-    ess_fraction = float(ess / n_events) if n_events > 0 else 0.0
-    coverage = diagnostics.coverage
-    clipped = diagnostics.clipped_fraction
+    n_events = max((diag.n_events for diag in diagnostics), default=0)
+    ess = min((diag.effective_sample_size for diag in diagnostics), default=0.0)
+    ess_fraction = min(
+        (float(diag.effective_sample_size / diag.n_events) if diag.n_events > 0 else 0.0 for diag in diagnostics),
+        default=0.0,
+    )
+    coverage = min((diag.coverage for diag in diagnostics), default=0.0)
+    clipped = max((diag.clipped_fraction for diag in diagnostics), default=0.0)
 
     reasons: list[str] = []
     if not np.isfinite(effect) or not np.isfinite(ci_low) or not np.isfinite(ci_high):
@@ -589,7 +592,7 @@ def _estimate_logged_policy(
         estimator = "doubly_robust"
         value = doubly_robust
     elif weight_mean > 0.0 and np.isfinite(snips):
-        terms = weighted_rewards / weight_mean
+        terms = snips + weights * (rewards - snips) / weight_mean
         estimator = "snips"
         value = snips
     else:
@@ -626,27 +629,27 @@ def _rollout_gate_parts(
         | PolicyComparisonReport
         | BootstrapPolicyComparisonReport
     ),
-) -> tuple[float, float, float, str, LoggedPolicyReport]:
+) -> tuple[float, float, float, str, tuple[LoggedPolicyReport, ...]]:
     if isinstance(report, BootstrapPolicyComparisonReport):
         return (
             report.base.uplift,
             report.bootstrap_ci_low,
             report.bootstrap_ci_high,
             report.estimator,
-            report.base.target,
+            (report.base.target, report.base.baseline),
         )
     if isinstance(report, PolicyComparisonReport):
-        return report.uplift, report.ci_low, report.ci_high, report.estimator, report.target
+        return report.uplift, report.ci_low, report.ci_high, report.estimator, (report.target, report.baseline)
     if isinstance(report, BootstrapLoggedPolicyReport):
         return (
             report.base.value,
             report.bootstrap_ci_low,
             report.bootstrap_ci_high,
             report.estimator,
-            report.base,
+            (report.base,),
         )
     if isinstance(report, LoggedPolicyReport):
-        return report.value, report.ci_low, report.ci_high, report.estimator, report
+        return report.value, report.ci_low, report.ci_high, report.estimator, (report,)
     raise TypeError(f"Unsupported OPE report type: {type(report).__name__}")
 
 

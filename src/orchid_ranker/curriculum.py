@@ -313,6 +313,9 @@ class DependencyGraph:
         if node in completed:
             return False
 
+        if node not in self._vertices:
+            return False
+
         prerequisites = self.prerequisites_for(node)
         return prerequisites.issubset(completed)
 
@@ -795,7 +798,10 @@ class ProgressionRecommender:
                 ),
             )
 
-        return candidates[:n]
+        n_int = int(n)
+        if n_int <= 0:
+            return []
+        return candidates[:n_int]
 
     def filter_candidates(
         self, candidates: List[str], completed: Set[str] = None,

@@ -43,8 +43,20 @@ def compute_auc(labels, scores):
     return float((rank_sum_pos - n_pos * (n_pos + 1) / 2.0) / (n_pos * n_neg))
 
 
-def precision_recall_ndcg_at_k(model, val_df, k, num_users, num_items, device="cpu", implicit=True):
+def precision_recall_ndcg_at_k(
+    model,
+    val_df,
+    k,
+    num_users,
+    num_items,
+    device="cpu",
+    implicit=True,
+    seen_by_user=None,
+):
     """
+    k = int(k)
+    if k <= 0:
+        return 0.0, 0.0, 0.0
     Compute Precision@K, Recall@K, and NDCG@K for recommendation.
 
     Args:
@@ -77,7 +89,13 @@ def precision_recall_ndcg_at_k(model, val_df, k, num_users, num_items, device="c
             # Predict scores for all items for user u
             user_tensor = torch.full((num_items,), u, dtype=torch.long, device=device)
             item_tensor = torch.arange(num_items, dtype=torch.long, device=device)
-            scores = model(user_tensor, item_tensor).cpu().numpy()
+            scores = np.asarray(model(user_tensor, item_tensor).cpu().numpy(), dtype=float).reshape(-1)
+            seen_items = set()
+            if seen_by_user is not None:
+                raw_seen = seen_by_user.get(u, set()) if hasattr(seen_by_user, "get") else set()
+                seen_items = {int(item) for item in raw_seen if 0 <= int(item) < num_items}
+                if seen_items:
+                    scores[list(seen_items)] = -np.inf
 
             # Remove items already seen in training+val
             if implicit:
@@ -89,28 +107,36 @@ def precision_recall_ndcg_at_k(model, val_df, k, num_users, num_items, device="c
 
             if not relevant_items:
                 continue  # skip users with no positives
+            available_relevant = relevant_items - seen_items
+            if seen_by_user is not None and not available_relevant:
+                continue
+            eval_relevant = available_relevant if seen_by_user is not None else relevant_items
 
             # Rank items by predicted score
+            if not np.any(np.isfinite(scores)):
+                continue
             ranked_items = np.argsort(-scores)[:k]
 
             # Precision & Recall (binary, even for explicit here)
-            hits = sum(1 for i in ranked_items if i in relevant_items)
+            hits = sum(1 for i in ranked_items if i in eval_relevant)
             precisions.append(hits / k)
-            recalls.append(hits / len(relevant_items))
+            recalls.append(hits / len(eval_relevant))
 
             # NDCG computation
             if implicit:
-                dcg = sum(1.0 / np.log2(idx + 2) for idx, i in enumerate(ranked_items) if i in relevant_items)
-                idcg = sum(1.0 / np.log2(idx + 2) for idx in range(min(len(relevant_items), k)))
+                dcg = sum(1.0 / np.log2(idx + 2) for idx, i in enumerate(ranked_items) if i in eval_relevant)
+                idcg = sum(1.0 / np.log2(idx + 2) for idx in range(min(len(eval_relevant), k)))
             else:
                 # Use actual ratings as relevance scores
                 dcg = sum(gt[u].get(i, 0) / np.log2(idx + 2) for idx, i in enumerate(ranked_items))
-                ideal_ratings = sorted(gt[u].values(), reverse=True)[:k]
+                ideal_ratings = sorted((gt[u][i] for i in eval_relevant), reverse=True)[:k]
                 idcg = sum(rel / np.log2(idx + 2) for idx, rel in enumerate(ideal_ratings))
 
             ndcgs.append(dcg / idcg if idcg > 0 else 0.0)
 
-    return np.mean(precisions), np.mean(recalls), np.mean(ndcgs)
+    if not precisions:
+        return 0.0, 0.0, 0.0
+    return float(np.mean(precisions)), float(np.mean(recalls)), float(np.mean(ndcgs))
 
 
 def _finite_vector(values, name):

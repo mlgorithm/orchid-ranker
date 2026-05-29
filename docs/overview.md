@@ -98,4 +98,5 @@ engineers can locate entry points quickly.
 
 Refer to the README quickstart for runnable examples and the `examples/`
 folder for scripts that can be copied into notebooks. For product-specific
-recipes, start with [Usage scenarios](scenarios.md).
+recipes, start with [Usage scenarios](scenarios.md) and
+[Use-case examples](examples.md).

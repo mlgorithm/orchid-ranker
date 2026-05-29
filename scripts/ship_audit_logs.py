@@ -6,6 +6,7 @@ import json
 from pathlib import Path
 from typing import Iterable
 from urllib import request
+from urllib.parse import urlsplit
 
 
 def iter_records(path: Path) -> Iterable[dict]:
@@ -14,13 +15,17 @@ def iter_records(path: Path) -> Iterable[dict]:
             line = line.strip()
             if not line:
                 continue
-            try:
-                yield json.loads(line)
-            except json.JSONDecodeError:
-                continue
+            yield json.loads(line)
 
 
-def ship(log_path: Path, url: str, api_key: str | None = None) -> None:
+def _validate_destination(url: str, *, allow_insecure_http: bool = False) -> None:
+    parsed = urlsplit(url)
+    if parsed.scheme.lower() != "https" and not allow_insecure_http:
+        raise ValueError("audit log shipping requires an https:// destination")
+
+
+def ship(log_path: Path, url: str, api_key: str | None = None, *, allow_insecure_http: bool = False) -> None:
+    _validate_destination(url, allow_insecure_http=allow_insecure_http)
     for record in iter_records(log_path):
         data = json.dumps(record).encode("utf-8")
         headers = {"Content-Type": "application/json"}
@@ -37,8 +42,13 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("log_path", type=Path)
     parser.add_argument("url", help="Destination webhook / SIEM endpoint")
     parser.add_argument("--api-key", help="Optional bearer token")
+    parser.add_argument(
+        "--allow-insecure-http",
+        action="store_true",
+        help="Permit plaintext HTTP destinations for local testing only.",
+    )
     args = parser.parse_args(argv)
-    ship(args.log_path, args.url, args.api_key)
+    ship(args.log_path, args.url, args.api_key, allow_insecure_http=args.allow_insecure_http)
     return 0
 
 

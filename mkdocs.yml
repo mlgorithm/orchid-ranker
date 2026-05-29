@@ -55,6 +55,7 @@ nav:
   - Why Orchid: why-orchid.md
   - Competitors: competitors.md
   - Usage scenarios: scenarios.md
+  - Use-case examples: examples.md
   - Core vs. specialty: core-vs-specialty.md
   - Getting started:
     - Quickstart: quickstart.md
@@ -77,7 +78,9 @@ nav:
     - Enterprise runbook: enterprise_runbook.md
     - Security threat model: security/threat_model.md
     - FERPA / GDPR alignment: compliance/ferpa_gdpr_alignment.md
-  - Contributing: contributing.md
+  - Contributing:
+    - Contribution guide: contributing.md
+    - Coding standards: coding-standards.md
 
 markdown_extensions:
   - admonition

@@ -53,6 +53,12 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser.add_argument("--port", type=int, default=8000)
     parser.add_argument("--metrics-port", type=int, default=9090)
     parser.add_argument("--health-port", type=int, default=8081)
+    parser.add_argument("--no-metrics", action="store_true", help="Do not bind the Prometheus metrics endpoint")
+    parser.add_argument(
+        "--ready-on-start",
+        action="store_true",
+        help="Report readiness immediately. Use only for health-endpoint-only deployments.",
+    )
     args = parser.parse_args(argv)
 
     stop = threading.Event()
@@ -64,9 +70,10 @@ def main(argv: Sequence[str] | None = None) -> int:
     signal.signal(signal.SIGINT, _stop)
 
     status_server = _start_status_server(args.port, args.host)
-    start_metrics_server(port=args.metrics_port, addr=args.host)
+    if not args.no_metrics:
+        start_metrics_server(port=args.metrics_port, addr=args.host)
     start_health_server(port=args.health_port, addr=args.host)
-    set_ready(True)
+    set_ready(bool(args.ready_on_start))
     try:
         while not stop.is_set():
             stop.wait(1.0)

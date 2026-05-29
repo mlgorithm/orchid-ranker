@@ -332,17 +332,15 @@ class TestAccountantFormula:
         assert incr == 0.0
         assert cum == eps_before
 
-    def test_accountant_with_zero_q(self):
-        """Test accountant with q=0 returns eps=0."""
-        accountant = SimpleDPAccountant(q=0.0, sigma=1.0, delta=1e-5)
-        incr, eps = accountant.step(100)
-        assert eps == 0.0
+    def test_accountant_rejects_zero_q(self):
+        """Zero sampling is not a valid DP accounting configuration."""
+        with pytest.raises(ValueError, match="q"):
+            SimpleDPAccountant(q=0.0, sigma=1.0, delta=1e-5)
 
-    def test_accountant_with_zero_sigma(self):
-        """Test accountant with sigma=0 returns eps=0."""
-        accountant = SimpleDPAccountant(q=0.1, sigma=0.0, delta=1e-5)
-        incr, eps = accountant.step(100)
-        assert eps == 0.0
+    def test_accountant_rejects_zero_sigma(self):
+        """No-noise training must not be reported as private."""
+        with pytest.raises(ValueError, match="sigma"):
+            SimpleDPAccountant(q=0.1, sigma=0.0, delta=1e-5)
 
     def test_accountant_large_T(self):
         """Test accountant with large T."""

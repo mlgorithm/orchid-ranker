@@ -20,6 +20,7 @@ dependencies = [
   "scipy>=1.9.3",
   "pyyaml>=6.0",
   "joblib>=1.2",
+  "prometheus-client>=0.16,<1",
 ]
 keywords = [
   "adaptive-learning",
@@ -216,4 +217,11 @@ testpaths = ["tests"]
 pythonpath = ["src"]
 filterwarnings = [
   "ignore:The PyTorch API of nested tensors is in prototype stage.*:UserWarning",
+]
+
+[tool.coverage.run]
+omit = [
+  "src/orchid_ranker/contrib/*",
+  "src/orchid_ranker/experiments/*",
+  "src/orchid_ranker/visualization/*",
 ]

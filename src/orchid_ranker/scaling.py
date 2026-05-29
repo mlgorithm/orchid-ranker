@@ -81,6 +81,18 @@ class ScalingConfig:
     ttl_seconds: float = 86400.0  # 24 h default for TTL policy
     enable_metrics: bool = True
 
+    def __post_init__(self) -> None:
+        if int(self.max_active_users) <= 0:
+            raise ValueError("max_active_users must be positive")
+        if int(self.num_state_shards) <= 0:
+            raise ValueError("num_state_shards must be positive")
+        policy = str(self.eviction_policy).lower()
+        if policy not in {"lru", "ttl"}:
+            raise ValueError("eviction_policy must be 'lru' or 'ttl'")
+        self.eviction_policy = policy
+        if policy == "ttl" and (not math.isfinite(float(self.ttl_seconds)) or float(self.ttl_seconds) <= 0.0):
+            raise ValueError("ttl_seconds must be finite and positive for ttl eviction")
+
 
 # ---------------------------------------------------------------------------
 # Sparse embedding table
@@ -123,6 +135,8 @@ class SparseEmbeddingTable:
         *,
         max_entries: int = 1_000_000,
         device: str = "cpu",
+        eviction_policy: str = "lru",
+        ttl_seconds: Optional[float] = None,
     ) -> None:
         if emb_dim <= 0:
             raise ValueError(f"emb_dim must be positive, got {emb_dim}")
@@ -132,9 +146,18 @@ class SparseEmbeddingTable:
         self._emb_dim = int(emb_dim)
         self._max_entries = int(max_entries)
         self._device = str(device)
+        self._eviction_policy = str(eviction_policy).lower()
+        if self._eviction_policy not in {"lru", "ttl"}:
+            raise ValueError("eviction_policy must be 'lru' or 'ttl'")
+        self._ttl_seconds = None if ttl_seconds is None else float(ttl_seconds)
+        if self._eviction_policy == "ttl" and (
+            self._ttl_seconds is None or not math.isfinite(self._ttl_seconds) or self._ttl_seconds <= 0.0
+        ):
+            raise ValueError("ttl_seconds must be finite and positive for ttl eviction")
         # OrderedDict preserves insertion order; we move keys to the end on
         # access so that the *first* item is always the least-recently-used.
         self._data: OrderedDict[int, torch.Tensor] = OrderedDict()
+        self._last_access: Dict[int, float] = {}
         self._lock = threading.RLock()
 
         logger.debug(
@@ -165,8 +188,11 @@ class SparseEmbeddingTable:
         """
         uid = int(user_id)
         with self._lock:
+            now = time.time()
+            self._evict_expired(now)
             if uid in self._data:
                 self._data.move_to_end(uid)
+                self._last_access[uid] = now
                 return self._data[uid]
         # Not stored -- return a fresh zero tensor (do NOT allocate a slot).
         return torch.zeros(self._emb_dim, device=self._device)
@@ -186,24 +212,30 @@ class SparseEmbeddingTable:
         """
         uid = int(user_id)
         with self._lock:
+            now = time.time()
+            self._evict_expired(now)
             if uid in self._data:
                 # Update existing -- move to end (most recent).
                 self._data[uid] = value.detach().to(self._device)
                 self._data.move_to_end(uid)
+                self._last_access[uid] = now
             else:
                 # New entry -- evict if at capacity.
-                if len(self._data) >= self._max_entries:
+                while len(self._data) >= self._max_entries:
                     self._evict_lru()
                 self._data[uid] = value.detach().to(self._device)
+                self._last_access[uid] = now
 
     def __contains__(self, user_id: int) -> bool:  # type: ignore[override]
         """Return ``True`` if *user_id* has a stored embedding."""
         with self._lock:
+            self._evict_expired(time.time())
             return int(user_id) in self._data
 
     def __len__(self) -> int:
         """Number of currently stored embeddings."""
         with self._lock:
+            self._evict_expired(time.time())
             return len(self._data)
 
     # ---- eviction ----
@@ -222,6 +254,7 @@ class SparseEmbeddingTable:
         with self._lock:
             if uid in self._data:
                 del self._data[uid]
+                self._last_access.pop(uid, None)
                 logger.debug("Manually evicted user %d from SparseEmbeddingTable", uid)
 
     def _evict_lru(self) -> None:
@@ -232,11 +265,21 @@ class SparseEmbeddingTable:
         if not self._data:
             return
         evicted_uid, _ = self._data.popitem(last=False)
+        self._last_access.pop(evicted_uid, None)
         logger.warning(
             "SparseEmbeddingTable at capacity (%s): evicted user %d",
             f"{self._max_entries:,}",
             evicted_uid,
         )
+
+    def _evict_expired(self, now: float) -> None:
+        if self._eviction_policy != "ttl" or self._ttl_seconds is None:
+            return
+        cutoff = float(now) - self._ttl_seconds
+        expired = [uid for uid, last in self._last_access.items() if last <= cutoff]
+        for uid in expired:
+            self._data.pop(uid, None)
+            self._last_access.pop(uid, None)
 
     # ---- diagnostics ----
 
@@ -251,6 +294,7 @@ class SparseEmbeddingTable:
             bookkeeping.
         """
         with self._lock:
+            self._evict_expired(time.time())
             n = len(self._data)
         # Each entry is a float32 tensor of shape (emb_dim,).
         bytes_per_entry = self._emb_dim * 4  # float32 = 4 bytes
@@ -271,7 +315,8 @@ class SparseEmbeddingTable:
         return (
             f"SparseEmbeddingTable(emb_dim={self._emb_dim}, "
             f"entries={len(self)}/{self._max_entries}, "
-            f"occupancy={self.occupancy:.1%})"
+            f"occupancy={self.occupancy:.1%}, "
+            f"eviction_policy={self._eviction_policy!r})"
         )
 
 
@@ -316,6 +361,8 @@ class SparseOnlineUserAdapter(nn.Module):
         clip: float = 1.0,
         max_active_users: int = 1_000_000,
         device: str = "cpu",
+        eviction_policy: str = "lru",
+        ttl_seconds: Optional[float] = None,
     ) -> None:
         super().__init__()
         if emb_dim <= 0:
@@ -331,6 +378,8 @@ class SparseOnlineUserAdapter(nn.Module):
             emb_dim=self.emb_dim,
             max_entries=max_active_users,
             device=self._device,
+            eviction_policy=eviction_policy,
+            ttl_seconds=ttl_seconds,
         )
         self._lock = threading.RLock()
         self._update_count: Dict[int, int] = defaultdict(int)
@@ -621,7 +670,8 @@ class _BKTShard:
                 trust = tel.trust()
                 engagement = tel.engagement(t_now)
 
-            self._touch(uid)
+            if uid in self._trackers or uid in self._telemetry:
+                self._touch(uid)
 
         return [comp, fatigue, trust, engagement]
 

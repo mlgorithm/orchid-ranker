@@ -1,7 +1,7 @@
 # src/agents/simple_dp.py
 import math
 from dataclasses import dataclass
-from typing import List, Tuple
+from typing import List, Optional, Tuple
 
 import torch
 
@@ -54,12 +54,18 @@ class SimpleDPAccountant:
         self.q = float(q)
         self.sigma = float(sigma)
         self.delta = float(delta)
+        if not 0.0 < self.q <= 1.0:
+            raise ValueError(f"q must be in (0, 1], got {q}")
+        if self.sigma <= 0.0:
+            raise ValueError(f"sigma must be > 0 for DP accounting, got {sigma}")
+        if not 0.0 < self.delta < 1.0:
+            raise ValueError(f"delta must be in (0, 1), got {delta}")
         self.T = 0
         self.eps = 0.0
 
     def _eps_for(self, T: int) -> float:
         """Compute cumulative epsilon for T DP steps using Abadi's bound."""
-        if self.sigma <= 0.0 or self.q <= 0.0 or T <= 0:
+        if T <= 0:
             return 0.0
         term1 = self.q * math.sqrt(2.0 * T * math.log(1.0 / self.delta)) / self.sigma
         term2 = (T * (self.q ** 2)) / (2.0 * self.sigma ** 2)
@@ -105,6 +111,7 @@ def dp_sgd_step(
     max_grad_norm: float,
     noise_multiplier: float,
     device: torch.device,
+    generator: Optional[torch.Generator] = None,
 ) -> float:
     """Perform one DP-SGD training step with per-example gradient clipping.
 
@@ -186,7 +193,7 @@ def dp_sgd_step(
     # add Gaussian noise and set averaged grads
     std = float(noise_multiplier) * float(max_grad_norm)
     for j, p in enumerate(params):
-        noise = torch.normal(mean=0.0, std=std, size=p.shape, device=device)
+        noise = torch.normal(mean=0.0, std=std, size=p.shape, device=device, dtype=p.dtype, generator=generator)
         noisy = sum_grads[j] + noise
         p.grad = (noisy / float(B))
 

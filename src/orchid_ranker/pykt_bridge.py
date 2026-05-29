@@ -278,13 +278,25 @@ def _build_sequences(
 def _sequences_to_text(sequences: Sequence[PyKTSequence]) -> str:
     lines: list[str] = []
     for sequence in sequences:
-        lines.append(f"{sequence.user_id},{sequence.seq_len}")
-        lines.append(",".join(sequence.questions))
-        lines.append(",".join(sequence.concepts))
+        user_id = _validate_pykt_token(sequence.user_id, "user_id")
+        questions = [_validate_pykt_token(value, "question") for value in sequence.questions]
+        concepts = [_validate_pykt_token(value, "concept") for value in sequence.concepts]
+        timestamps = [_validate_pykt_token(value, "timestamp") for value in sequence.timestamps]
+        durations = [_validate_pykt_token(value, "duration") for value in sequence.durations]
+        lines.append(f"{user_id},{sequence.seq_len}")
+        lines.append(",".join(questions))
+        lines.append(",".join(concepts))
         lines.append(",".join(str(value) for value in sequence.responses))
-        lines.append(",".join(sequence.timestamps))
-        lines.append(",".join(sequence.durations))
+        lines.append(",".join(timestamps))
+        lines.append(",".join(durations))
     return "\n".join(lines) + ("\n" if lines else "")
+
+
+def _validate_pykt_token(value: Any, field: str) -> str:
+    text = str(value)
+    if "," in text or "\n" in text or "\r" in text:
+        raise ValueError(f"{field} contains a comma or newline, which pyKT sequence export cannot encode safely")
+    return text
 
 
 def _column_or_na(group: pd.DataFrame, column: Optional[str], length: int) -> tuple[str, ...]:

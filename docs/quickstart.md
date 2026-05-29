@@ -46,6 +46,8 @@ print(ranked)
 
 See `examples/adaptive_learning_quickstart.py` for the full adaptive-learning
 script.
+See `examples/adaptive_learning_use_cases.py` for concrete compliance,
+language-review, rehabilitation, and rollout-gate examples.
 See `examples/scenario_selection.py` when you want Orchid to choose a workflow
 from product and data signals. See `examples/knowledge_tracing_quickstart.py`
 for predicted-correctness ranking from learner sequences,
@@ -74,6 +76,7 @@ calibration, chronological splits, and OPE from logged decisions. Start with
 - Read `docs/adaptive-learning-positioning.md` to understand the business fit.
 - Browse `docs/overview.md` for module map.
 - Browse `docs/scenarios.md` for practical deployment recipes.
+- Browse `docs/examples.md` for domain examples that map APIs to product use cases.
 - Browse `docs/algorithm-roadmap.md` for planned KT and policy-learning algorithms.
 - Use `docs/guides/01-fit-offline.md` for batch usage.
 - Use `docs/guides/02-serve-streaming.md` when you need live learner-state adaptation.

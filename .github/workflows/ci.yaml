@@ -57,7 +57,7 @@ jobs:
     runs-on: ubuntu-latest
     strategy:
       matrix:
-        contract: ["base", "adaptive"]
+        contract: ["base", "adaptive", "auth", "privacy", "observability", "streaming", "connectors", "agentic"]
 
     steps:
       - name: Checkout repository
@@ -81,6 +81,24 @@ jobs:
             adaptive)
               python -m pip install ".[adaptive]"
               ;;
+            auth)
+              python -m pip install ".[auth]"
+              ;;
+            privacy)
+              python -m pip install ".[privacy]"
+              ;;
+            observability)
+              python -m pip install ".[observability]"
+              ;;
+            streaming)
+              python -m pip install ".[streaming]"
+              ;;
+            connectors)
+              python -m pip install ".[connectors]"
+              ;;
+            agentic)
+              python -m pip install ".[agentic]"
+              ;;
           esac
 
       - name: Smoke base install
@@ -93,6 +111,13 @@ jobs:
           assert orchid_ranker.__version__
           assert BayesianKnowledgeTracing().p_known >= 0.0
           assert ProgressionRecommender is not None
+          PY
+          orchid-serve --help
+
+      - name: Assert generic recommender stays out of base install
+        if: matrix.contract == 'base'
+        run: |
+          python - <<'PY'
           try:
               from orchid_ranker import OrchidRecommender  # noqa: F401
           except ImportError as exc:
@@ -105,6 +130,27 @@ jobs:
         if: matrix.contract == 'adaptive'
         run: |
           python examples/adaptive_learning_quickstart.py
+
+      - name: Smoke optional install
+        if: matrix.contract != 'base' && matrix.contract != 'adaptive'
+        run: |
+          python - <<'PY'
+          import orchid_ranker
+          assert orchid_ranker.__version__
+          PY
+
+  docker-smoke:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Build container
+        run: docker build -t orchid-ranker:test .
+
+      - name: Smoke container CLI
+        run: docker run --rm orchid-ranker:test --help
 
   lower-bounds:
     runs-on: ubuntu-latest

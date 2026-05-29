@@ -585,12 +585,13 @@ class MultiUserOrchestrator:
                 _labs: list[float] = []
                 for _wr in range(int(self.cfg.warmup_rounds)):
                     for ux in self.users:
-                        uid = int(ux.user_id)
+                        uid_ext = int(ux.user_id)
+                        uid = int(ux.user_idx)
                         user_ids = torch.tensor([uid], dtype=torch.long, device=self.device)
-                        self._state_buf[0, 0] = self._khat[uid]
+                        self._state_buf[0, 0] = self._khat[uid_ext]
                         self._state_buf[0, 1] = 0.0
                         self._state_buf[0, 2] = 0.5
-                        self._state_buf[0, 3] = self._ehat[uid]
+                        self._state_buf[0, 3] = self._ehat[uid_ext]
                         state_vec = self._state_buf
                         # sample show_cnt candidate positions
                         all_pos = torch.arange(self.item_matrix.shape[0], dtype=torch.long, device=self.device)
@@ -607,11 +608,11 @@ class MultiUserOrchestrator:
                             logits=logits,
                             top_k=top_k_warm,
                             item_ids=cand_pos,
-                            user_id=uid,
-                            engagement=float(self._ehat[uid]),
+                            user_id=uid_ext,
+                            engagement=float(self._ehat[uid_ext]),
                             trust=0.5,
                             difficulty_map=self._difficulty_map,
-                            knowledge=float(self._khat[uid]),
+                            knowledge=float(self._khat[uid_ext]),
                             zpd_delta=float(self.cfg.zpd_margin),
                         )
                         chosen_set = set(int(p) for p in chosen_pos)
@@ -622,11 +623,11 @@ class MultiUserOrchestrator:
                             items.append(int(p))
                             labels.append(1.0 if int(p) in chosen_set else 0.0)
                         batch = {
-                            "user_ids": user_ids.expand(len(items)),
+                            "user_ids": user_ids.expand(len(items)).detach().clone(),
                             "item_ids": torch.tensor(items, dtype=torch.long, device=self.device),
                             "labels": torch.tensor(labels, dtype=torch.float32, device=self.device),
                             "item_matrix": self.item_matrix,
-                            "state_vec": state_vec.expand(len(items), -1),
+                            "state_vec": state_vec.expand(len(items), -1).detach().clone(),
                         }
                         pre_batches.append(batch)
                         if len(pre_batches) >= self._MAX_WARMUP_BATCHES:
@@ -664,7 +665,8 @@ class MultiUserOrchestrator:
                         for t_param, s_param in zip(self.rec.teacher.parameters(), self.rec.student.parameters()):
                             t_param.data.copy_(s_param.data)
             except Exception:
-                pass
+                logger.exception("warmup preloop failed")
+                raise
 
         # Per-user seen sets and embedding histories (for novelty/serendipity)
         seen_by_user = {int(ux.user_id): set() for ux in self.users}
@@ -1071,10 +1073,12 @@ class MultiUserOrchestrator:
 
                 # ---- cohort-level novelty/serendipity accounting (after logging) ----
                 if accepted_ids:
+                    policy_seen = self._seen_by_user.setdefault(uid_ext, set())
                     for iid in accepted_ids:
                         if iid not in prev_seen:
                             novel_hits += 1
                         prev_seen.add(iid)
+                        policy_seen.add(iid)
                         pop_counts[iid] += 1
                     novel_den += len(accepted_ids)
 
@@ -1135,15 +1139,15 @@ class MultiUserOrchestrator:
                         item_tensor = torch.tensor(all_pos_idx, dtype=torch.long, device=self.device)
                         label_tensor = torch.tensor(all_labels, dtype=torch.float32, device=self.device)
                         batch = {
-                            "user_ids": user_ids.expand(len(all_pos_idx)),
+                            "user_ids": user_ids.expand(len(all_pos_idx)).detach().clone(),
                             "item_ids": item_tensor,
                             "labels": label_tensor,
                             "item_matrix": self.item_matrix,
-                            "state_vec": state_vec.expand(len(all_pos_idx), -1),
+                            "state_vec": state_vec.expand(len(all_pos_idx), -1).detach().clone(),
                         }
                         if hasattr(self.rec, "train_step") and callable(self.rec.train_step):
                             # During warmup, accumulate; otherwise train now
-                            if self._is_adaptive and int(r) < int(self.cfg.warmup_rounds):
+                            if self._is_adaptive and int(r) <= int(self.cfg.warmup_rounds):
                                 try:
                                     self._warmup_buffer.append(batch)
                                 except Exception:
@@ -1241,7 +1245,7 @@ class MultiUserOrchestrator:
                     pass
 
             # ---------- end of warmup: pretrain student over accumulated batches ----------
-            if self._is_adaptive and int(r) + 1 == int(self.cfg.warmup_rounds):
+            if self._is_adaptive and int(r) == int(self.cfg.warmup_rounds):
                 with self._timing.phase("warmup_sync"):
                     try:
                         steps = max(1, int(self.cfg.warmup_steps))

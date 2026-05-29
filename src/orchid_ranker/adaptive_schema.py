@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 from dataclasses import asdict, dataclass
 from typing import Any, Iterable, Mapping, Optional, Sequence, cast
 
@@ -73,8 +74,12 @@ def logged_decisions_to_frame(decisions: Iterable[LoggedDecision]) -> pd.DataFra
     return validate_logged_decisions(frame, reward_col=reward_col)
 
 
-def hash_identifier(value: Any, *, salt: str = "orchid") -> str:
+def hash_identifier(value: Any, *, salt: Optional[str] = None) -> str:
     """Return a stable salted SHA-256 hash for privacy-preserving IDs."""
+    if salt is None:
+        salt = os.environ.get("ORCHID_HASH_SALT")
+    if not salt:
+        raise ValueError("hash_identifier requires a secret salt or ORCHID_HASH_SALT")
     payload = f"{salt}:{value}".encode("utf-8")
     return hashlib.sha256(payload).hexdigest()
 

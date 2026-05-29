@@ -1,14 +1,35 @@
 # Contributing
 
-Use the repository-level [CONTRIBUTING.md](https://github.com/mlgorithm/orchid-ranker/blob/main/CONTRIBUTING.md) for the full contribution workflow.
+Use the repository-level
+[CONTRIBUTING.md](https://github.com/mlgorithm/orchid-ranker/blob/main/CONTRIBUTING.md)
+for the full contribution workflow, and read
+[Coding standards](coding-standards.md) before adding public APIs or examples.
 
-For local development:
+## Local Setup
 
 ```bash
+python -m venv .venv
+source .venv/bin/activate
+python -m pip install --upgrade pip
 python -m pip install -e ".[dev]"
-python -m pytest tests/test_adaptive_learning_recommender.py tests/test_knowledge_tracing.py
-python -m ruff check src/
 ```
 
-Before opening a pull request, run the focused tests for the feature area you
-changed and include the commands in the PR description.
+## Quality Gate
+
+```bash
+./scripts/run_full_tests.sh --quick
+./scripts/run_full_tests.sh
+```
+
+The quick gate runs lint, type checking, documentation-readiness checks,
+publish-readiness checks, and the core adaptive-learning smoke path. The full
+gate runs lint, types, all tests, strict docs build, and package build.
+
+## Contribution Scope
+
+Good contributions improve adaptive learning, knowledge tracing, progression
+ranking, prerequisite-aware candidate selection, OPE, safe rollout, privacy,
+connectors, or documentation for those workflows.
+
+Do not reintroduce generic recommender APIs, generic feed/movie/music
+benchmarks, or package-root tuning and serialization helpers.

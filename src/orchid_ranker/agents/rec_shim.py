@@ -19,8 +19,8 @@ class RecShim:
         if isinstance(x, torch.Tensor): return x.to(self.device)
         a = np.array(x)
         t = torch.from_numpy(a)
-        if dtype is not None and t.dtype != dtype and not t.dtype.is_floating_point:
-            return t.to(self.device)
+        if dtype is not None and t.dtype != dtype:
+            return t.to(device=self.device, dtype=dtype)
         return t.to(self.device)
 
     @torch.no_grad()
@@ -33,9 +33,22 @@ class RecShim:
         return self.rec.think(user_vec=u, item_matrix=Xi, user_ids=uids, item_ids=iids, state_vec=s)
 
     @torch.no_grad()
-    def decide(self, logits, top_k: int, item_ids, user_id: int, engagement: float, trust: float):
+    def decide(
+        self,
+        logits,
+        top_k: int,
+        item_ids,
+        user_id: int,
+        engagement: float,
+        trust: float,
+        difficulty_map: dict | None = None,
+        knowledge: float = 0.0,
+        zpd_delta: float = 0.0,
+    ):
         return self.rec.decide(logits=logits, top_k=int(top_k), item_ids=item_ids,
-                               user_id=int(user_id), engagement=float(engagement), trust=float(trust))
+                               user_id=int(user_id), engagement=float(engagement), trust=float(trust),
+                               difficulty_map=difficulty_map or {}, knowledge=float(knowledge),
+                               zpd_delta=float(zpd_delta))
 
     def _normalize_feedback_keys(self, feedback: Dict[int, int], item_ids):
         """Map feedback keys to the key space used by the wrapped recommender."""

@@ -947,21 +947,22 @@ class AdaptiveAgentFactory:
             raise ValueError(
                 f"Unknown AdaptiveAgent type '{name}'. Available: {list(cls._registry.keys())}"
             )
-        agent = cls._registry[key](**kwargs)
         # If caller passed initial latents in kwargs (common from run_all), apply them now.
         # We look for common keys and aliases.
         init_keys = {"engagement", "trust", "knowledge", "fatigue", "E", "T", "K", "F", "theta"}
-        if any(k in kwargs for k in init_keys):
+        init_kwargs = {k: kwargs.pop(k) for k in list(kwargs) if k in init_keys}
+        agent = cls._registry[key](**kwargs)
+        if init_kwargs:
             # normalize a few aliases
             lat = {}
-            if "E" in kwargs: lat["engagement"] = kwargs["E"]
-            if "T" in kwargs: lat["trust"] = kwargs["T"]
-            if "K" in kwargs: lat["knowledge"] = kwargs["K"]
-            if "theta" in kwargs: lat["knowledge"] = kwargs["theta"]
-            if "F" in kwargs: lat["fatigue"] = kwargs["F"]
+            if "E" in init_kwargs: lat["engagement"] = init_kwargs["E"]
+            if "T" in init_kwargs: lat["trust"] = init_kwargs["T"]
+            if "K" in init_kwargs: lat["knowledge"] = init_kwargs["K"]
+            if "theta" in init_kwargs: lat["knowledge"] = init_kwargs["theta"]
+            if "F" in init_kwargs: lat["fatigue"] = init_kwargs["F"]
             for k in ("engagement", "trust", "knowledge", "fatigue"):
-                if k in kwargs:
-                    lat[k] = kwargs[k]
+                if k in init_kwargs:
+                    lat[k] = init_kwargs[k]
             try:
                 agent.set_initial_latents(**lat)
             except Exception:

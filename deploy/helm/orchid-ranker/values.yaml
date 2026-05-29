@@ -20,7 +20,11 @@ resources:
 env:
   ORCHID_LOG_LEVEL: INFO
   ORCHID_AUDIT_ENDPOINT: ""
-  ORCHID_AUDIT_API_KEY: ""
+
+secrets:
+  # Prefer an externally managed Kubernetes Secret in production.
+  existingSecret: ""
+  auditApiKey: ""
 
 metrics:
   enabled: true

@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Dict, Iterable, Optional, Tuple
+from typing import Dict, Iterable, Mapping, Optional, Tuple
 
 import numpy as np
 import torch
@@ -165,6 +165,7 @@ def _with_sampled_missing_negatives(
     num_items: int,
     num_negative_samples: int,
     random_state: Optional[int],
+    exclude_by_user: Optional[Mapping[int, Iterable[int]]] = None,
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
     """Append sampled unobserved items as negatives for implicit-positive logs."""
     if num_negative_samples <= 0 or user_ids.size == 0 or num_items <= 1:
@@ -182,7 +183,9 @@ def _with_sampled_missing_negatives(
     for user_id, _item_id, label in zip(user_ids, item_ids, labels):
         if float(label) <= 0.0:
             continue
-        positives = positive_by_user.get(int(user_id), set())
+        positives = set(positive_by_user.get(int(user_id), set()))
+        if exclude_by_user is not None:
+            positives.update(int(item) for item in exclude_by_user.get(int(user_id), ()))
         if len(positives) >= num_items:
             continue
         candidates = np.array([int(i) for i in all_items if int(i) not in positives], dtype=np.int64)
@@ -383,6 +386,7 @@ class ALSBaseline(BaseBaseline):
         labels: Iterable[int],
         *,
         sample_missing_negatives: Optional[bool] = None,
+        exclude_by_user: Optional[Mapping[int, Iterable[int]]] = None,
     ) -> None:
         """Train the matrix factorization model.
 
@@ -408,6 +412,7 @@ class ALSBaseline(BaseBaseline):
                 num_items=self.num_items,
                 num_negative_samples=self.num_negative_samples,
                 random_state=self.random_state,
+                exclude_by_user=exclude_by_user,
             )
         self._last_num_training_examples = int(label_arr.size)
         self._last_num_negative_examples = int(np.count_nonzero(label_arr <= 0.0))
@@ -1052,6 +1057,7 @@ class NeuralMatrixFactorizationBaseline(BaseBaseline):
         labels: Iterable[float],
         *,
         sample_missing_negatives: Optional[bool] = None,
+        exclude_by_user: Optional[Mapping[int, Iterable[int]]] = None,
     ) -> None:
         """Train the neural matrix factorization model.
 
@@ -1077,6 +1083,7 @@ class NeuralMatrixFactorizationBaseline(BaseBaseline):
                 num_items=self.num_items,
                 num_negative_samples=max(1, self.neg_k),
                 random_state=None,
+                exclude_by_user=exclude_by_user,
             )
         self._last_num_training_examples = int(label_arr.size)
         self._last_num_negative_examples = int(np.count_nonzero(label_arr <= 0.0))

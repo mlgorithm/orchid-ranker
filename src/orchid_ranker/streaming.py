@@ -47,6 +47,8 @@ import torch.nn as nn
 
 from orchid_ranker.knowledge_tracing import BayesianKnowledgeTracing
 
+from ._labels import parse_binary_label
+
 logger = logging.getLogger(__name__)
 
 __all__ = [
@@ -318,7 +320,8 @@ class OnlineUserAdapter(nn.Module):
 
     @torch.no_grad()
     def forward(self, user_ids: torch.Tensor) -> torch.Tensor:  # type: ignore[override]
-        return self.residual(user_ids.long())
+        with self._lock:
+            return self.residual(user_ids.long())
 
     @torch.no_grad()
     def observe(
@@ -473,6 +476,9 @@ class StreamingAdaptiveRanker:
         self.user_features = user_features.to(device)
         self.item_features = item_features.to(device)
         self.device = device
+        self._num_dense_users = int(num_users)
+        self._num_items = int(item_features.shape[0])
+        self._allow_sparse_cold_users = scaling_config is not None
         self._user_id_map = {int(k): int(v) for k, v in (user_id_map or {}).items()}
         self._item_id_map = {int(k): int(v) for k, v in (item_id_map or {}).items()}
         self._index_item_map = {int(k): int(v) for k, v in (index_item_map or {}).items()}
@@ -498,6 +504,8 @@ class StreamingAdaptiveRanker:
                 emb_dim=emb_dim, lr=lr, l2=l2,
                 max_active_users=max_active,
                 device=device,
+                eviction_policy=getattr(scaling_config, "eviction_policy", "lru"),
+                ttl_seconds=getattr(scaling_config, "ttl_seconds", None),
             )
             logger.info(
                 "StreamingAdaptiveRanker: using sparse scaling backend "
@@ -556,15 +564,25 @@ class StreamingAdaptiveRanker:
             internal = self._item_id_map.get(external) if self._item_id_map else external
             if internal is None or internal in seen:
                 continue
+            if int(internal) < 0 or int(internal) >= self._num_items:
+                continue
             output_id = external if self._item_id_map else self._index_item_map.get(internal, internal)
             pairs.append((output_id, internal))
             seen.add(internal)
         return pairs
 
+    def _tower_user_index(self, user_id: int) -> int:
+        uid = int(user_id)
+        if 0 <= uid < self._num_dense_users:
+            return uid
+        if self._allow_sparse_cold_users:
+            return abs(uid) % max(1, self._num_dense_users)
+        raise IndexError(f"user_id {uid} out of range [0, {self._num_dense_users})")
+
     @torch.no_grad()
     def _user_base_emb(self, user_id: int, state_vec: torch.Tensor) -> torch.Tensor:
         """Compute the tower's pre-residual user embedding for residual SGD."""
-        uid_t = torch.tensor([int(user_id)], dtype=torch.long, device=self.device)
+        uid_t = torch.tensor([self._tower_user_index(user_id)], dtype=torch.long, device=self.device)
         x_u = self.user_features[uid_t]
         u = self.tower._user_context_vec(x_u, uid_t, state_vec.to(self.device))  # [1, emb_dim]
         return u.squeeze(0).detach()
@@ -607,19 +625,21 @@ class StreamingAdaptiveRanker:
                 category = skill
 
         t0 = time.perf_counter()
+        correct_bool = parse_binary_label(correct, name="correct")
         user_idx = self._user_index(user_id)
         item_idx = self._item_index(item_id)
-        y = float(1.0 if bool(correct) else 0.0)
+        if item_idx < 0 or item_idx >= self._num_items:
+            raise IndexError(f"item_id {item_id} maps to item index {item_idx}, outside [0, {self._num_items})")
+        y = float(1.0 if correct_bool else 0.0)
         # pre-competence snapshot *before* outcome tracing update -- needed for progression_gain
         pre_competence = self.state.competence(user_idx, category=category)
-        # 1. update BKT + telemetry
-        p_known = self.state.observe(
-            user_idx, bool(correct), category=category, timestamp=timestamp,
-        )
-        # 2. compute u_base and item_emb from frozen tower
         sv = self.state.state_vec(user_idx, device=self.device)
         u_base = self._user_base_emb(user_idx, sv)
         i_emb = self._item_emb_for(item_idx)
+        # 1. update BKT + telemetry only after all model lookups succeeded.
+        p_known = self.state.observe(
+            user_idx, correct_bool, category=category, timestamp=timestamp,
+        )
         # 3. online residual SGD step
         residual_norm_sq = self.adapter.observe(user_idx, u_base, i_emb, y)
         dt_ms = 1000.0 * (time.perf_counter() - t0)
@@ -634,7 +654,7 @@ class StreamingAdaptiveRanker:
                 self.monitor.record(  # type: ignore[attr-defined]
                     user_id=user_id,
                     item_id=item_id,
-                    correct=bool(correct),
+                    correct=correct_bool,
                     pre_competence=float(pre_competence),
                     post_competence=float(p_known),
                     category=str(category or "__default__"),
@@ -673,7 +693,9 @@ class StreamingAdaptiveRanker:
             return []
         external_ids = [external for external, _internal in pairs]
         cand = [internal for _external, internal in pairs]
-        uid_t = torch.tensor([int(user_idx)], dtype=torch.long, device=self.device)
+        tower_user_idx = self._tower_user_index(user_idx)
+        uid_t = torch.tensor([int(tower_user_idx)], dtype=torch.long, device=self.device)
+        adapter_uid_t = torch.tensor([int(user_idx)], dtype=torch.long, device=self.device)
         iid_t = torch.tensor(cand, dtype=torch.long, device=self.device)
         sv = self.state.state_vec(user_idx, device=self.device)
         x_u = self.user_features[uid_t]
@@ -688,7 +710,7 @@ class StreamingAdaptiveRanker:
         ).view(-1)
 
         # Residual contribution: dot(r_u, i_emb) — add to each candidate score
-        r_u = self.adapter(uid_t).view(-1)  # [emb_dim]
+        r_u = self.adapter(adapter_uid_t).view(-1)  # [emb_dim]
         if float(torch.linalg.vector_norm(r_u)) > 0.0:
             I_base = self.tower.item_net(self.item_features.index_select(0, iid_t))
             I = self.tower.item_proj(I_base) + self.tower.item_emb(iid_t)  # [K, emb_dim]

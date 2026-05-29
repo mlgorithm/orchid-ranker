@@ -184,10 +184,16 @@ def expected_calibration_error(preds: np.ndarray, labels: np.ndarray, bins: int 
     """
     preds = np.asarray(preds, dtype=float)
     labels = np.asarray(labels, dtype=float)
-    if preds.size == 0:
-        return 0.0
     if preds.shape != labels.shape:
         raise ValueError(f"preds and labels must have the same shape, got {preds.shape} vs {labels.shape}")
+    if preds.size == 0:
+        return 0.0
+    if np.any(~np.isfinite(preds)) or np.any(~np.isfinite(labels)):
+        raise ValueError("preds and labels must be finite")
+    if np.any((preds < 0.0) | (preds > 1.0)):
+        raise ValueError("preds must be probabilities in [0, 1]")
+    if np.any(~(np.isclose(labels, 0.0) | np.isclose(labels, 1.0))):
+        raise ValueError("labels must be binary values 0 or 1")
     bins = max(1, int(bins))
     # Vectorized binning with numpy.digitize instead of Python loop
     bin_indices = np.digitize(preds, np.linspace(0.0, 1.0, bins + 1)) - 1
@@ -669,7 +675,7 @@ def engagement_score(
     if total_recommended <= 0:
         return 0.0
     items = set(interacted_items) if not isinstance(interacted_items, set) else interacted_items
-    return float(len(items)) / float(total_recommended)
+    return min(1.0, float(len(items)) / float(total_recommended))
 
 
 @dataclass

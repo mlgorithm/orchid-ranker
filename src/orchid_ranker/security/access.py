@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from types import MappingProxyType
 from typing import FrozenSet, Iterable, Mapping, Set
 
 Action = str
@@ -16,13 +17,20 @@ DEFAULT_POLICY: Mapping[Role, FrozenSet[Action]] = {
 }
 
 
-@dataclass
+@dataclass(frozen=True)
 class AccessControl:
     """Role-based access guard with immutable policy."""
 
     policy: Mapping[Role, Iterable[Action]] = field(
-        default_factory=lambda: {role: set(actions) for role, actions in DEFAULT_POLICY.items()}
+        default_factory=lambda: DEFAULT_POLICY
     )
+
+    def __post_init__(self) -> None:
+        immutable = {
+            str(role): frozenset(str(action) for action in actions)
+            for role, actions in self.policy.items()
+        }
+        object.__setattr__(self, "policy", MappingProxyType(immutable))
 
     def _to_set(self, role: Role) -> Set[Action]:
         actions = self.policy.get(role) or set()

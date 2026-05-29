@@ -171,26 +171,36 @@ class SemanticItemEncoder:
         """Return items close to a weighted profile of known item IDs."""
         self._require_fitted()
         assert self.embeddings_ is not None
-        if not item_ids:
+        if top_k <= 0:
             return []
-        indices = [self._item_index[item_id] for item_id in item_ids if item_id in self._item_index]
-        if not indices:
+        input_items = list(item_ids)
+        if not input_items:
             return []
         if weights is None:
-            raw_weights = np.ones((len(indices),), dtype=float)
+            pairs = [(item_id, 1.0) for item_id in input_items if item_id in self._item_index]
         else:
-            raw_weights = np.asarray(list(weights), dtype=float)[: len(indices)]
-            if raw_weights.size != len(indices):
-                raise ValueError("weights must match the number of known item IDs")
+            raw_all_weights = np.asarray(list(weights), dtype=float)
+            if raw_all_weights.size != len(input_items):
+                raise ValueError("weights must match the number of input item IDs")
+            pairs = [
+                (item_id, float(weight))
+                for item_id, weight in zip(input_items, raw_all_weights)
+                if item_id in self._item_index
+            ]
+        if not pairs:
+            return []
+        indices = [self._item_index[item_id] for item_id, _weight in pairs]
+        raw_weights = np.asarray([weight for _item_id, weight in pairs], dtype=float)
         if not np.all(np.isfinite(raw_weights)):
             raise ValueError("weights must be finite")
         profile = np.asarray(raw_weights @ self.embeddings_[indices].toarray(), dtype=float).reshape(1, -1)
         profile = normalize(profile, norm="l2", copy=False)
         candidates = self.item_ids_ if candidate_item_ids is None else list(candidate_item_ids)
+        exclude_items = set(input_items)
         scores: dict[Any, float] = {}
         for item_id in candidates:
             idx = self._item_index.get(item_id)
-            if idx is None or item_id in item_ids:
+            if idx is None or item_id in exclude_items:
                 continue
             scores[item_id] = float(np.asarray(self.embeddings_[idx] @ profile.T).ravel()[0])
         ranked = sorted(scores, key=lambda item_id: (scores[item_id], str(item_id)), reverse=True)
@@ -332,15 +342,24 @@ class DenseSemanticItemEncoder:
         """Return dense-nearest items to a weighted profile of known item IDs."""
         self._require_fitted()
         assert self.embeddings_ is not None
-        indices = [self._item_index[item_id] for item_id in item_ids if item_id in self._item_index]
-        if not indices:
+        if top_k <= 0:
             return []
+        input_items = list(item_ids)
         if weights is None:
-            raw_weights = np.ones((len(indices),), dtype=float)
+            pairs = [(item_id, 1.0) for item_id in input_items if item_id in self._item_index]
         else:
-            raw_weights = np.asarray(list(weights), dtype=float)[: len(indices)]
-            if raw_weights.size != len(indices):
-                raise ValueError("weights must match the number of known item IDs")
+            raw_all_weights = np.asarray(list(weights), dtype=float)
+            if raw_all_weights.size != len(input_items):
+                raise ValueError("weights must match the number of input item IDs")
+            pairs = [
+                (item_id, float(weight))
+                for item_id, weight in zip(input_items, raw_all_weights)
+                if item_id in self._item_index
+            ]
+        if not pairs:
+            return []
+        indices = [self._item_index[item_id] for item_id, _weight in pairs]
+        raw_weights = np.asarray([weight for _item_id, weight in pairs], dtype=float)
         if not np.all(np.isfinite(raw_weights)):
             raise ValueError("weights must be finite")
         profile = raw_weights @ self.embeddings_[indices]
@@ -350,9 +369,10 @@ class DenseSemanticItemEncoder:
         candidates = self.item_ids_ if candidate_item_ids is None else list(candidate_item_ids)
         scores: dict[Any, float] = {}
         profile_vec = profile[0]
+        exclude_items = set(input_items)
         for item_id in candidates:
             idx = self._item_index.get(item_id)
-            if idx is None or item_id in item_ids:
+            if idx is None or item_id in exclude_items:
                 continue
             scores[item_id] = float(self.embeddings_[idx] @ profile_vec)
         ranked = sorted(scores, key=lambda item_id: (scores[item_id], str(item_id)), reverse=True)

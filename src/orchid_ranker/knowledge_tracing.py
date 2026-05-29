@@ -10,6 +10,8 @@ import math
 from datetime import datetime
 from typing import Dict, List, Optional
 
+from ._labels import parse_binary_label
+
 
 class BayesianKnowledgeTracing:
     """Bayesian Knowledge Tracing (BKT) for estimating user competence.
@@ -136,6 +138,7 @@ class BayesianKnowledgeTracing:
         Then apply transition to account for learning opportunity:
         P(L_{t+1}) = P(L_t) + (1 - P(L_t)) * p_transit
         """
+        correct = parse_binary_label(correct, name="correct")
         # Likelihood of observation given knowledge state
         if correct:
             # P(correct | known) and P(correct | unknown)

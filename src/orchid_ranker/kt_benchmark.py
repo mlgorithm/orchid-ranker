@@ -1,6 +1,7 @@
 """Leakage-safe benchmarking helpers for knowledge tracing models."""
 from __future__ import annotations
 
+import inspect
 from dataclasses import asdict, dataclass
 from typing import Any, Dict, Optional, Sequence
 
@@ -193,6 +194,25 @@ def _report(labels: np.ndarray, preds: np.ndarray, *, decision_threshold: float 
     )
 
 
+def _observe_with_optional_timestamp(
+    tracer: Any,
+    user_id: Any,
+    item_id: Any,
+    label: int,
+    *,
+    timestamp: Optional[Any],
+) -> Any:
+    if timestamp is None:
+        return tracer.observe(user_id, item_id, label)
+    try:
+        params = inspect.signature(tracer.observe).parameters
+    except (TypeError, ValueError):
+        params = {}
+    if "timestamp" in params:
+        return tracer.observe(user_id, item_id, label, timestamp=timestamp)
+    return tracer.observe(user_id, item_id, label)
+
+
 def evaluate_tracer_replay(
     tracer: SAKTTracer,
     split: KTHoldoutSplit,
@@ -210,12 +230,16 @@ def evaluate_tracer_replay(
     test = _ordered(split.test, user_col=split.user_col, timestamp_col=split.timestamp_col)
     preds = []
     labels = []
-    for row in test[[split.user_col, split.item_col, split.correct_col]].itertuples(index=False, name=None):
-        user_id, item_id, raw_correct = row
+    columns = [split.user_col, split.item_col, split.correct_col]
+    if split.timestamp_col is not None:
+        columns.append(split.timestamp_col)
+    for row in test[columns].itertuples(index=False, name=None):
+        user_id, item_id, raw_correct = row[:3]
+        timestamp = row[3] if split.timestamp_col is not None else None
         label = int(float(raw_correct) >= threshold)
         preds.append(tracer.predict_correct(user_id, item_id))
         labels.append(label)
-        tracer.observe(user_id, item_id, label)
+        _observe_with_optional_timestamp(tracer, user_id, item_id, label, timestamp=timestamp)
     return _report(np.asarray(labels, dtype=np.float32), np.asarray(preds, dtype=np.float32))
 
 

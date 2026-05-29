@@ -41,6 +41,7 @@ from collections import deque
 from dataclasses import dataclass
 from typing import Any, Callable, Deque, Dict, Iterable, List, Mapping, Optional
 
+from orchid_ranker._labels import parse_binary_label
 from orchid_ranker.streaming import StreamingAdaptiveRanker
 
 logger = logging.getLogger(__name__)
@@ -56,22 +57,7 @@ __all__ = [
 
 
 def _parse_correct(value: Any) -> bool:
-    if isinstance(value, bool):
-        return value
-    if isinstance(value, str):
-        normalized = value.strip().lower()
-        if normalized in {"true", "t"}:
-            return True
-        if normalized in {"false", "f"}:
-            return False
-        numeric = float(normalized)
-    else:
-        numeric = float(value)
-    if numeric == 0.0:
-        return False
-    if numeric == 1.0:
-        return True
-    raise ValueError("correct must be a strict boolean or 0/1 value")
+    return parse_binary_label(value, name="correct")
 
 
 # ---------------------------------------------------------------------------
@@ -127,6 +113,7 @@ class InteractionEventBus(ABC):
     Implementations need only ``poll`` and ``close``. ``poll`` should return
     quickly (<= ~a few seconds) — the ingestor loop calls it repeatedly.
     """
+    stop_on_apply_error = False
 
     @abstractmethod
     def poll(self, max_events: int = 100, timeout_s: float = 0.5) -> List[InteractionEvent]:
@@ -208,6 +195,7 @@ class KafkaEventBus(InteractionEventBus):
         Extra consumer config, merged after the defaults. Use for TLS, SASL,
         auto-commit settings, etc.
     """
+    stop_on_apply_error = True
 
     def __init__(
         self,
@@ -239,6 +227,7 @@ class KafkaEventBus(InteractionEventBus):
         self._topic = topic
         self._closed = False
         self._pending: Dict[int, Any] = {}
+        self.parse_errors = 0
 
     def poll(self, max_events: int = 100, timeout_s: float = 0.5) -> List[InteractionEvent]:  # pragma: no cover - requires broker
         if self._closed:
@@ -260,7 +249,12 @@ class KafkaEventBus(InteractionEventBus):
                 self._pending[id(event)] = msg
                 out.append(event)
             except ValueError as exc:
+                self.parse_errors += 1
                 logger.warning("dropping malformed event: %s", exc)
+                try:
+                    self._consumer.commit(message=msg, asynchronous=False)
+                except Exception:  # noqa: BLE001
+                    logger.exception("failed to commit malformed kafka message")
         return out
 
     def ack(self, event: InteractionEvent) -> None:  # pragma: no cover - requires broker
@@ -379,12 +373,18 @@ class StreamingIngestor:
     def _drain_once(self) -> int:
         """Poll once and apply whatever arrived. Returns events applied."""
         self.metrics.polls += 1
+        parse_errors_before = int(getattr(self.bus, "parse_errors", 0))
         batch = self.bus.poll(max_events=self.batch_size, timeout_s=self.poll_timeout_s)
+        parse_errors_after = int(getattr(self.bus, "parse_errors", parse_errors_before))
+        if parse_errors_after > parse_errors_before:
+            self.metrics.parse_errors += parse_errors_after - parse_errors_before
         self.metrics.events_consumed += len(batch)
         applied = 0
         for ev in batch:
             if self._apply(ev):
                 applied += 1
+            elif getattr(self.bus, "stop_on_apply_error", False):
+                break
         return applied
 
     # ---- public API ----

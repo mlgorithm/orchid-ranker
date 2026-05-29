@@ -143,6 +143,7 @@ class SketchCandidateGenerator:
         seen_bloom: Optional[BloomFilter] = None,
         recent_reservoir: Optional[ReservoirSampler] = None,
         top_m: int = 200,
+        max_heavy_hitters_per_concept: Optional[int] = None,
     ) -> None:
         if top_m < 1:
             raise ValueError("top_m must be positive")
@@ -151,11 +152,18 @@ class SketchCandidateGenerator:
         self.seen = seen_bloom or BloomFilter()
         self.recent = recent_reservoir or ReservoirSampler()
         self.top_m = int(top_m)
-        self._concept_item_counts: dict[tuple[Any, Any], float] = defaultdict(float)
+        self.max_heavy_hitters_per_concept = int(max_heavy_hitters_per_concept or max(self.top_m * 4, 1024))
+        if self.max_heavy_hitters_per_concept < 1:
+            raise ValueError("max_heavy_hitters_per_concept must be positive")
+        self._concept_item_counts: dict[Any, dict[Any, float]] = defaultdict(dict)
 
     def update(self, learner_id: Any, concept_id: Any, item_id: Any, correct: Optional[Any] = None) -> None:
         self.cms.add((concept_id, item_id), 1.0)
-        self._concept_item_counts[(concept_id, item_id)] += 1.0
+        counts = self._concept_item_counts[concept_id]
+        counts[item_id] = float(counts.get(item_id, 0.0) + 1.0)
+        while len(counts) > self.max_heavy_hitters_per_concept:
+            evict_id = min(counts, key=lambda key: (counts[key], str(key)))
+            counts.pop(evict_id, None)
         self.recent.update(learner_id, (item_id, correct))
         self.mark_seen(learner_id, item_id)
 
@@ -192,9 +200,8 @@ class SketchCandidateGenerator:
 
     def _heavy_hitters(self, concept_id: Any, *, k: int) -> list[Any]:
         rows = [
-            (item_id, count)
-            for (concept, item_id), count in self._concept_item_counts.items()
-            if concept == concept_id
+            (item_id, self.cms.estimate((concept_id, item_id)), count)
+            for item_id, count in self._concept_item_counts.get(concept_id, {}).items()
         ]
-        rows.sort(key=lambda pair: (pair[1], str(pair[0])), reverse=True)
-        return [item_id for item_id, _count in rows[: min(int(k), len(rows))]]
+        rows.sort(key=lambda pair: (pair[1], pair[2], str(pair[0])), reverse=True)
+        return [item_id for item_id, _estimate, _count in rows[: min(int(k), len(rows))]]

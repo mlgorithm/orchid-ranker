@@ -6,6 +6,7 @@
 - `guides/03-operate-safely.md` – adaptive-learning guardrails and fallback.
 - `scenarios.md` – adaptive-learning deployment recipes.
 - `overview.md` – module reference and entry points.
+- `coding-standards.md` – public API, testing, docs, and review standards.
 - `deployment.md` – Docker/Helm/Terraform guidance.
 - `privacy.md` – differential privacy engines and audit logging.
 - `security.md` – SBOM workflow, audit forwarding, compliance artefacts.

@@ -68,17 +68,15 @@ class TestSimpleDPAccountant:
         for i in range(1, len(epsilons)):
             assert epsilons[i] >= epsilons[i - 1]
 
-    def test_epsilon_zero_when_no_noise(self):
-        """Test that epsilon is 0 when sigma=0."""
-        accountant = SimpleDPAccountant(q=0.02, sigma=0.0, delta=1e-5)
-        _, eps = accountant.step(10)
-        assert eps == 0.0
+    def test_rejects_no_noise_accounting(self):
+        """No-noise training is not a valid DP configuration."""
+        with pytest.raises(ValueError, match="sigma"):
+            SimpleDPAccountant(q=0.02, sigma=0.0, delta=1e-5)
 
-    def test_epsilon_zero_when_no_sampling(self):
-        """Test that epsilon is 0 when q=0."""
-        accountant = SimpleDPAccountant(q=0.0, sigma=1.0, delta=1e-5)
-        _, eps = accountant.step(10)
-        assert eps == 0.0
+    def test_rejects_no_sampling_accounting(self):
+        """A zero sample rate should not be silently reported as private."""
+        with pytest.raises(ValueError, match="q"):
+            SimpleDPAccountant(q=0.0, sigma=1.0, delta=1e-5)
 
     def test_epsilon_zero_on_zero_steps(self):
         """Test that epsilon is 0 when T=0."""

@@ -107,12 +107,14 @@ def fit_bkt_em(
             break
         previous_ll = total_ll
 
+    p_init, p_transit, p_slip, p_guess = [float(value) for value in params]
+    final_ll = sum(_forward_backward(obs, p_init, p_transit, p_slip, p_guess)[2] for obs in observations)
     return BKTFitReport(
         p_init=float(params[0]),
         p_transit=float(params[1]),
         p_slip=float(params[2]),
         p_guess=float(params[3]),
-        log_likelihood=float(previous_ll),
+        log_likelihood=float(final_ll),
         iterations=iterations,
         n_sequences=len(observations),
         n_observations=total_obs,

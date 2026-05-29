@@ -1,94 +1,50 @@
 #!/usr/bin/env bash
-# =============================================================================
-# Orchid Ranker — Full Production Test Suite
-# =============================================================================
-# Run this locally where torch and all dependencies are installed.
-#
-# Usage:
-#   ./scripts/run_full_tests.sh          # Run all tests
-#   ./scripts/run_full_tests.sh --quick  # Run only fast unit tests
-#   ./scripts/run_full_tests.sh --lint   # Run linting only
-# =============================================================================
-
 set -euo pipefail
+
 cd "$(dirname "$0")/.."
 
-RED='\033[0;31m'
-GREEN='\033[0;32m'
-YELLOW='\033[1;33m'
-NC='\033[0m'
+PYTHON_BIN="${PYTHON:-python}"
+MODE="${1:-}"
 
-echo "============================================"
-echo "  Orchid Ranker — Production Test Suite"
-echo "============================================"
-echo ""
-
-# ---------------------------------------------------------------------------
-# 1. Environment check
-# ---------------------------------------------------------------------------
-echo -e "${YELLOW}[1/5] Checking environment...${NC}"
-python3 -c "import torch; print(f'  PyTorch {torch.__version__}')"
-python3 -c "import numpy; print(f'  NumPy {numpy.__version__}')"
-python3 -c "import pandas; print(f'  Pandas {pandas.__version__}')"
-python3 -c "import sklearn; print(f'  scikit-learn {sklearn.__version__}')"
-python3 -c "import scipy; print(f'  SciPy {scipy.__version__}')"
-echo -e "${GREEN}  Environment OK${NC}"
-echo ""
-
-# ---------------------------------------------------------------------------
-# 2. Lint with ruff
-# ---------------------------------------------------------------------------
-echo -e "${YELLOW}[2/5] Running ruff linter...${NC}"
-if command -v ruff &> /dev/null; then
-    ruff check src/ tests/ --config pyproject.toml || {
-        echo -e "${RED}  Ruff found issues. Run 'ruff check --fix' to auto-fix.${NC}"
-    }
-    echo -e "${GREEN}  Ruff complete${NC}"
-else
-    echo -e "${YELLOW}  ruff not installed, skipping (pip install ruff)${NC}"
-fi
-echo ""
-
-if [[ "${1:-}" == "--lint" ]]; then
-    echo "Lint-only mode — done."
-    exit 0
-fi
-
-# ---------------------------------------------------------------------------
-# 3. Type check with mypy
-# ---------------------------------------------------------------------------
-echo -e "${YELLOW}[3/5] Running mypy type checker...${NC}"
-if command -v mypy &> /dev/null; then
-    mypy src/orchid_ranker/ --config-file pyproject.toml --no-error-summary 2>&1 | tail -5 || true
-    echo -e "${GREEN}  mypy complete${NC}"
-else
-    echo -e "${YELLOW}  mypy not installed, skipping (pip install mypy)${NC}"
-fi
-echo ""
-
-# ---------------------------------------------------------------------------
-# 4. Unit tests
-# ---------------------------------------------------------------------------
-echo -e "${YELLOW}[4/5] Running pytest...${NC}"
-if [[ "${1:-}" == "--quick" ]]; then
-    python3 -m pytest tests/ \
-        --ignore=tests/test_agentic_ml100k.py \
-        --ignore=tests/test_agentic_smoke.py \
-        -x -q --tb=short 2>&1
-else
-    python3 -m pytest tests/ -v --tb=short 2>&1
-fi
-echo ""
-
-# ---------------------------------------------------------------------------
-# 5. Build check
-# ---------------------------------------------------------------------------
-echo -e "${YELLOW}[5/5] Verifying package builds...${NC}"
-python3 -m build --sdist --no-isolation 2>&1 | tail -3 || {
-    echo -e "${YELLOW}  Build check skipped (install 'build' package)${NC}"
+usage() {
+  cat <<'EOF'
+Usage:
+  ./scripts/run_full_tests.sh          Run lint, types, tests, docs, and build
+  ./scripts/run_full_tests.sh --quick  Run lint, types, docs readiness, and core smoke tests
+  ./scripts/run_full_tests.sh --lint   Run lint and type checks only
+EOF
 }
-echo ""
 
-echo "============================================"
-echo -e "${GREEN}  All checks complete!${NC}"
-echo "============================================"
+if [[ "${MODE}" != "" && "${MODE}" != "--quick" && "${MODE}" != "--lint" ]]; then
+  usage >&2
+  exit 2
+fi
+
+run_step() {
+  local label="$1"
+  shift
+  printf '\n==> %s\n' "${label}"
+  "$@"
+}
+
+run_step "Ruff lint" "${PYTHON_BIN}" -m ruff check .
+run_step "Mypy type check" "${PYTHON_BIN}" -m mypy src/orchid_ranker
+
+if [[ "${MODE}" == "--lint" ]]; then
+  exit 0
+fi
+
+if [[ "${MODE}" == "--quick" ]]; then
+  run_step "Quick regression tests" "${PYTHON_BIN}" -m pytest \
+    tests/test_documentation_readiness.py \
+    tests/test_publish_readiness.py \
+    tests/test_adaptive_learning_recommender.py \
+    tests/test_knowledge_tracing.py \
+    -q
+else
+  run_step "Full test suite with coverage" "${PYTHON_BIN}" -m pytest tests -q \
+    --cov=src/orchid_ranker --cov-report=term-missing --cov-fail-under=70
+fi
+
+run_step "Documentation build" "${PYTHON_BIN}" -m mkdocs build --strict
+run_step "Package build" "${PYTHON_BIN}" -m build

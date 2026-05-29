@@ -203,7 +203,10 @@ class AdaptiveRanker:
         self._require_fitted()
         assert self.recommender_ is not None
         active_mode = self.config.mode if mode is None else mode
-        candidates = list(candidate_item_ids or [])
+        top_k = int(top_k)
+        if top_k <= 0:
+            return []
+        candidates = list(candidate_item_ids) if candidate_item_ids is not None else []
         if not candidates and item_query_text is not None and self.semantic_encoder_ is not None:
             candidates = self.semantic_encoder_.similar_items(
                 item_query_text,
@@ -272,7 +275,11 @@ class AdaptiveRanker:
         max_weight: Optional[float] = None,
     ) -> LoggedPolicyReport:
         """Evaluate the fitted conservative policy from logged decisions."""
-        work = validate_logged_decisions(logged_decisions, reward_col=reward_col).copy()
+        work = validate_logged_decisions(
+            logged_decisions,
+            reward_col=reward_col,
+            propensity_col=propensity_col,
+        ).copy()
         if target_probability_col not in work.columns:
             if self.offline_policy_ is None:
                 raise RuntimeError("fit_policy or target_probability_col is required before ope_report")
