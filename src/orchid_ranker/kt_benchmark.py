@@ -205,10 +205,10 @@ def _observe_with_optional_timestamp(
     if timestamp is None:
         return tracer.observe(user_id, item_id, label)
     try:
-        params = inspect.signature(tracer.observe).parameters
+        supports_timestamp = "timestamp" in inspect.signature(tracer.observe).parameters
     except (TypeError, ValueError):
-        params = {}
-    if "timestamp" in params:
+        supports_timestamp = False
+    if supports_timestamp:
         return tracer.observe(user_id, item_id, label, timestamp=timestamp)
     return tracer.observe(user_id, item_id, label)
 
