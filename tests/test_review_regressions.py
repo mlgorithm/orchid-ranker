@@ -88,6 +88,29 @@ def test_fqe_report_uses_target_start_action_value() -> None:
     assert fqe.report_.estimated_value == pytest.approx(0.0)
 
 
+def test_fqe_default_start_action_uses_target_policy_not_logged() -> None:
+    # Start context "s0" is logged with high-value action "a", but the target policy's
+    # action at "s0" is "b" (recovered from the x -> s0 transition's target_action).
+    # Without an explicit target_start_action_col, the reported policy value must be
+    # Q(s0, "b") (~0), not the logged Q(s0, "a") (~1).
+    transitions = pd.DataFrame(
+        [
+            {"context_hash": "s0", "chosen_item_id": "a", "reward": 1.0,
+             "next_context_hash": "terminal", "target_action_id": "b", "done": True},
+            {"context_hash": "s0", "chosen_item_id": "b", "reward": 0.0,
+             "next_context_hash": "terminal", "target_action_id": "b", "done": True},
+            {"context_hash": "x", "chosen_item_id": "c", "reward": 0.0,
+             "next_context_hash": "s0", "target_action_id": "b", "done": False},
+        ]
+    )
+    fqe = TabularFQE(gamma=0.9, epochs=80, learning_rate=0.3).fit(transitions)
+    assert fqe.score("s0", "a") > 0.9
+    assert fqe.score("s0", "b") == pytest.approx(0.0, abs=1e-6)
+    # Logged-action default would give ~1/3; target-policy default gives ~0.
+    assert fqe.report_.estimated_value < 0.2
+    assert fqe.report_.target_start_action_is_explicit is False
+
+
 def test_irt_3pl_update_matches_likelihood_gradient() -> None:
     selector = IRTAdaptiveSelector(initial_theta=0.2, learning_rate=1.0).fit_items(
         [{"item_id": "q", "difficulty": -0.3, "discrimination": 1.7, "guessing": 0.25}]

@@ -555,8 +555,12 @@ def _estimate_logged_policy(
 
     propensities = _numeric(events[propensity_col], propensity_col)
     policy_probs = _numeric(events[policy_probability_col], policy_probability_col)
-    if np.any(propensities < min_propensity) or np.any(propensities > 1.0):
-        raise ValueError(f"{propensity_col} values must be in [{min_propensity}, 1]")
+    if np.any(~np.isfinite(propensities)) or np.any(propensities <= 0.0) or np.any(propensities > 1.0):
+        raise ValueError(f"{propensity_col} values must be finite and in (0, 1]")
+    # min_propensity is a numerical floor on the IPS denominator, not a hard validation
+    # bound: clip tiny-but-valid propensities up to it so they cannot blow up the importance
+    # weights (consistent with callers that accept any propensity in (0, 1]).
+    propensities = np.clip(propensities, min_propensity, 1.0)
     if np.any(policy_probs < 0.0) or np.any(policy_probs > 1.0):
         raise ValueError(f"{policy_probability_col} values must be in [0, 1]")
 

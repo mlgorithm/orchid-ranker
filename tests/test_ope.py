@@ -212,6 +212,27 @@ def test_invalid_propensity_raises_clear_error():
         )
 
 
+def test_propensity_below_floor_is_clipped_not_raised():
+    # A tiny-but-valid propensity must be floored to min_propensity (bounding the IPS
+    # weight), not abort the whole evaluation. Zero/negative propensities still raise.
+    frame = pd.DataFrame(
+        {
+            "reward": [1.0, 0.0, 1.0],
+            "propensity": [1e-9, 0.5, 0.5],
+            "target_prob": [1.0, 1.0, 0.0],
+        }
+    )
+    report = evaluate_logged_policy(
+        frame,
+        reward_col="reward",
+        propensity_col="propensity",
+        target_probability_col="target_prob",
+        min_propensity=1e-3,
+    )
+    # weight for row 0 is target_prob / floored_propensity = 1.0 / 1e-3 = 1000, not 1e9.
+    assert report.weight_max == pytest.approx(1000.0)
+
+
 def test_weight_clipping_reports_clipped_fraction():
     frame = pd.DataFrame(
         {

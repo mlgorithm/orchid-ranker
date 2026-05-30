@@ -85,8 +85,13 @@ class _Event:
 class ProgressionSnapshot:
     """Current values for the four progression metrics + acceptance rate.
 
-    All fields are in [0, 1]. ``sample_size`` is the number of events actually
-    used to compute the snapshot (capped by the monitor's window size).
+    ``progression_gain`` is a normalized learning-gain mean in ``(-inf, 1]``; it
+    goes **negative** when learners regress (post-competence below pre-competence),
+    which is exactly the signal the progression guardrail halts on, so it must not
+    be clamped to ``[0, 1]``. The other four metrics (``category_coverage``,
+    ``sequence_adherence``, ``stretch_fit``, ``accept_rate``) are in ``[0, 1]``.
+    ``sample_size`` is the number of events actually used to compute the snapshot
+    (capped by the monitor's window size).
     """
     progression_gain: float
     category_coverage: float
@@ -332,11 +337,17 @@ class RollingProgressionMonitor:
             self._emit(self.snapshot())
 
     def _prune_succeeded_locked(self) -> None:
-        rebuilt: Dict[int, Set[int]] = defaultdict(set)
-        for event in self._events:
-            if event.correct or event.post_competence >= self.success_threshold:
-                rebuilt[event.user_id].add(event.item_id)
-        self._user_succeeded_items = rebuilt
+        # Keep each user's *monotonic* success history (do NOT rebuild it from the window):
+        # a prerequisite a learner mastered before the window slid past it must still count
+        # toward sequence_adherence, otherwise long-satisfied prerequisites "expire" as the
+        # window advances and depress the metric (and can trip the progression guardrail) on
+        # a healthy policy. Memory is bounded by dropping only users who have no events left
+        # in the window at all -- their history is needed only while they are being scored.
+        active_users = {event.user_id for event in self._events}
+        self._user_succeeded_items = defaultdict(
+            set,
+            {u: items for u, items in self._user_succeeded_items.items() if u in active_users},
+        )
 
     # ------- computation -------
     def snapshot(self) -> ProgressionSnapshot:

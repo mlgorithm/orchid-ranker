@@ -631,17 +631,22 @@ class StreamingAdaptiveRanker:
         if item_idx < 0 or item_idx >= self._num_items:
             raise IndexError(f"item_id {item_id} maps to item index {item_idx}, outside [0, {self._num_items})")
         y = float(1.0 if correct_bool else 0.0)
-        # pre-competence snapshot *before* outcome tracing update -- needed for progression_gain
-        pre_competence = self.state.competence(user_idx, category=category)
-        sv = self.state.state_vec(user_idx, device=self.device)
-        u_base = self._user_base_emb(user_idx, sv)
-        i_emb = self._item_emb_for(item_idx)
-        # 1. update BKT + telemetry only after all model lookups succeeded.
-        p_known = self.state.observe(
-            user_idx, correct_bool, category=category, timestamp=timestamp,
-        )
-        # 3. online residual SGD step
-        residual_norm_sq = self.adapter.observe(user_idx, u_base, i_emb, y)
+        # Serialize the whole read->update so concurrent observe() calls for the same user
+        # cannot interleave -- otherwise a residual SGD step can be computed from a stale
+        # embedding, or the pre/post competence pair can straddle another thread's update.
+        # self._lock is reentrant (RLock), so the telemetry append below re-acquires safely.
+        with self._lock:
+            # pre-competence snapshot *before* outcome tracing update -- needed for progression_gain
+            pre_competence = self.state.competence(user_idx, category=category)
+            sv = self.state.state_vec(user_idx, device=self.device)
+            u_base = self._user_base_emb(user_idx, sv)
+            i_emb = self._item_emb_for(item_idx)
+            # 1. update BKT + telemetry only after all model lookups succeeded.
+            p_known = self.state.observe(
+                user_idx, correct_bool, category=category, timestamp=timestamp,
+            )
+            # 3. online residual SGD step
+            residual_norm_sq = self.adapter.observe(user_idx, u_base, i_emb, y)
         dt_ms = 1000.0 * (time.perf_counter() - t0)
         with self._lock:
             self._observe_ms.append(dt_ms)

@@ -104,6 +104,19 @@ class TestRollingMonitor:
 
         assert m.snapshot().sequence_adherence == pytest.approx(2 / 3, abs=1e-6)
 
+    def test_sequence_adherence_remembers_prereqs_before_window(self):
+        # A prerequisite mastered before the rolling window slid past it must still count.
+        m = RollingProgressionMonitor(
+            policy="t_seq_mem", emit_prometheus=False, window_size=3,
+            prerequisite_graph={9: {1}},
+        )
+        m.record(user_id=0, item_id=1, correct=True, pre_competence=0.1, post_competence=0.9)
+        for k in (2, 3, 4):  # flood the window so item 1 ages out of it
+            m.record(user_id=0, item_id=k, correct=True, pre_competence=0.5, post_competence=0.9)
+        m.record(user_id=0, item_id=9, correct=False, pre_competence=0.5, post_competence=0.5)
+        # item 9 requires item 1, satisfied before the window -> all 3 in-window recs adherent.
+        assert m.snapshot().sequence_adherence == pytest.approx(1.0, abs=1e-6)
+
     def test_stretch_fit(self):
         m = RollingProgressionMonitor(
             policy="t_diff", emit_prometheus=False, stretch_width=0.2,

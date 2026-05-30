@@ -32,13 +32,24 @@ class SimpleDPConfig:
     delta: float = 1e-5               # δ
 
 class SimpleDPAccountant:
-    """Simple privacy accountant using Abadi et al. (2016) Gaussian mechanism bound.
+    """Heuristic privacy-loss estimate for subsampled Gaussian DP-SGD.
 
-    Tracks cumulative epsilon (ε) for (ε, δ)-differential privacy using the bound:
-      ε(T) ≈ q * sqrt(2 T log(1/δ)) / σ + T * q^2 / σ^2
+    Tracks a cumulative epsilon (ε) estimate for (ε, δ)-DP using the closed form
+      ε(T) ≈ q * sqrt(2 T log(1/δ)) / σ + T * q^2 / (2 σ^2)
 
-    where q is sample rate, T is number of DP steps, σ is noise multiplier.
-    Composes linearly across steps.
+    where q is the sample rate, T the number of DP steps, and σ the noise
+    multiplier. The two terms compose linearly across steps.
+
+    .. warning::
+        This is a **lightweight heuristic**, not the Abadi et al. (2016) moments
+        accountant (which numerically optimizes the privacy loss over RDP orders
+        and yields a materially tighter, rigorously valid bound). This closed
+        form is convenient for in-process monitoring and relative comparisons,
+        but it is **not guaranteed to upper-bound the true privacy loss in every
+        (q, σ, T) regime** and must not be relied on for a compliance-grade
+        (ε, δ) guarantee. For regulated deployments, account privacy with a
+        validated RDP accountant — e.g. Opacus ``RDPAccountant`` or
+        ``tensorflow_privacy`` — and convert RDP → (ε, δ).
 
     Parameters
     ----------
@@ -64,7 +75,7 @@ class SimpleDPAccountant:
         self.eps = 0.0
 
     def _eps_for(self, T: int) -> float:
-        """Compute cumulative epsilon for T DP steps using Abadi's bound."""
+        """Compute the cumulative epsilon estimate for T DP steps (heuristic, see class docstring)."""
         if T <= 0:
             return 0.0
         term1 = self.q * math.sqrt(2.0 * T * math.log(1.0 / self.delta)) / self.sigma

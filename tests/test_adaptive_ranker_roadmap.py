@@ -333,6 +333,30 @@ def test_semantic_item_encoder_profiles_from_known_items():
     assert "linear" not in ranked
 
 
+def test_semantic_profile_falls_back_when_weights_cancel():
+    # Two inputs with identical text get identical embeddings; weights [1, -1] cancel the
+    # weighted profile to the zero vector. The encoder must fall back to the unweighted
+    # centroid and still rank by similarity. The candidate ids are chosen so that the
+    # buggy all-zeros path (which sorts by the id tiebreak, descending) would wrongly rank
+    # the unrelated "zzz_bio" first.
+    catalog = pd.DataFrame(
+        {
+            "item_id": ["in_a", "in_b", "aaa_alg", "zzz_bio"],
+            "item_text": [
+                "solve linear equations in algebra",
+                "solve linear equations in algebra",
+                "graph linear equations in algebra",
+                "describe photosynthesis in plants",
+            ],
+        }
+    )
+    encoder = SemanticItemEncoder(n_features=256).fit(catalog)
+
+    ranked = encoder.similar_to_items(["in_a", "in_b"], weights=[1.0, -1.0], top_k=2)
+
+    assert ranked[0] == "aaa_alg"
+
+
 def test_dense_semantic_item_encoder_uses_external_embedding_adapter():
     vocab = {
         "fraction": [1.0, 0.0, 0.0],

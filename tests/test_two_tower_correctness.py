@@ -10,13 +10,41 @@ Tests focus on exact formula verification:
 - compile flag correctness
 - Score ordering preservation
 """
+import math
 import sys
 
 sys.path.insert(0, "src")
 
+import pytest
 import torch
 
 from orchid_ranker.agents.recommender_agent import TwoTowerRecommender
+from orchid_ranker.agents.two_tower import _bernoulli_symmetric_kl
+
+
+class TestBernoulliSymmetricKL:
+    """The distillation penalty must be the full Bernoulli (Jeffreys) KL."""
+
+    def test_zero_when_distributions_match(self):
+        z = torch.tensor([-2.0, 0.0, 1.5, 3.0])
+        assert float(_bernoulli_symmetric_kl(z, z).max()) == pytest.approx(0.0, abs=1e-6)
+
+    def test_matches_analytic_bernoulli_jeffreys(self):
+        s_logit, t_logit = 0.7, -1.3
+        ps = 1.0 / (1.0 + math.exp(-s_logit))
+        pt = 1.0 / (1.0 + math.exp(-t_logit))
+        expected = (
+            pt * math.log(pt / ps) + (1 - pt) * math.log((1 - pt) / (1 - ps))
+            + ps * math.log(ps / pt) + (1 - ps) * math.log((1 - ps) / (1 - pt))
+        )
+        got = float(_bernoulli_symmetric_kl(torch.tensor([s_logit]), torch.tensor([t_logit]))[0])
+        assert got == pytest.approx(expected, rel=1e-5)
+
+    def test_non_negative(self):
+        for a in (-4.0, -1.0, 0.0, 2.0, 5.0):
+            for b in (-4.0, -1.0, 0.0, 2.0, 5.0):
+                v = float(_bernoulli_symmetric_kl(torch.tensor([a]), torch.tensor([b]))[0])
+                assert v >= -1e-7
 
 
 class TestFiLMGatingFormula:

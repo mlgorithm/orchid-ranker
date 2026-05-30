@@ -316,7 +316,10 @@ class DependencyGraph:
         if node not in self._vertices:
             return False
 
-        prerequisites = self.prerequisites_for(node)
+        # Gate on the full transitive prerequisite set, not just direct parents, so an item
+        # cannot become eligible when an indirect prerequisite is missing (e.g. completion
+        # data that is not downward-closed: "b" recorded complete without its prereq "a").
+        prerequisites = self.all_prerequisites_for(node)
         return prerequisites.issubset(completed)
 
     # Backward-compatible aliases
@@ -371,7 +374,9 @@ class DependencyGraph:
         for v in self._vertices:
             if v in completed:
                 continue
-            prereqs = self._reverse_edges.get(v, set())
+            # Transitive prerequisites: an item is available only when every ancestor is
+            # completed, robust to completion sets that are not downward-closed.
+            prereqs = self.all_prerequisites_for(v)
             if prereqs.issubset(completed):
                 result.append(v)
 

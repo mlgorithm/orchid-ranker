@@ -288,7 +288,7 @@ class PopularityBaseline(BaseBaseline):
         tuple
             (list of selected item IDs, metadata dict)
         """
-        order = torch.argsort(logits[0], descending=True)
+        order = torch.argsort(logits[0], descending=True, stable=True)
         chosen = order[:top_k]
         return [int(item_ids[i].item()) for i in chosen], {"policy": "popularity"}
 
@@ -363,6 +363,7 @@ class ALSBaseline(BaseBaseline):
     def __init__(self, num_users: int, num_items: int, device: torch.device,
                  embedding_dim: int = 32, learning_rate: float = 1e-2, epochs: int = 5,
                  num_negative_samples: int = 4, random_state: Optional[int] = 42,
+                 weight_decay: float = 1e-5,
                  *, emb_dim: Optional[int] = None, lr: Optional[float] = None):
         super().__init__(device)
         # Support abbreviated aliases for backward compatibility
@@ -371,6 +372,9 @@ class ALSBaseline(BaseBaseline):
         self.model = MatrixFactorization(num_users, num_items, emb_dim=embedding_dim, implicit=True).to(device)
         self.learning_rate = learning_rate
         self.lr = learning_rate  # alias
+        # L2 regularization on the factors/biases: without it the free bias terms can grow
+        # unbounded to push BCE toward exact labels and overfit.
+        self.weight_decay = float(weight_decay)
         self.epochs = epochs
         self.num_users = int(num_users)
         self.num_items = int(num_items)
@@ -422,7 +426,7 @@ class ALSBaseline(BaseBaseline):
         label_tensor = torch.tensor(label_arr, dtype=torch.float32, device=self.device)
         # ALS uses BCE loss which requires labels in [0, 1]; clamp to handle explicit ratings
         label_tensor = torch.clamp(label_tensor, 0.0, 1.0)
-        optimizer = torch.optim.Adam(self.model.parameters(), lr=self.lr)
+        optimizer = torch.optim.Adam(self.model.parameters(), lr=self.lr, weight_decay=self.weight_decay)
         loss_fn = nn.BCELoss()
         for _ in range(self.epochs):
             optimizer.zero_grad()
@@ -470,7 +474,7 @@ class ALSBaseline(BaseBaseline):
         tuple
             (list of selected item IDs, metadata dict)
         """
-        top = torch.argsort(logits[0], descending=True)[:top_k]
+        top = torch.argsort(logits[0], descending=True, stable=True)[:top_k]
         return [int(item_ids[i].item()) for i in top], {"policy": "als"}
 
 
@@ -559,7 +563,7 @@ class UserKNNBaseline(BaseBaseline):
         tuple
             (list of selected item IDs, metadata dict)
         """
-        order = torch.argsort(logits[0], descending=True)[:top_k]
+        order = torch.argsort(logits[0], descending=True, stable=True)[:top_k]
         return [int(item_ids[i].item()) for i in order], {"policy": "user_knn"}
 
 
@@ -709,7 +713,7 @@ class LinUCBBaseline(BaseBaseline):
         tuple
             (list of selected item IDs, metadata dict)
         """
-        order = torch.argsort(logits[0], descending=True)[:top_k]
+        order = torch.argsort(logits[0], descending=True, stable=True)[:top_k]
         chosen = [int(item_ids[i].item()) for i in order]
         return chosen, {"policy": "linucb"}
 
@@ -821,7 +825,7 @@ class _ImplicitBase(BaseBaseline):
         tuple
             (list of selected item IDs, metadata dict)
         """
-        top = torch.argsort(logits[0], descending=True)[:top_k]
+        top = torch.argsort(logits[0], descending=True, stable=True)[:top_k]
         return [int(item_ids[i].item()) for i in top], {"policy": type(self).__name__.lower()}
 
 
@@ -850,7 +854,7 @@ class RestoredImplicitFactorBaseline(BaseBaseline):
         return torch.tensor(scores, dtype=torch.float32, device=self.device)
 
     def decide(self, *, logits: torch.Tensor, top_k: int, item_ids: torch.Tensor, **_):
-        top = torch.argsort(logits[0], descending=True)[:top_k]
+        top = torch.argsort(logits[0], descending=True, stable=True)[:top_k]
         return [int(item_ids[i].item()) for i in top], {"policy": self.policy}
 
 
@@ -997,6 +1001,7 @@ class NeuralMatrixFactorizationBaseline(BaseBaseline):
         loss: str = "bce",
         num_negative_samples: int = 10,
         batch_size: int = 256,
+        random_state: Optional[int] = 42,
         *,
         # Backward-compatible abbreviated aliases
         emb_dim: Optional[int] = None,
@@ -1022,6 +1027,15 @@ class NeuralMatrixFactorizationBaseline(BaseBaseline):
         self.loss_type = str(loss).lower()
         self.neg_k = int(num_negative_samples)
         self.batch_size = int(batch_size)
+        self.random_state = random_state
+
+        # Deterministic parameter init when a seed is given. We seed the (CPU) RNG that
+        # governs layer init and restore it afterwards, so constructing a seeded baseline
+        # is reproducible without perturbing the caller's global RNG stream.
+        _prev_rng_state = None
+        if random_state is not None:
+            _prev_rng_state = torch.random.get_rng_state()
+            torch.manual_seed(int(random_state))
 
         layers: list[nn.Module] = []
         in_dim = self.emb_dim * 2
@@ -1037,6 +1051,8 @@ class NeuralMatrixFactorizationBaseline(BaseBaseline):
         self.sigmoid = nn.Sigmoid()
         self.optimizer = torch.optim.Adam(self.parameters(), lr=self.lr)
         self.loss_fn = nn.BCELoss()
+        if _prev_rng_state is not None:
+            torch.random.set_rng_state(_prev_rng_state)
         self._last_num_training_examples = 0
         self._last_num_negative_examples = 0
 
@@ -1082,11 +1098,15 @@ class NeuralMatrixFactorizationBaseline(BaseBaseline):
                 label_arr,
                 num_items=self.num_items,
                 num_negative_samples=max(1, self.neg_k),
-                random_state=None,
+                random_state=self.random_state,
                 exclude_by_user=exclude_by_user,
             )
         self._last_num_training_examples = int(label_arr.size)
         self._last_num_negative_examples = int(np.count_nonzero(label_arr <= 0.0))
+
+        gen = torch.Generator(device=self.device)
+        if self.random_state is not None:
+            gen.manual_seed(int(self.random_state))
 
         users = torch.tensor(user_arr, dtype=torch.long, device=self.device)
         items = torch.tensor(item_arr, dtype=torch.long, device=self.device)
@@ -1100,16 +1120,17 @@ class NeuralMatrixFactorizationBaseline(BaseBaseline):
                 self.result.train_loss = 0.0
                 return
             bsz = max(256, self.batch_size)
+            pos_codes = torch.unique(users.long() * self.num_items + items.long())
             for _ in range(self.epochs):
-                perm = torch.randperm(users.size(0), device=self.device)
+                perm = torch.randperm(users.size(0), device=self.device, generator=gen)
                 for start in range(0, users.size(0), bsz):
                     idx = perm[start:start+bsz]
                     u_pos = users[idx]
                     i_pos = items[idx]
-                    # Vectorized negative sampling — sample batch at once on device.
-                    # For large item counts, collision probability with positives is negligible,
-                    # so uniform sampling is a good approximation and avoids rejection sampling overhead.
-                    j_neg = torch.randint(0, self.num_items, (u_pos.size(0),), device=self.device)
+                    # Sample negatives that are not among the user's known positives. Uniform
+                    # draws often hit a real positive on small catalogs, which corrupts the
+                    # pairwise objective by ranking one true positive below another.
+                    j_neg = self._sample_negatives(u_pos, pos_codes, gen)
                     self.optimizer.zero_grad()
                     # Use the same MLP scoring path for training and inference.
                     s_ui = self._logits(u_pos, i_pos).view(-1)
@@ -1130,15 +1151,15 @@ class NeuralMatrixFactorizationBaseline(BaseBaseline):
             bsz = max(256, self.batch_size)
             neg_k = max(1, self.neg_k)
             ce = nn.CrossEntropyLoss()
+            pos_codes = torch.unique(up.long() * self.num_items + ip.long())
             for _ in range(self.epochs):
-                perm = torch.randperm(up.size(0), device=self.device)
+                perm = torch.randperm(up.size(0), device=self.device, generator=gen)
                 for start in range(0, up.size(0), bsz):
                     idx = perm[start:start+bsz]
                     u_pos = up[idx]
                     i_pos = ip[idx]
-                    # Vectorized: sample [batch_size, neg_k] negatives at once.
-                    # For large item catalogs, collision probability with positives is negligible.
-                    j_neg = torch.randint(0, self.num_items, (u_pos.size(0), neg_k), device=self.device)  # [B, K]
+                    # Sample [B, K] negatives excluding the user's known positives.
+                    j_neg = self._sample_negatives(u_pos, pos_codes, gen, neg_k=neg_k)  # [B, K]
 
                     self.optimizer.zero_grad()
                     s_pos = self._logits(u_pos, i_pos).view(-1, 1)             # [B, 1]
@@ -1152,7 +1173,7 @@ class NeuralMatrixFactorizationBaseline(BaseBaseline):
             self.result.train_loss = float(loss.detach().cpu().item()) if 'loss' in locals() else 0.0
         else:
             dataset = torch.utils.data.TensorDataset(users, items, y)
-            loader = torch.utils.data.DataLoader(dataset, batch_size=256, shuffle=True)
+            loader = torch.utils.data.DataLoader(dataset, batch_size=256, shuffle=True, generator=gen)
             for _ in range(self.epochs):
                 for batch_users, batch_items, batch_y in loader:
                     self.optimizer.zero_grad()
@@ -1161,6 +1182,32 @@ class NeuralMatrixFactorizationBaseline(BaseBaseline):
                     loss.backward()
                     self.optimizer.step()
             self.result.train_loss = float(loss.detach().cpu().item()) if 'loss' in locals() else 0.0
+
+    def _sample_negatives(
+        self,
+        u_pos: torch.Tensor,
+        pos_codes: torch.Tensor,
+        generator: torch.Generator,
+        *,
+        neg_k: Optional[int] = None,
+    ) -> torch.Tensor:
+        """Sample negatives per positive user, excluding that user's known positives.
+
+        Uses bounded rejection: collisions with the (user, item) positive set are resampled
+        a few times. Pairs are encoded as ``user * num_items + item`` for an O(1) membership
+        test via ``torch.isin``. Returns shape ``(B,)`` or ``(B, neg_k)``.
+        """
+        shape = (u_pos.size(0),) if neg_k is None else (u_pos.size(0), neg_k)
+        u_base = u_pos.long() * self.num_items
+        u_base = u_base if neg_k is None else u_base.view(-1, 1)
+        j = torch.randint(0, self.num_items, shape, device=self.device, generator=generator)
+        for _ in range(8):
+            collision = torch.isin(u_base + j.long(), pos_codes)
+            if not bool(collision.any()):
+                break
+            replacement = torch.randint(0, self.num_items, shape, device=self.device, generator=generator)
+            j = torch.where(collision, replacement, j)
+        return j
 
     def _logits(self, user_ids: torch.Tensor, item_ids: torch.Tensor) -> torch.Tensor:
         """Compute raw MLP scores for user-item pairs."""
@@ -1223,7 +1270,7 @@ class NeuralMatrixFactorizationBaseline(BaseBaseline):
         tuple
             (list of selected item IDs, metadata dict)
         """
-        top = torch.argsort(logits[0], descending=True)[:top_k]
+        top = torch.argsort(logits[0], descending=True, stable=True)[:top_k]
         return [int(item_ids[i].item()) for i in top], {"policy": "neural_mf"}
 
 
@@ -1348,7 +1395,7 @@ class ExplicitMFBaseline(BaseBaseline):
         tuple
             (list of selected item IDs, metadata dict)
         """
-        top = torch.argsort(logits[0], descending=True)[:top_k]
+        top = torch.argsort(logits[0], descending=True, stable=True)[:top_k]
         return [int(item_ids[i].item()) for i in top], {"policy": "explicit_mf"}
 
 

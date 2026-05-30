@@ -194,6 +194,11 @@ class SemanticItemEncoder:
         if not np.all(np.isfinite(raw_weights)):
             raise ValueError("weights must be finite")
         profile = np.asarray(raw_weights @ self.embeddings_[indices].toarray(), dtype=float).reshape(1, -1)
+        if float(np.linalg.norm(profile)) <= 1e-12:
+            # Weighted profile cancelled to (near) zero (e.g. weights [1, -1] on similar
+            # items); fall back to the unweighted centroid so cosine scores stay meaningful
+            # instead of collapsing to 0 and degenerating the ranking to the id tiebreak.
+            profile = np.asarray(self.embeddings_[indices].toarray(), dtype=float).mean(axis=0, keepdims=True)
         profile = normalize(profile, norm="l2", copy=False)
         candidates = self.item_ids_ if candidate_item_ids is None else list(candidate_item_ids)
         exclude_items = set(input_items)
@@ -364,6 +369,10 @@ class DenseSemanticItemEncoder:
             raise ValueError("weights must be finite")
         profile = raw_weights @ self.embeddings_[indices]
         profile = np.asarray(profile, dtype=float).reshape(1, -1)
+        if float(np.linalg.norm(profile)) <= 1e-12:
+            # Weighted profile cancelled to (near) zero; fall back to the unweighted centroid
+            # so scores stay meaningful instead of collapsing to 0.
+            profile = np.asarray(self.embeddings_[indices], dtype=float).mean(axis=0, keepdims=True)
         if self.normalize_embeddings:
             profile = normalize(profile, norm="l2", copy=False)
         candidates = self.item_ids_ if candidate_item_ids is None else list(candidate_item_ids)

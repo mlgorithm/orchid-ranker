@@ -45,6 +45,26 @@ def _entropy_seed() -> int:
     return int.from_bytes(os.urandom(8), "little") % (2**63 - 1)
 
 
+def _bernoulli_symmetric_kl(student_logits: torch.Tensor, teacher_logits: torch.Tensor) -> torch.Tensor:
+    """Symmetric (Jeffreys) KL between two Bernoulli heads, given their logits.
+
+    A Bernoulli head is a full 2-class distribution, so the divergence must include
+    both the positive- and negative-class terms; using only the positive class (the
+    ``p * log(p_t/p_s)`` term) silently discards half of each distribution's mass.
+    Everything is computed in log-space via ``logsigmoid`` for numerical stability,
+    and the result is elementwise non-negative.
+    """
+    log_ps = torch.nn.functional.logsigmoid(student_logits)
+    log_1mps = torch.nn.functional.logsigmoid(-student_logits)
+    log_pt = torch.nn.functional.logsigmoid(teacher_logits)
+    log_1mpt = torch.nn.functional.logsigmoid(-teacher_logits)
+    ps = torch.exp(log_ps)
+    pt = torch.exp(log_pt)
+    kl_teacher_student = pt * (log_pt - log_ps) + (1.0 - pt) * (log_1mpt - log_1mps)
+    kl_student_teacher = ps * (log_ps - log_pt) + (1.0 - ps) * (log_1mps - log_1mpt)
+    return kl_teacher_student + kl_student_teacher
+
+
 class TwoTowerRecommender(nn.Module):
     """Two-tower neural recommender with state-dependent gating and diversity mechanisms.
 
@@ -587,18 +607,29 @@ class TwoTowerRecommender(nn.Module):
                 bonuses = np.array([self.linucb.score(phi_np[j], base=0.0, i=int(iid))
                                     for j, iid in enumerate(self._last_item_ids)])
                 b = torch.from_numpy(bonuses).to(device=logits.device, dtype=logits.dtype)
-                b = (b - b.mean()) / (b.std(unbiased=False) + 1e-6)
-                logits = logits + b.unsqueeze(0) * self.linucb_alpha
-                if _DEBUG_REC:
-                    _d(f"think: linUCB bonus applied alpha={self.linucb_alpha:.3f}")
+                b_std = b.std(unbiased=False)
+                # Only standardize when there is a real spread in uncertainty. A near-zero std
+                # means uniform uncertainty (no differential exploration signal) -- dividing by
+                # std then either collapses the bonus to 0 or amplifies floating-point noise.
+                if float(b_std) > 1e-6:
+                    b = (b - b.mean()) / b_std
+                    logits = logits + b.unsqueeze(0) * self.linucb_alpha
+                    if _DEBUG_REC:
+                        _d(f"think: linUCB bonus applied alpha={self.linucb_alpha:.3f}")
+                elif _DEBUG_REC:
+                    _d("think: linUCB bonus skipped (uniform uncertainty)")
 
             if self.use_bootts and self.bootts is not None:
                 bonuses = self.bootts.score_many(phi_np)
                 b = torch.from_numpy(bonuses).to(device=logits.device, dtype=logits.dtype)
-                b = (b - b.mean()) / (b.std(unbiased=False) + 1e-6)
-                logits = logits + b.unsqueeze(0) * self.ts_alpha
-                if _DEBUG_REC:
-                    _d(f"think: BootTS bonus applied alpha={self.ts_alpha:.3f}")
+                b_std = b.std(unbiased=False)
+                if float(b_std) > 1e-6:
+                    b = (b - b.mean()) / b_std
+                    logits = logits + b.unsqueeze(0) * self.ts_alpha
+                    if _DEBUG_REC:
+                        _d(f"think: BootTS bonus applied alpha={self.ts_alpha:.3f}")
+                elif _DEBUG_REC:
+                    _d("think: BootTS bonus skipped (uniform uncertainty)")
 
         # keep features for update()
         self._last_phi_np = phi_np
@@ -1209,9 +1240,7 @@ class TwoTowerRecommender(nn.Module):
                         cohort_ids=None,
                     )
                     t_logits_all = torch.nan_to_num(t_logits_all, nan=-1e9, posinf=1e9, neginf=-1e9)
-                log_p = torch.nn.functional.logsigmoid(logits_all[0, idx_t])
-                log_pt = torch.nn.functional.logsigmoid(t_logits_all[0, idx_t])
-                kl_stu = torch.exp(log_pt) * (log_pt - log_p) + torch.exp(log_p) * (log_p - log_pt)
+                kl_stu = _bernoulli_symmetric_kl(logits_all[0, idx_t], t_logits_all[0, idx_t])
                 kl_pen = self.kl_beta * kl_stu.mean()
 
                 loss = bce(logits, y) + kl_pen
@@ -1358,9 +1387,7 @@ class TwoTowerRecommender(nn.Module):
             t_logits_all = torch.nan_to_num(t_logits_all, nan=-1e9, posinf=1e9, neginf=-1e9)
 
         logits = logits_all[0, idx_t]
-        log_p = torch.nn.functional.logsigmoid(logits)
-        log_pt = torch.nn.functional.logsigmoid(t_logits_all[0, idx_t])
-        kl_stu = torch.exp(log_pt) * (log_pt - log_p) + torch.exp(log_p) * (log_p - log_pt)
+        kl_stu = _bernoulli_symmetric_kl(logits, t_logits_all[0, idx_t])
         bce_per = torch.nn.functional.binary_cross_entropy_with_logits(logits, y, reduction="none")
         per_sample_losses = bce_per + self.kl_beta * kl_stu
 

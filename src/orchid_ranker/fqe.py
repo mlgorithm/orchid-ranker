@@ -73,7 +73,18 @@ class TabularFQE:
         target_start_action_col: Optional[str] = None,
         done_col: str = "done",
     ) -> "TabularFQE":
-        """Fit Q values for a fixed target policy action per next context."""
+        """Fit Q values for a fixed target policy action per next context.
+
+        The reported ``estimated_value`` is the policy value at the start states,
+        ``V^π(s0) = Q^π(s0, π(s0))``. Supply ``target_start_action_col`` with the
+        target policy's action at each start context for an exact estimate. When
+        it is omitted, the start action defaults to the target policy's action
+        recovered from the observed ``next_context -> target_action`` pairs (NOT
+        the logged action), falling back to the logged action only for start
+        contexts whose target action is unknown. Inspect
+        ``target_start_action_supported_fraction`` to see how much of the start
+        value is backed by logged ``(context, action)`` support.
+        """
         required = {context_col, action_col, reward_col, next_context_col, target_action_col, done_col}
         if target_start_action_col is not None:
             required.add(target_start_action_col)
@@ -85,26 +96,45 @@ class TabularFQE:
         rows = []
         contexts: set[Any] = set()
         actions: set[Any] = set()
-        start_actions: list[Any] = []
+        explicit_start_actions: list[Any] = []
         logged_pairs: set[tuple[Any, Any]] = set()
+        # Deterministic target policy recovered from observed (state, π(state)) pairs: each
+        # row reports the target action at its *next* context, i.e. π evaluated at that state.
+        # We reuse it to recover the target action at *start* contexts as well.
+        policy_action_by_context: dict[Any, Any] = {}
         columns = [context_col, action_col, reward_col, next_context_col, target_action_col, done_col]
         if target_start_action_col is not None:
             columns.append(target_start_action_col)
         for values in work[columns].itertuples(index=False, name=None):
             context, action, reward, next_context, target_action, done = values[:6]
-            start_action = values[6] if target_start_action_col is not None else action
             reward_value = float(reward)
             if not np.isfinite(reward_value):
                 raise ValueError("reward values must be finite")
             done_value = bool(done)
             rows.append((context, action, reward_value, next_context, target_action, done_value))
-            start_actions.append(start_action)
+            if target_start_action_col is not None:
+                explicit_start_actions.append(values[6])
             logged_pairs.add((context, action))
             contexts.update([context, next_context])
-            actions.update([action, target_action, start_action])
+            actions.update([action, target_action])
+            policy_action_by_context.setdefault(next_context, target_action)
             self.q_values_.setdefault((context, action), 0.0)
-            self.q_values_.setdefault((context, start_action), 0.0)
             self.q_values_.setdefault((next_context, target_action), 0.0)
+
+        # Resolve the start action used to report V^π(s0) = Q^π(s0, π(s0)). Explicit column
+        # wins; otherwise use the target policy's action at the start context (NOT the logged
+        # action), falling back to the logged action only for start contexts whose target
+        # action is unknown. Defaulting to the logged action would report Q^π(s0, a_logged),
+        # which is not the target policy value when behavior and target diverge at the root.
+        start_actions: list[Any] = []
+        for idx, (context, action, *_rest) in enumerate(rows):
+            if target_start_action_col is not None:
+                start_action = explicit_start_actions[idx]
+            else:
+                start_action = policy_action_by_context.get(context, action)
+            start_actions.append(start_action)
+            actions.add(start_action)
+            self.q_values_.setdefault((context, start_action), 0.0)
 
         rng = np.random.RandomState(self.random_state)
         final_loss = 0.0
