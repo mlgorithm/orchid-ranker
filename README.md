@@ -65,7 +65,6 @@ Get up and running in under 5 minutes:
 - [Progression policy quickstart](examples/progression_policy_quickstart.py) --- reward stretch and learning progress, not just correctness
 - [pyKT bridge quickstart](examples/pykt_bridge_quickstart.py) --- export pyKT sequences and reuse pyKT prediction tables
 - [Docs quickstart](docs/quickstart.md) --- install, fit, recommend, evaluate
-- [Adaptive learning positioning](docs/adaptive-learning-positioning.md) --- what the library is for and not for
 - [Algorithm roadmap](docs/algorithm-roadmap.md) --- KT, semantic exercise recommendation, and policy-learning direction
 - [Fit offline guide](docs/guides/01-fit-offline.md) --- train on a CSV, save, evaluate
 - [Usage scenarios](docs/scenarios.md) --- practical recipes for common Orchid deployments
@@ -82,8 +81,6 @@ Go from adaptive-learning fit to monitored rollout:
 
 Understand what makes Orchid different:
 
-- [Why Orchid](docs/why-orchid.md) --- the adaptive-learning thesis, five pillars, honest comparison
-- [Competitor comparison](docs/competitors.md) --- when to use Orchid vs RecBole, Merlin, implicit, LightFM, TFRS, Gorse
 - [Benchmark credibility protocol](docs/benchmarks/credibility.md) --- one-command JSON + Markdown evidence artifact
 - [ASSISTments KT benchmark](docs/benchmarks/assistments-kt.md) --- adaptive-learning correctness and policy evidence
 - [KT policy OPE benchmark](docs/benchmarks/kt-policy-ope.md) --- evaluate KT-guided next-item policies before rollout

@@ -11,5 +11,3 @@
 - `privacy.md` – differential privacy engines and audit logging.
 - `security.md` – SBOM workflow, audit forwarding, compliance artefacts.
 - `compliance/` – data retention, incident response, FERPA/GDPR alignment.
-- `why-orchid.md` – the adaptive-learning thesis, five pillars, honest comparison.
-- `competitors.md` – where Orchid fits against KT and recommender stacks.

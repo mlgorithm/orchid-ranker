@@ -49,11 +49,8 @@ plugins:
 
 nav:
   - Home: index.md
-  - Adaptive learning fit: adaptive-learning-positioning.md
   - Algorithm roadmap: algorithm-roadmap.md
   - Literature notes: adaptive-recommender-literature.md
-  - Why Orchid: why-orchid.md
-  - Competitors: competitors.md
   - Usage scenarios: scenarios.md
   - Use-case examples: examples.md
   - Core vs. specialty: core-vs-specialty.md

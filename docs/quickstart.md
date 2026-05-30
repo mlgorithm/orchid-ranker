@@ -73,7 +73,6 @@ calibration, chronological splits, and OPE from logged decisions. Start with
 
 ## Next Steps
 
-- Read `docs/adaptive-learning-positioning.md` to understand the business fit.
 - Browse `docs/overview.md` for module map.
 - Browse `docs/scenarios.md` for practical deployment recipes.
 - Browse `docs/examples.md` for domain examples that map APIs to product use cases.

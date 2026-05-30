@@ -55,7 +55,6 @@ recommender.observe(user_id=1, item_id=ranked[0].item_id, correct=True)
 
 ## Next Steps
 
-- [**Adaptive learning positioning**](adaptive-learning-positioning.md) - what Orchid is for, who it serves, and what it should not claim
 - [**Quickstart**](quickstart.md) - install, fit, recommend, evaluate
 - [**Algorithm roadmap**](algorithm-roadmap.md) - modern KT, semantic exercise recommendation, and policy-learning direction
 - [**Guide 1: Fit offline**](guides/01-fit-offline.md) - adaptive-learning fit workflow
@@ -64,8 +63,6 @@ recommender.observe(user_id=1, item_id=ranked[0].item_id, correct=True)
 - [**Guide 3: Operate safely**](guides/03-operate-safely.md) - guardrails and fallback
 - [**Usage scenarios**](scenarios.md) - practical recipes for common deployments
 - [**Use-case examples**](examples.md) - compliance, language review, rehab, and safe rollout examples
-- [**Why Orchid**](why-orchid.md) - product thesis and evidence
-- [**Competitor comparison**](competitors.md) - when to use Orchid vs other stacks
 
 ## Features at a Glance
 
@@ -81,6 +78,6 @@ recommender.observe(user_id=1, item_id=ranked[0].item_id, correct=True)
 
 ---
 
-Start with the [adaptive learning positioning](adaptive-learning-positioning.md),
+Start with the [quickstart](quickstart.md),
 then run the
 [adaptive learning quickstart](https://github.com/mlgorithm/orchid-ranker/blob/main/examples/adaptive_learning_quickstart.py).
