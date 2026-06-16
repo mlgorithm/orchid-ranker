@@ -24,22 +24,24 @@ from orchid_ranker.safety.safeswitch_dr import SafeSwitchDR, SafeSwitchDRConfig
 
 
 class TestDRDeltaTFormula:
-    """Test anytime-valid delta_t formula: delta_t = delta/2 for t<=1, else 6*delta/(π²*t²)."""
+    """Test anytime-valid delta_t formula: delta_t = 6*delta/(π²*t²) for all t>=1 (t clamped to >=1)."""
 
     def test_delta_t_at_t_equals_0(self):
-        """When t=0 (before first update), delta_t should be delta/2."""
+        """When t=0 (before first update), delta_t should use t clamped to 1."""
         cfg = DRCSConfig(delta=0.01)
         dr = DRConfidenceSequence(cfg)
         delta_t = dr._delta_t()
-        assert pytest.approx(delta_t, rel=1e-10) == 0.01 / 2.0
+        expected = 6.0 * 0.01 / (math.pi**2 * 1.0)
+        assert pytest.approx(delta_t, rel=1e-10) == expected
 
     def test_delta_t_at_t_equals_1(self):
-        """When t=1 (after first update), delta_t should be delta/2."""
+        """When t=1 (after first update), delta_t should be 6*delta/(π²*1)."""
         cfg = DRCSConfig(delta=0.01)
         dr = DRConfidenceSequence(cfg)
         dr.update(True, 0.5, 0.5, 0.3, 0.5)
         delta_t = dr._delta_t()
-        assert pytest.approx(delta_t, rel=1e-10) == 0.01 / 2.0
+        expected = 6.0 * 0.01 / (math.pi**2 * 1.0)
+        assert pytest.approx(delta_t, rel=1e-10) == expected
 
     def test_delta_t_at_t_equals_2(self):
         """When t=2, delta_t should be 6*delta/(π²*t²)."""
@@ -460,7 +462,7 @@ class TestStepUpStepDown:
         assert pytest.approx(gate.p, rel=1e-10) == expected_p
 
     def test_step_down_when_dr_lcb_non_positive(self):
-        """p should be multiplied by step_down when dr.lcb() <= 0."""
+        """p should be reduced additively by step_down when dr.lcb() <= 0."""
         cfg = SafeSwitchDRConfig(
             delta=0.05,
             p_min=0.1,
@@ -489,8 +491,42 @@ class TestStepUpStepDown:
         gate.dr = MockDR()
         gate.update(True, 0.5, 1.0, 0.5, 0.3, gate.p)
 
-        expected_p = max(cfg.p_min, initial_p * cfg.step_down)
+        expected_p = max(cfg.p_min, initial_p - cfg.step_down)
         assert pytest.approx(gate.p, rel=1e-10) == expected_p
+
+    def test_step_down_is_additive_not_multiplicative(self):
+        """Discriminating test: additive, multiplicative, and clamp all differ.
+
+        With p=0.9, step_down=0.5, p_min=0.1:
+        - additive:       0.9 - 0.5 = 0.4  (correct)
+        - multiplicative: 0.9 * 0.5 = 0.45 (would fail)
+        - clamp to p_min: 0.1            (would fail)
+        """
+        cfg = SafeSwitchDRConfig(
+            delta=0.05,
+            p_min=0.1,
+            p_max=1.0,
+            step_up=0.05,
+            step_down=0.5,
+            accept_floor=0.0,
+        )
+        gate = SafeSwitchDR(cfg)
+        gate.p = 0.9
+
+        class MockDR:
+            def lcb(self):
+                return -0.2
+
+            def update(self, *args, **kwargs):
+                pass
+
+            def summary(self):
+                return {"t": 1, "mean": -0.2, "rad": 0.3, "lcb": -0.2}
+
+        gate.dr = MockDR()
+        gate.update(True, 0.5, 1.0, 0.5, 0.3, gate.p)
+
+        assert gate.p == pytest.approx(0.4)
 
     def test_step_down_respects_p_min(self):
         """p should never go below p_min after step-down."""
@@ -577,7 +613,7 @@ class TestBoundaryBehavior:
         gate.dr = MockDR()
         gate.update(True, 0.5, 1.0, 0.5, 0.3, gate.p)
 
-        # 0.15 * 0.5 = 0.075 < p_min=0.1, should be clamped
+        # 0.15 - 0.5 = -0.35 < p_min=0.1, should be clamped
         assert pytest.approx(gate.p, rel=1e-10) == cfg.p_min
 
     def test_guardrail_can_set_p_to_zero(self):

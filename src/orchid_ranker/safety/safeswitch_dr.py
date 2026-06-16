@@ -83,10 +83,14 @@ class SafeSwitchDR:
         self._last_decision = (True, cfg.p_min)
 
     def _delta_t(self) -> float:
-        """Compute anytime-valid failure probability for current time step."""
-        if self.t <= 1:
-            return self.cfg.delta / 2.0
-        return 6.0 * self.cfg.delta / (math.pi**2 * (self.t**2))
+        """Compute anytime-valid failure probability for current time step.
+
+        Uses the normalized schedule 6*delta/(pi^2 * t^2) for all t>=1, whose
+        tail sum over t>=1 equals delta exactly, so the union bound does not
+        over-spend the failure budget.
+        """
+        n = max(self.t, 1)
+        return 6.0 * self.cfg.delta / (math.pi**2 * (n**2))
 
     def _acc_lcb(self) -> float:
         """Compute lower confidence bound on acceptance rate."""
@@ -113,7 +117,7 @@ class SafeSwitchDR:
             if self._state == self._STATE_HALTED:
                 self._last_decision = (False, 0.0)
                 return self._last_decision
-            if self.t >= 5 and self.acc_mean < self.cfg.accept_floor and self._acc_lcb() < self.cfg.accept_floor:
+            if self.cfg.accept_floor > 0.0 and self.t >= 5 and self._acc_lcb() < self.cfg.accept_floor:
                 self.p = 0.0
                 self._state = self._STATE_HALTED
                 self._last_decision = (False, 0.0)
@@ -183,7 +187,7 @@ class SafeSwitchDR:
             if self._state == self._STATE_HALTED:
                 return
 
-            if self.t >= 5 and self.acc_mean < self.cfg.accept_floor and self._acc_lcb() < self.cfg.accept_floor:
+            if self.cfg.accept_floor > 0.0 and self.t >= 5 and self._acc_lcb() < self.cfg.accept_floor:
                 self.p = 0.0
                 self._state = self._STATE_HALTED
                 return

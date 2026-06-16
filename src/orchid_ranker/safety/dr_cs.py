@@ -55,10 +55,14 @@ class DRConfidenceSequence:
         )
 
     def _delta_t(self) -> float:
-        """Compute anytime-valid failure probability for current time step."""
-        if self.t <= 1:
-            return self.cfg.delta / 2.0
-        return 6.0 * self.cfg.delta / (math.pi**2 * (self.t**2))
+        """Compute anytime-valid failure probability for current time step.
+
+        Uses the normalized schedule 6*delta/(pi^2 * t^2) for all t>=1, whose
+        tail sum over t>=1 equals delta exactly, so the union bound does not
+        over-spend the failure budget.
+        """
+        n = max(self.t, 1)
+        return 6.0 * self.cfg.delta / (math.pi**2 * (n**2))
 
     def _radius(self) -> float:
         """Compute confidence radius from empirical variance and failure probability."""
