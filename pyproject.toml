@@ -191,10 +191,12 @@ warn_return_any = true
 warn_unused_configs = true
 ignore_missing_imports = true
 
+# NOTE: adaptive_ranker, adaptive_learning, and offline_policy are now fully
+# type-checked (removed from this ignore list). learning_policy remains ignored
+# because of genuine LSP override signatures on the policy subclasses that cannot
+# be tightened without an API/behavior change.
 [[tool.mypy.overrides]]
 module = [
-  "orchid_ranker.adaptive_learning",
-  "orchid_ranker.adaptive_ranker",
   "orchid_ranker.agents.*",
   "orchid_ranker.baselines",
   "orchid_ranker.calibration",
@@ -204,9 +206,8 @@ module = [
   "orchid_ranker.data.*",
   "orchid_ranker.delayed_gain",
   "orchid_ranker.experiments.*",
-  "orchid_ranker.learning_policy",
+  "orchid_ranker.learning_policy",  # TODO: re-enable mypy (subclass rank() override return-type variance)
   "orchid_ranker.native.fast_score",
-  "orchid_ranker.offline_policy",
   "orchid_ranker.security.audit",
   "orchid_ranker.streaming",
 ]

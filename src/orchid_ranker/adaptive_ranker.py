@@ -7,9 +7,12 @@ from typing import Any, Optional, Sequence
 import pandas as pd
 
 from .adaptive_learning import (
+    _UNSET,
     AdaptiveLearningConfig,
     AdaptiveLearningRecommendation,
     AdaptiveLearningRecommender,
+    _apply_config_alias,
+    _resolve_alias,
 )
 from .adaptive_schema import (
     LearnerEvent,
@@ -58,6 +61,9 @@ class AdaptiveRanker:
     """
 
     def __init__(self, config: Optional[AdaptiveRankerConfig] = None, **overrides: Any) -> None:
+        # Backward-compatible alias: ``tracer_model`` (the AdaptiveLearningEngine
+        # spelling) maps to ``kt_backbone``. Resolve before strict validation.
+        _apply_config_alias(overrides, "kt_backbone", "tracer_model")
         valid = {field.name for field in fields(AdaptiveRankerConfig)}
         unknown = sorted(set(overrides) - valid)
         if unknown:
@@ -189,9 +195,10 @@ class AdaptiveRanker:
 
     def recommend(
         self,
-        learner_id: Any,
+        learner_id: Any = _UNSET,
         candidate_item_ids: Optional[Sequence[Any]] = None,
         *,
+        user_id: Any = _UNSET,
         top_k: int = 10,
         mode: Optional[str] = None,
         context_hash: Optional[str] = None,
@@ -199,7 +206,12 @@ class AdaptiveRanker:
         item_query_vec: Optional[Sequence[float]] = None,
         item_query_text: Optional[str] = None,
     ) -> list[AdaptiveLearningRecommendation]:
-        """Recommend next items using exact or sketch-mode candidates."""
+        """Recommend next items using exact or sketch-mode candidates.
+
+        ``learner_id`` is the canonical name; ``user_id`` is accepted as a
+        backward-compatible alias (the AdaptiveLearningEngine spelling).
+        """
+        learner_id = _resolve_alias("learner_id", learner_id, "user_id", user_id)
         self._require_fitted()
         assert self.recommender_ is not None
         active_mode = self.config.mode if mode is None else mode
@@ -254,9 +266,17 @@ class AdaptiveRanker:
         return recs[: min(int(top_k), len(recs))]
 
     def observe(self, event: LearnerEvent | None = None, **kwargs: Any) -> Any:
-        """Observe one learner event and update live state."""
+        """Observe one learner event and update live state.
+
+        Accepts a :class:`LearnerEvent` or its fields as keywords. ``user_id`` is
+        accepted as a backward-compatible alias for ``learner_id``.
+        """
         self._require_fitted()
         assert self.recommender_ is not None
+        if "user_id" in kwargs:
+            if "learner_id" in kwargs:
+                raise TypeError("Got both 'learner_id' and its alias 'user_id'; pass only one")
+            kwargs["learner_id"] = kwargs.pop("user_id")
         learner_event = event or LearnerEvent(**kwargs)
         return self.recommender_.observe(
             learner_event.learner_id,
@@ -449,7 +469,9 @@ def _cold_start_correctness_prior(*, competence: Optional[float], difficulty: Op
     if competence is None and difficulty is None:
         return 0.5
     if competence is None:
-        return _clamp01(1.0 - float(difficulty))
+        # difficulty is non-None here (both-None handled above).
+        assert difficulty is not None
+        return _clamp01(1.0 - difficulty)
     if difficulty is None:
-        return _clamp01(float(competence))
-    return _clamp01(0.5 + 0.5 * (float(competence) - float(difficulty)))
+        return _clamp01(competence)
+    return _clamp01(0.5 + 0.5 * (competence - difficulty))

@@ -44,7 +44,7 @@ Orchid is a recommendation toolkit designed around five pillars:
 
 **Safety-native.** A progression guardrail monitors rolling metrics -- progression gain, category coverage, sequence adherence, and stretch fit -- and halts the adaptive policy when any of them drop below configured floors. This is distinct from generic A/B test guardrails that gate on CTR or revenue. A ranker that keeps users clicking but stops them from progressing should be halted, and Orchid does this automatically.
 
-**Privacy-native.** Differential privacy is a first-class concern, not a retrofit. The toolkit includes a DP accountant and configurable noise injection for training and serving.
+**Privacy-aware.** The toolkit includes a DP accountant and an opt-in DP-SGD training pathway on the experimental two-tower agent (`TwoTowerRecommender`), plus audit-logging and RBAC primitives you wire into your own service. Note that the flagship `AdaptiveRanker`/`AdaptiveLearningEngine` serving path does not itself apply differential privacy today.
 
 ### The technical pipeline
 

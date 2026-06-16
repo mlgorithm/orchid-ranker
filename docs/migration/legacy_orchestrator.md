@@ -1,6 +1,6 @@
 # Migrating from Legacy Orchestrator
 
-The `orchid_ranker.contrib.legacy_orchestrator` module is deprecated as of v0.3.0 and will be removed in v0.5.0. This guide walks you through migrating to the supported `MultiUserOrchestrator` API.
+The `orchid_ranker.contrib.legacy_orchestrator` module is deprecated as of v0.3.0 and will be removed in v1.0. This guide walks you through migrating to the supported `MultiUserOrchestrator` API.
 
 ## What changed
 

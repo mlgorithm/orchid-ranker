@@ -16,7 +16,7 @@ the next click. Unlike generic recommender systems, it ships with:
 - **Live adaptation** through `observe()` after each learner outcome
 - **Offline policy evaluation** through IPS, SNIPS, and doubly robust estimates
 - **Safety guardrails** that can fall back to a reviewed learning policy
-- **Privacy and audit hooks** for regulated deployments
+- **Audit and RBAC primitives** (`AuditLogger`, `AccessControl`) you wire into your own service for regulated deployments; opt-in DP-SGD is available on the experimental two-tower agent path, not the flagship `AdaptiveLearningEngine`
 
 ## Quick Start
 

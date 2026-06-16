@@ -196,11 +196,6 @@ def __getattr__(name: str):
         import warnings
         module_path, attr_name = _DEPRECATED_ALIASES[name]
 
-        # torch-dependent deprecated names need torch check
-        if name in _TORCH_LAZY:
-            from ._compat import require_torch
-            require_torch(f"orchid_ranker.{name}")
-
         module = importlib.import_module(module_path, __name__)
         value = getattr(module, attr_name)
         warnings.warn(

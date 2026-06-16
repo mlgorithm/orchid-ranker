@@ -1,6 +1,13 @@
 # Differential Privacy Notes
 
-Orchid Ranker ships with an opt-in DP-SGD training pathway. DP is disabled by
+> **Scope:** DP-SGD applies only to the experimental two-tower agent path
+> (`orchid_ranker.agents.two_tower.TwoTowerRecommender`, which is not part of the
+> public `__all__`). The flagship `AdaptiveRanker` and `AdaptiveLearningEngine`
+> APIs do **not** currently apply differential privacy to their updates. If you
+> need DP today, use the two-tower path described below.
+
+Orchid Ranker ships with an opt-in DP-SGD training pathway on the two-tower
+agent. DP is disabled by
 default; pass `dp_cfg={"enabled": True, ...}` when you want private updates.
 When `dp_cfg` includes `"engine": "per_sample"` (the default after opt-in),
 updates to the `TwoTowerRecommender` perform per-example gradient clipping and

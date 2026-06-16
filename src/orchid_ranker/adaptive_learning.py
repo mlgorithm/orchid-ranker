@@ -30,6 +30,38 @@ __all__ = [
 ]
 
 
+class _Unset:
+    """Sentinel for distinguishing "argument omitted" from an explicit ``None``."""
+
+
+_UNSET: Any = _Unset()
+
+
+def _resolve_alias(primary_name: str, primary: Any, alias_name: str, alias: Any) -> Any:
+    """Resolve a positional argument that also accepts a backward-compatible alias.
+
+    Exactly one of ``primary``/``alias`` must be supplied (i.e. not ``_UNSET``).
+    Returns the supplied value. Raises ``TypeError`` if both or neither is given.
+    """
+    primary_given = primary is not _UNSET
+    alias_given = alias is not _UNSET
+    if primary_given and alias_given:
+        raise TypeError(f"Got both {primary_name!r} and its alias {alias_name!r}; pass only one")
+    if primary_given:
+        return primary
+    if alias_given:
+        return alias
+    raise TypeError(f"Missing required argument {primary_name!r} (or alias {alias_name!r})")
+
+
+def _apply_config_alias(overrides: Dict[str, Any], primary: str, alias: str) -> None:
+    """Translate a config-kwarg ``alias`` into ``primary`` in-place before validation."""
+    if alias in overrides:
+        if primary in overrides:
+            raise TypeError(f"Got both {primary!r} and its alias {alias!r}; pass only one")
+        overrides[primary] = overrides.pop(alias)
+
+
 @dataclass(frozen=True)
 class AdaptiveLearningConfig:
     """Configuration for :class:`AdaptiveLearningRecommender`."""
@@ -98,6 +130,9 @@ class AdaptiveLearningRecommender:
     """
 
     def __init__(self, config: Optional[AdaptiveLearningConfig] = None, **overrides: Any) -> None:
+        # Backward-compatible alias: ``kt_backbone`` (the AdaptiveRanker spelling)
+        # maps to ``tracer_model``. Resolve before strict field validation.
+        _apply_config_alias(overrides, "tracer_model", "kt_backbone")
         valid = {field.name for field in fields(AdaptiveLearningConfig)}
         unknown = sorted(set(overrides) - valid)
         if unknown:
@@ -286,14 +321,20 @@ class AdaptiveLearningRecommender:
 
     def rank(
         self,
-        user_id: Any,
-        candidate_item_ids: Sequence[Any],
+        user_id: Any = _UNSET,
+        candidate_item_ids: Optional[Sequence[Any]] = None,
         *,
+        learner_id: Any = _UNSET,
         top_k: int = 5,
         enforce_prerequisites: Optional[bool] = None,
         allow_prerequisite_fallback: Optional[bool] = None,
     ) -> list[AdaptiveLearningRecommendation]:
-        """Rank candidate items for the next adaptive-learning action."""
+        """Rank candidate items for the next adaptive-learning action.
+
+        ``user_id`` is the canonical name; ``learner_id`` is accepted as a
+        backward-compatible alias (the AdaptiveRanker spelling).
+        """
+        user_id = _resolve_alias("user_id", user_id, "learner_id", learner_id)
         self._require_fitted()
         if top_k <= 0 or not candidate_item_ids:
             return []
@@ -320,8 +361,21 @@ class AdaptiveLearningRecommender:
 
     recommend = rank
 
-    def observe(self, user_id: Any, item_id: Any, correct: Any, *, timestamp: Optional[Any] = None) -> Any:
-        """Observe one live outcome and update learner state."""
+    def observe(
+        self,
+        user_id: Any = _UNSET,
+        item_id: Any = None,
+        correct: Any = None,
+        *,
+        learner_id: Any = _UNSET,
+        timestamp: Optional[Any] = None,
+    ) -> Any:
+        """Observe one live outcome and update learner state.
+
+        ``user_id`` is the canonical name; ``learner_id`` is accepted as a
+        backward-compatible alias (the AdaptiveRanker spelling).
+        """
+        user_id = _resolve_alias("user_id", user_id, "learner_id", learner_id)
         self._require_fitted()
         if item_id not in set(self.item_ids_):
             raise KeyError(f"Unknown item_id={item_id!r}")
@@ -590,7 +644,7 @@ class AdaptiveLearningRecommender:
     def _normalize_recommendation(self, user_id: Any, rec: Any) -> AdaptiveLearningRecommendation:
         item_id = rec.item_id
         concept = getattr(rec, "concept_id", self.concept_by_item_.get(item_id))
-        reward = getattr(rec, "reward", None)
+        reward: Any = getattr(rec, "reward", None)
         reward_breakdown = reward.to_dict() if hasattr(reward, "to_dict") else None
         return AdaptiveLearningRecommendation(
             item_id=item_id,
