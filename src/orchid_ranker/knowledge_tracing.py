@@ -604,6 +604,15 @@ class ForgettingCurve:
         If you measure time in hours, it means ~37% after 1 hour. Range: (0, inf).
     strength_gain_on_review : float, default=0.5
         Strength increase per review (same units as initial_strength). Range: (0, inf).
+    time_unit_seconds : float, default=86400.0
+        Number of seconds in one unit of ``strength``. ``retention_at`` and
+        ``review`` are unit-agnostic, but ``should_review`` and ``__repr__``
+        derive elapsed time from wall-clock ``datetime`` values, which are in
+        seconds. This factor converts that elapsed wall-clock time into the same
+        unit as ``strength`` before computing retention. The default of 86400
+        (seconds per day) means ``strength`` is measured in days. Use 3600 for
+        hours, or 1.0 if ``strength`` is itself expressed in seconds. Range:
+        (0, inf).
 
     Attributes
     ----------
@@ -643,6 +652,7 @@ class ForgettingCurve:
         self,
         initial_strength: float = 1.0,
         strength_gain_on_review: float = 0.5,
+        time_unit_seconds: float = 86400.0,
     ):
         """Initialize ForgettingCurve.
 
@@ -652,6 +662,10 @@ class ForgettingCurve:
             Initial memory strength.
         strength_gain_on_review : float, default=0.5
             Strength increase per review.
+        time_unit_seconds : float, default=86400.0
+            Seconds per unit of ``strength``, used to convert wall-clock elapsed
+            time into ``strength`` units in ``should_review`` and ``__repr__``.
+            Defaults to 86400 (days). Use 3600 for hours or 1.0 for seconds.
 
         Raises
         ------
@@ -664,9 +678,14 @@ class ForgettingCurve:
             raise ValueError(
                 f"strength_gain_on_review must be positive, got {strength_gain_on_review}"
             )
+        if time_unit_seconds <= 0:
+            raise ValueError(
+                f"time_unit_seconds must be positive, got {time_unit_seconds}"
+            )
 
         self.strength = initial_strength
         self.strength_gain_on_review = strength_gain_on_review
+        self.time_unit_seconds = float(time_unit_seconds)
         self.last_review_time: Optional[datetime] = None
 
     def retention_at(self, time_since_last_review: float) -> float:
@@ -750,6 +769,11 @@ class ForgettingCurve:
         - 0.8 (80%): Conservative review schedule
         - 0.9 (90%): Very conservative schedule
 
+        Wall-clock elapsed time (seconds) since ``last_review_time`` is converted
+        into ``strength`` units by dividing by ``time_unit_seconds`` before
+        computing retention, so day-scale ``strength`` is compared against
+        day-scale elapsed time.
+
         Examples
         --------
         >>> curve = ForgettingCurve()
@@ -762,15 +786,23 @@ class ForgettingCurve:
         if self.last_review_time is None:
             return True
 
-        elapsed = (datetime.now() - self.last_review_time).total_seconds()
+        elapsed_seconds = (datetime.now() - self.last_review_time).total_seconds()
+        elapsed = elapsed_seconds / self.time_unit_seconds
         retention = self.retention_at(elapsed)
         return retention < threshold
 
     def __repr__(self) -> str:
-        """Return string representation."""
-        retention_now = self.retention_at(0) if self.last_review_time is None else self.retention_at(
-            (datetime.now() - self.last_review_time).total_seconds()
-        )
+        """Return string representation.
+
+        Elapsed wall-clock time since ``last_review_time`` is converted into
+        ``strength`` units via ``time_unit_seconds`` before computing the
+        displayed retention (see :meth:`should_review`).
+        """
+        if self.last_review_time is None:
+            retention_now = self.retention_at(0)
+        else:
+            elapsed_seconds = (datetime.now() - self.last_review_time).total_seconds()
+            retention_now = self.retention_at(elapsed_seconds / self.time_unit_seconds)
         return (
             f"ForgettingCurve("
             f"strength={self.strength:.2f}, "

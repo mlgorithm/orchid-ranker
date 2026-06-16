@@ -1,11 +1,20 @@
 """Tests for the experimental SAKT-style knowledge tracer."""
 from __future__ import annotations
 
+import warnings
+
 import numpy as np
 import pandas as pd
 import pytest
 
-from orchid_ranker.kt import AKTTracer, SAINTPlusTracer, SAINTTracer, SAKTTracer, build_sakt_examples
+from orchid_ranker.kt import (
+    AKTTracer,
+    DKTTracer,
+    SAINTPlusTracer,
+    SAINTTracer,
+    SAKTTracer,
+    build_sakt_examples,
+)
 
 
 def _small_learning_events() -> pd.DataFrame:
@@ -210,7 +219,12 @@ def test_saint_tracers_fit_predict_and_update(tracer_cls):
     ).fit(_small_learning_events(), timestamp_col="timestamp")
 
     before = tracer.state_vector("live-saint", [20, 30])
-    length = tracer.observe("live-saint", 10, correct=True)
+    with warnings.catch_warnings():
+        # SAINTPlusTracer fit with timestamps intentionally warns when observe()
+        # is called without one (see FIX 3). That behavior is exercised directly
+        # elsewhere; here we only care about prediction/update mechanics.
+        warnings.simplefilter("ignore", UserWarning)
+        length = tracer.observe("live-saint", 10, correct=True)
     after = tracer.state_vector("live-saint", [20, 30])
 
     assert tracer.is_fitted
@@ -218,3 +232,93 @@ def test_saint_tracers_fit_predict_and_update(tracer_cls):
     assert length == 1
     assert before.shape == after.shape == (2,)
     assert not np.allclose(before, after)
+
+
+def test_dkt_short_history_prediction_depends_on_last_response():
+    """Regression test for DKT reading the wrong (left-padded) hidden state.
+
+    Sequences are left-padded, so the most recent interaction lives at the final
+    timestep. The old code read ``outputs[:, n-1]`` where ``n`` is the history
+    length, which lands in the leading padding region for histories shorter than
+    ``max_seq_len`` -- so the latest response had no effect on the prediction.
+    With ``max_seq_len`` deliberately larger than the live history, flipping the
+    most recent response must change the predicted probability.
+    """
+    tracer = DKTTracer(
+        max_seq_len=8,
+        d_model=16,
+        epochs=3,
+        batch_size=4,
+        random_state=17,
+        device="cpu",
+    ).fit(_small_learning_events(), timestamp_col="timestamp")
+
+    # Two live users with identical short histories except the final response.
+    # The history (length 2) is far shorter than max_seq_len (8), so the buggy
+    # indexing would read padding and ignore the last interaction entirely.
+    for user_id in ("dkt-pos", "dkt-neg"):
+        tracer.observe(user_id, 10, correct=True)
+    tracer.observe("dkt-pos", 20, correct=True)
+    tracer.observe("dkt-neg", 20, correct=False)
+
+    prob_pos = tracer.predict_correct("dkt-pos", 30)
+    prob_neg = tracer.predict_correct("dkt-neg", 30)
+
+    assert 0.0 <= prob_pos <= 1.0
+    assert 0.0 <= prob_neg <= 1.0
+    # The only difference is the most recent response; it must influence the
+    # prediction. This assertion fails with the pre-fix padding-region indexing.
+    assert abs(prob_pos - prob_neg) > 1e-4
+
+
+def _fit_saintplus_with_timestamps(random_state: int = 41) -> SAINTPlusTracer:
+    return SAINTPlusTracer(
+        max_seq_len=4,
+        d_model=16,
+        n_heads=2,
+        epochs=1,
+        batch_size=4,
+        random_state=random_state,
+        device="cpu",
+    ).fit(_small_learning_events(), timestamp_col="timestamp")
+
+
+def test_saintplus_observe_without_timestamp_warns_when_fit_with_timestamps():
+    """Regression: warn that synthesized time gaps may not match training."""
+    tracer = _fit_saintplus_with_timestamps()
+
+    with pytest.warns(UserWarning, match="timestamp"):
+        tracer.observe("live-user", 10, correct=True)
+
+    # The warning fires at most once per instance.
+    with warnings.catch_warnings():
+        warnings.simplefilter("error")
+        # No exception means no warning was raised on the second call.
+        tracer.observe("live-user", 20, correct=False)
+
+
+def test_saintplus_observe_with_timestamp_does_not_warn():
+    """Passing a real timestamp keeps temporal features consistent: no warning."""
+    tracer = _fit_saintplus_with_timestamps(random_state=42)
+
+    with warnings.catch_warnings():
+        warnings.simplefilter("error")
+        tracer.observe("live-user", 10, correct=True, timestamp=5)
+        tracer.observe("live-user", 20, correct=False, timestamp=9)
+
+
+def test_saintplus_observe_without_timestamps_when_fit_without_timestamps_is_silent():
+    """If fit without timestamps, the missing-timestamp warning must not fire."""
+    tracer = SAINTPlusTracer(
+        max_seq_len=4,
+        d_model=16,
+        n_heads=2,
+        epochs=1,
+        batch_size=4,
+        random_state=43,
+        device="cpu",
+    ).fit(_small_learning_events())  # no timestamp_col
+
+    with warnings.catch_warnings():
+        warnings.simplefilter("error")
+        tracer.observe("live-user", 10, correct=True)

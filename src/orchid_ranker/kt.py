@@ -12,6 +12,7 @@ The API is experimental. Import from this submodule directly:
 """
 from __future__ import annotations
 
+import warnings
 from dataclasses import dataclass
 from typing import Any, Dict, List, Optional, Sequence, Tuple, cast
 
@@ -466,9 +467,10 @@ class _DKTModel(nn.Module):
         interaction_codes = interaction_codes.masked_fill(pad_mask, 0)
         x = self.interaction_emb(interaction_codes)
         outputs, _ = self.gru(x)
-        lengths = (~pad_mask).sum(dim=1).clamp(min=1) - 1
-        batch_index = torch.arange(history_items.shape[0], device=history_items.device)
-        context = outputs[batch_index, lengths]
+        # Sequences are LEFT-padded (see ``_encode_examples`` / ``_history_tensors``),
+        # so the most recent real interaction is always the final timestep. The GRU
+        # is ``batch_first=True``, so the last hidden state is ``outputs[:, -1, :]``.
+        context = outputs[:, -1, :]
         query = self.query_item_emb(query_items)
         return cast(torch.Tensor, self.out(torch.cat([context, query], dim=-1)).squeeze(-1))
 
@@ -583,6 +585,10 @@ class SAKTTracer:
         self._idx2item: Dict[int, Any] = {}
         self._histories: Dict[Any, List[Tuple[int, int]]] = {}
         self._history_times: Dict[Any, List[float]] = {}
+        # Records whether ``fit`` was given a ``timestamp_col``. Used by
+        # timestamp-aware subclasses (e.g. :class:`SAINTPlusTracer`) to warn when
+        # ``observe`` is later called without a timestamp at serving time.
+        self._fit_used_timestamps: bool = False
 
     @property
     def is_fitted(self) -> bool:
@@ -605,6 +611,8 @@ class SAKTTracer:
         if self.random_state is not None:
             torch.manual_seed(int(self.random_state))
             np.random.seed(int(self.random_state))
+
+        self._fit_used_timestamps = timestamp_col is not None
 
         examples = build_sakt_examples(
             interactions,
@@ -940,9 +948,44 @@ class SAINTPlusTracer(SAINTTracer):
             random_state=random_state,
         )
         self.num_time_buckets = int(num_time_buckets)
+        # Emit the missing-timestamp serving warning at most once per instance.
+        self._warned_missing_observe_timestamp: bool = False
 
     def observe(self, user_id: Any, item_id: Any, correct: Any, timestamp: Optional[Any] = None) -> int:
-        """Append one live outcome and preserve timestamp features when present."""
+        """Append one live outcome and preserve timestamp features when present.
+
+        Parameters
+        ----------
+        timestamp : optional
+            Wall-clock time of this interaction. When omitted, the base tracer
+            synthesizes a placeholder gap of ``+1.0`` time unit from the previous
+            interaction.
+
+        Notes
+        -----
+        If the tracer was fit **with** a ``timestamp_col`` but ``observe`` is
+        called **without** a ``timestamp``, the synthesized placeholder gap will
+        not match the temporal distribution seen during training, so the live
+        elapsed-time and lag-time features (and therefore predictions) may be
+        inaccurate. A :class:`UserWarning` is emitted once per tracer instance in
+        that case. The numeric fallback is unchanged; pass ``timestamp`` to
+        supply a real value and silence the warning.
+        """
+        if (
+            timestamp is None
+            and self._fit_used_timestamps
+            and not self._warned_missing_observe_timestamp
+        ):
+            warnings.warn(
+                "SAINTPlusTracer was fit with a timestamp_col, but observe() was "
+                "called without a timestamp. A placeholder time gap is being used, "
+                "so the live elapsed/lag temporal features may not match training "
+                "and predictions may be inaccurate. Pass timestamp=... to observe() "
+                "to provide a real value.",
+                UserWarning,
+                stacklevel=2,
+            )
+            self._warned_missing_observe_timestamp = True
         length = super().observe(user_id, item_id, correct)
         if timestamp is not None:
             self._history_times.setdefault(user_id, [])[-1] = _time_value(timestamp)

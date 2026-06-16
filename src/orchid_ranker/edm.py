@@ -31,6 +31,24 @@ class EDMTrainingReport:
         return asdict(self)
 
 
+def _as_int32_csr(matrix: Any) -> Any:
+    """Return a CSR copy of ``matrix`` with 32-bit ``indices``/``indptr``.
+
+    scikit-learn's ``liblinear`` solver (and ``check_array`` with
+    ``accept_large_sparse=False``) rejects sparse matrices whose index arrays use
+    64-bit integers, which ``DictVectorizer`` can emit on some platforms / newer
+    SciPy builds. Casting the index arrays to ``int32`` keeps the data identical
+    while satisfying that constraint. This is a no-op when indices are already
+    32-bit.
+    """
+    csr = matrix.tocsr()
+    if csr.indices.dtype != np.int32:
+        csr.indices = csr.indices.astype(np.int32, copy=False)
+    if csr.indptr.dtype != np.int32:
+        csr.indptr = csr.indptr.astype(np.int32, copy=False)
+    return csr
+
+
 class PFATracer:
     """Performance Factors Analysis baseline.
 
@@ -108,7 +126,7 @@ class PFATracer:
         if fallback_only:
             self.model_ = None
         else:
-            X = self.vectorizer_.fit_transform(features)
+            X = _as_int32_csr(self.vectorizer_.fit_transform(features))
             self.model_ = LogisticRegression(C=self.C, max_iter=self.max_iter, solver="liblinear").fit(X, y)
 
         self.report_ = EDMTrainingReport(
@@ -134,7 +152,7 @@ class PFATracer:
         ]
         if self.model_ is None or self.vectorizer_ is None:
             return {item_id: self.global_prior_ for item_id in item_ids}
-        X = self.vectorizer_.transform(features)
+        X = _as_int32_csr(self.vectorizer_.transform(features))
         probs = self.model_.predict_proba(X)[:, 1]
         return {item_id: float(np.clip(prob, 0.0, 1.0)) for item_id, prob in zip(item_ids, probs)}
 

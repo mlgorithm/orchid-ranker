@@ -319,8 +319,10 @@ class TestForgettingCurve:
         assert curve.should_review(threshold=0.5) is False
 
     def test_should_review_with_elapsed_time(self):
-        """Test should_review based on elapsed time."""
-        curve = ForgettingCurve(initial_strength=1.0)
+        """Test should_review based on elapsed time (seconds-scale strength)."""
+        # time_unit_seconds=1.0 makes strength seconds-scale so 2s elapsed maps
+        # to t=2 in retention units (matches this test's original intent).
+        curve = ForgettingCurve(initial_strength=1.0, time_unit_seconds=1.0)
         # Set review time to 2 seconds ago
         curve.last_review_time = datetime.now() - timedelta(seconds=2)
         # With threshold=0.5 and strength=1.0, after 1 second retention~0.37
@@ -329,8 +331,8 @@ class TestForgettingCurve:
         assert result is True
 
     def test_should_review_threshold_boundary(self):
-        """Test should_review at threshold boundary."""
-        curve = ForgettingCurve(initial_strength=2.0)
+        """Test should_review at threshold boundary (seconds-scale strength)."""
+        curve = ForgettingCurve(initial_strength=2.0, time_unit_seconds=1.0)
         curve.review()
         # With strength=2, retention after 1.4 seconds is ~0.5
         curve.last_review_time = datetime.now() - timedelta(seconds=1.4)
@@ -338,12 +340,61 @@ class TestForgettingCurve:
         result = curve.should_review(threshold=0.5)
         assert isinstance(result, bool)
 
+    def test_should_review_uses_day_scale_time_unit_by_default(self):
+        """Regression: day-scale strength must not trigger review after seconds.
+
+        Previously ``should_review`` fed raw elapsed *seconds* into
+        ``retention_at`` regardless of the strength unit. With day-scale strength
+        that made any real elapsed time collapse retention to ~0 and always
+        recommend a review. The default ``time_unit_seconds=86400`` now converts
+        elapsed seconds to days first.
+        """
+        curve = ForgettingCurve(initial_strength=5.0)  # 5 days
+        curve.review()  # strength now 5.5 days, last_review_time = now
+
+        # A few seconds of real elapsed time is a tiny fraction of a day, so
+        # retention stays near 1.0 and no review should be recommended. The old
+        # seconds-based code would have computed retention ~= exp(-3/5.5) ~ 0.58
+        # and, for a tighter threshold, wrongly demanded a review.
+        curve.last_review_time = datetime.now() - timedelta(seconds=3)
+        assert curve.should_review(threshold=0.9) is False
+
+        # Across multiple days the same curve does drop below threshold.
+        curve.last_review_time = datetime.now() - timedelta(days=10)
+        assert curve.should_review(threshold=0.5) is True
+
+    def test_should_review_honors_custom_time_unit_seconds(self):
+        """An hour-scale unit converts elapsed seconds into hours."""
+        curve = ForgettingCurve(initial_strength=1.0, time_unit_seconds=3600.0)
+        curve.last_review_time = datetime.now() - timedelta(hours=2)
+        # 2 hours / strength(1 hour) -> retention ~= exp(-2) ~ 0.135 < 0.5
+        assert curve.should_review(threshold=0.5) is True
+        # Only a few seconds elapsed -> still well retained on the hour scale.
+        curve.last_review_time = datetime.now() - timedelta(seconds=5)
+        assert curve.should_review(threshold=0.5) is False
+
+    def test_init_rejects_non_positive_time_unit(self):
+        """time_unit_seconds must be positive."""
+        try:
+            ForgettingCurve(time_unit_seconds=0.0)
+        except ValueError:
+            pass
+        else:
+            raise AssertionError("expected ValueError for time_unit_seconds=0.0")
+
     def test_repr_shows_state(self):
         """Test string representation."""
         curve = ForgettingCurve(initial_strength=2.0)
         repr_str = repr(curve)
         assert 'ForgettingCurve' in repr_str
         assert 'strength' in repr_str.lower()
+
+    def test_repr_uses_day_scale_time_unit(self):
+        """__repr__ retention reflects day-scale conversion, not raw seconds."""
+        curve = ForgettingCurve(initial_strength=5.0)
+        curve.last_review_time = datetime.now() - timedelta(seconds=2)
+        # 2 seconds is negligible on a 5-day scale, so displayed retention ~1.0.
+        assert 'retention=1.00' in repr(curve) or 'retention=0.99' in repr(curve)
 
 
 def pytest_approx(value, rel=1e-6):
