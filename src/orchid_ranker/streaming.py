@@ -37,7 +37,7 @@ import logging
 import math
 import threading
 import time
-from collections import defaultdict, deque
+from collections import OrderedDict, defaultdict, deque
 from dataclasses import dataclass, field
 from typing import Deque, Dict, Iterable, List, Mapping, Optional, Sequence, Tuple
 
@@ -127,9 +127,19 @@ class BKTStateProvider:
         per-user tracker.
     default_category : str
         Key used when an interaction does not specify a category.
+    max_users : int
+        Maximum number of distinct users tracked before the least-recently-used
+        user (trackers + telemetry) is evicted. Bounds memory for long-running
+        single-process deployments; evicted users transparently cold-start on
+        next access, mirroring :class:`ShardedBKTStateProvider`'s per-shard cap.
     default_skill : str
         Deprecated alias for ``default_category``.
     """
+
+    #: Default per-process user cap when none is supplied. Sized so that a
+    #: typical 4-byte-per-float BKT footprint stays comfortably bounded while
+    #: still covering very large active populations.
+    DEFAULT_MAX_USERS: int = 1_000_000
 
     def __init__(
         self,
@@ -137,6 +147,7 @@ class BKTStateProvider:
         bkt_kwargs: Optional[dict] = None,
         default_category: Optional[str] = None,
         *,
+        max_users: Optional[int] = None,
         # Deprecated alias
         default_skill: Optional[str] = None,
     ) -> None:
@@ -162,10 +173,35 @@ class BKTStateProvider:
         self.state_dim = state_dim
         self.default_category = str(default_category)
         self._bkt_kwargs = dict(bkt_kwargs or {})
+        cap = self.DEFAULT_MAX_USERS if max_users is None else int(max_users)
+        if cap <= 0:
+            raise ValueError("max_users must be positive")
+        self._max_users = cap
         # user_id -> { category -> tracker }
         self._trackers: Dict[int, Dict[str, BayesianKnowledgeTracing]] = defaultdict(dict)
         self._telemetry: Dict[int, _UserTelemetry] = defaultdict(_UserTelemetry)
+        # LRU access order; first key is the least recently used user.
+        self._access_order: "OrderedDict[int, None]" = OrderedDict()
         self._lock = threading.RLock()
+
+    def _touch(self, uid: int) -> None:
+        """Mark *uid* as most recently accessed. Must hold ``self._lock``."""
+        if uid in self._access_order:
+            self._access_order.move_to_end(uid)
+        else:
+            self._access_order[uid] = None
+
+    def _ensure_capacity(self) -> None:
+        """Evict LRU users while over capacity. Must hold ``self._lock``."""
+        while len(self._access_order) > self._max_users:
+            evicted_uid, _ = self._access_order.popitem(last=False)
+            self._trackers.pop(evicted_uid, None)
+            self._telemetry.pop(evicted_uid, None)
+            logger.warning(
+                "BKTStateProvider at capacity (%s): evicted user %d",
+                f"{self._max_users:,}",
+                evicted_uid,
+            )
 
     @property
     def default_skill(self) -> str:
@@ -197,12 +233,15 @@ class BKTStateProvider:
                 category = skill
         category = str(category or self.default_category)
         ts = float(time.time() if timestamp is None else timestamp)
+        uid = int(user_id)
         with self._lock:
-            bkts = self._trackers[int(user_id)]
+            bkts = self._trackers[uid]
             if category not in bkts:
                 bkts[category] = BayesianKnowledgeTracing(**self._bkt_kwargs)
             p_known = bkts[category].update(bool(correct))
-            self._telemetry[int(user_id)].record(correct, ts)
+            self._telemetry[uid].record(correct, ts)
+            self._touch(uid)
+            self._ensure_capacity()
             return float(p_known)
 
     # ---- read ----
@@ -216,14 +255,15 @@ class BKTStateProvider:
     ) -> torch.Tensor:
         """Return the current user state vector for ``user_id`` as a 1 x state_dim tensor."""
         t_now = float(time.time() if now is None else now)
+        uid = int(user_id)
         with self._lock:
-            bkts = self._trackers.get(int(user_id), {})
+            bkts = self._trackers.get(uid, {})
             if bkts:
                 comp = float(np.mean([bk.p_known for bk in bkts.values()]))
             else:
                 # cold-start prior
                 comp = float(self._bkt_kwargs.get("p_init", 0.1))
-            tel = self._telemetry.get(int(user_id))
+            tel = self._telemetry.get(uid)
             if tel is None:
                 fatigue = 0.0
                 trust = 0.5
@@ -232,6 +272,10 @@ class BKTStateProvider:
                 fatigue = tel.fatigue(t_now)
                 trust = tel.trust()
                 engagement = tel.engagement(t_now)
+            # Refresh LRU recency for users that already have state so an
+            # actively-served user is not evicted by other users' writes.
+            if uid in self._access_order:
+                self._touch(uid)
         vec = torch.tensor(
             [[comp, fatigue, trust, engagement]],
             device=device,
@@ -316,12 +360,18 @@ class OnlineUserAdapter(nn.Module):
         nn.init.zeros_(self.residual.weight)
         self.residual.weight.requires_grad_(False)  # we update manually
         self._lock = threading.RLock()
+        # Bounded by construction: keys are validated to [0, num_users) in
+        # observe(), so this dict can never exceed num_users entries.
         self._update_count: Dict[int, int] = defaultdict(int)
 
     @torch.no_grad()
     def forward(self, user_ids: torch.Tensor) -> torch.Tensor:  # type: ignore[override]
         with self._lock:
-            return self.residual(user_ids.long())
+            # Return a snapshot: ``self.residual(ids)`` indexes the live embedding
+            # weight that ``observe()`` mutates in place, so without a clone a
+            # concurrent rank could read a half-written row once the lock is
+            # released. ``.clone()`` detaches the result from the live storage.
+            return self.residual(user_ids.long()).clone()
 
     @torch.no_grad()
     def observe(
@@ -635,6 +685,7 @@ class StreamingAdaptiveRanker:
         # cannot interleave -- otherwise a residual SGD step can be computed from a stale
         # embedding, or the pre/post competence pair can straddle another thread's update.
         # self._lock is reentrant (RLock), so the telemetry append below re-acquires safely.
+        monitor_payload: Optional[Dict[str, object]] = None
         with self._lock:
             # pre-competence snapshot *before* outcome tracing update -- needed for progression_gain
             pre_competence = self.state.competence(user_idx, category=category)
@@ -647,25 +698,31 @@ class StreamingAdaptiveRanker:
             )
             # 3. online residual SGD step
             residual_norm_sq = self.adapter.observe(user_idx, u_base, i_emb, y)
+            # Build the monitor payload INSIDE the lock so the (pre, post) competence
+            # pair is guaranteed adjacent: a concurrent observe() for the same user
+            # cannot slip an update between the pre-snapshot and post-update we just
+            # took. Only the (potentially slow) monitor.record() call runs outside.
+            if self.monitor is not None:
+                difficulty = None
+                if self._item_difficulties is not None and 0 <= int(item_idx) < len(self._item_difficulties):
+                    difficulty = self._item_difficulties[int(item_idx)]
+                monitor_payload = {
+                    "user_id": user_id,
+                    "item_id": item_id,
+                    "correct": correct_bool,
+                    "pre_competence": float(pre_competence),
+                    "post_competence": float(p_known),
+                    "category": str(category or "__default__"),
+                    "difficulty": difficulty,
+                    "timestamp": timestamp,
+                }
         dt_ms = 1000.0 * (time.perf_counter() - t0)
         with self._lock:
             self._observe_ms.append(dt_ms)
         # 4. fan out to the live monitor (never allowed to break the path)
-        if self.monitor is not None:
-            difficulty = None
-            if self._item_difficulties is not None and 0 <= int(item_idx) < len(self._item_difficulties):
-                difficulty = self._item_difficulties[int(item_idx)]
+        if monitor_payload is not None and self.monitor is not None:
             try:
-                self.monitor.record(  # type: ignore[attr-defined]
-                    user_id=user_id,
-                    item_id=item_id,
-                    correct=correct_bool,
-                    pre_competence=float(pre_competence),
-                    post_competence=float(p_known),
-                    category=str(category or "__default__"),
-                    difficulty=difficulty,
-                    timestamp=timestamp,
-                )
+                self.monitor.record(**monitor_payload)  # type: ignore[attr-defined]
             except Exception:  # noqa: BLE001
                 # Monitor hooks are best-effort; never crash serving.
                 pass
@@ -692,6 +749,8 @@ class StreamingAdaptiveRanker:
         if top_k <= 0:
             return []
         t0 = time.perf_counter()
+        # Pure-Python pre-processing that touches no shared mutable state can run
+        # outside the lock.
         user_idx = self._user_index(user_id)
         pairs = self._candidate_pairs(candidate_item_ids)
         if not pairs:
@@ -702,26 +761,35 @@ class StreamingAdaptiveRanker:
         uid_t = torch.tensor([int(tower_user_idx)], dtype=torch.long, device=self.device)
         adapter_uid_t = torch.tensor([int(user_idx)], dtype=torch.long, device=self.device)
         iid_t = torch.tensor(cand, dtype=torch.long, device=self.device)
-        sv = self.state.state_vec(user_idx, device=self.device)
-        x_u = self.user_features[uid_t]
 
-        # Base tower logits [1, K]
-        logits = self.tower.infer(
-            user_vec=x_u,
-            item_matrix=self.item_features,
-            user_ids=uid_t,
-            item_ids=iid_t,
-            state_vec=sv,
-        ).view(-1)
+        # Serialize everything that reads shared state (tower forward, BKT state,
+        # residual adapter) against observe(), which mutates that same state under
+        # the same RLock on a background ingestor thread. Without this, rank() can
+        # read a half-applied residual / state update and produce inconsistent
+        # scores. self._lock is reentrant, so the latency append below is safe.
+        with self._lock:
+            sv = self.state.state_vec(user_idx, device=self.device)
+            x_u = self.user_features[uid_t]
 
-        # Residual contribution: dot(r_u, i_emb) — add to each candidate score
-        r_u = self.adapter(adapter_uid_t).view(-1)  # [emb_dim]
-        if float(torch.linalg.vector_norm(r_u)) > 0.0:
-            I_base = self.tower.item_net(self.item_features.index_select(0, iid_t))
-            I = self.tower.item_proj(I_base) + self.tower.item_emb(iid_t)  # [K, emb_dim]
-            bonus = (I @ r_u).view(-1)
-            logits = logits + bonus
+            # Base tower logits [1, K]
+            logits = self.tower.infer(
+                user_vec=x_u,
+                item_matrix=self.item_features,
+                user_ids=uid_t,
+                item_ids=iid_t,
+                state_vec=sv,
+            ).view(-1)
 
+            # Residual contribution: dot(r_u, i_emb) — add to each candidate score
+            r_u = self.adapter(adapter_uid_t).view(-1)  # [emb_dim]
+            if float(torch.linalg.vector_norm(r_u)) > 0.0:
+                I_base = self.tower.item_net(self.item_features.index_select(0, iid_t))
+                I = self.tower.item_proj(I_base) + self.tower.item_emb(iid_t)  # [K, emb_dim]
+                bonus = (I @ r_u).view(-1)
+                logits = logits + bonus
+
+        # Post-processing operates on the materialized `logits` tensor only; it no
+        # longer touches shared state, so it runs outside the lock to keep latency low.
         k = max(1, min(int(top_k), len(cand)))
         vals, idxs = torch.topk(logits, k=k)
         out = [(external_ids[int(i)], float(v)) for v, i in zip(vals.tolist(), idxs.tolist())]

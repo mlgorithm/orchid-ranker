@@ -27,7 +27,7 @@ import threading
 import time
 from collections import OrderedDict, defaultdict, deque
 from dataclasses import dataclass, field
-from typing import Deque, Dict, List, Optional, Tuple
+from typing import Callable, Deque, Dict, List, Optional, Tuple
 
 import numpy as np
 import torch
@@ -137,6 +137,7 @@ class SparseEmbeddingTable:
         device: str = "cpu",
         eviction_policy: str = "lru",
         ttl_seconds: Optional[float] = None,
+        on_evict: Optional[Callable[[int], None]] = None,
     ) -> None:
         if emb_dim <= 0:
             raise ValueError(f"emb_dim must be positive, got {emb_dim}")
@@ -154,6 +155,12 @@ class SparseEmbeddingTable:
             self._ttl_seconds is None or not math.isfinite(self._ttl_seconds) or self._ttl_seconds <= 0.0
         ):
             raise ValueError("ttl_seconds must be finite and positive for ttl eviction")
+        # Optional callback invoked with each evicted user_id (LRU, TTL, or
+        # manual). Lets owners (e.g. SparseOnlineUserAdapter) drop side-table
+        # state — like per-user update counts — so it cannot grow unboundedly
+        # after the embeddings themselves are evicted. Invoked while holding the
+        # table lock; keep it cheap and non-reentrant w.r.t. this table.
+        self._on_evict = on_evict
         # OrderedDict preserves insertion order; we move keys to the end on
         # access so that the *first* item is always the least-recently-used.
         self._data: OrderedDict[int, torch.Tensor] = OrderedDict()
@@ -255,7 +262,17 @@ class SparseEmbeddingTable:
             if uid in self._data:
                 del self._data[uid]
                 self._last_access.pop(uid, None)
+                self._notify_evicted(uid)
                 logger.debug("Manually evicted user %d from SparseEmbeddingTable", uid)
+
+    def _notify_evicted(self, uid: int) -> None:
+        """Fire the eviction callback, if any. Must hold ``self._lock``."""
+        if self._on_evict is None:
+            return
+        try:
+            self._on_evict(uid)
+        except Exception:  # noqa: BLE001 - eviction bookkeeping must never crash serving
+            logger.exception("on_evict callback raised for user %d", uid)
 
     def _evict_lru(self) -> None:
         """Evict the single least-recently-used entry.
@@ -266,6 +283,7 @@ class SparseEmbeddingTable:
             return
         evicted_uid, _ = self._data.popitem(last=False)
         self._last_access.pop(evicted_uid, None)
+        self._notify_evicted(evicted_uid)
         logger.warning(
             "SparseEmbeddingTable at capacity (%s): evicted user %d",
             f"{self._max_entries:,}",
@@ -280,6 +298,7 @@ class SparseEmbeddingTable:
         for uid in expired:
             self._data.pop(uid, None)
             self._last_access.pop(uid, None)
+            self._notify_evicted(uid)
 
     # ---- diagnostics ----
 
@@ -374,15 +393,24 @@ class SparseOnlineUserAdapter(nn.Module):
         self.clip = float(clip)
         self._device = str(device)
 
+        # Dedicated lock for the update-count side table. It is deliberately
+        # independent of self._lock (the adapter lock) and the embedding table's
+        # lock: the table fires _drop_update_count() from inside its own lock
+        # during eviction, which can happen on the lock-free forward() read path
+        # (TTL) as well as under the adapter lock (observe/reset). Using a
+        # separate, leaf-level lock keeps the read-modify-write of the counts
+        # safe without creating a lock-ordering cycle with the table.
+        self._count_lock = threading.Lock()
+        self._update_count: Dict[int, int] = defaultdict(int)
         self._embeddings = SparseEmbeddingTable(
             emb_dim=self.emb_dim,
             max_entries=max_active_users,
             device=self._device,
             eviction_policy=eviction_policy,
             ttl_seconds=ttl_seconds,
+            on_evict=self._drop_update_count,
         )
         self._lock = threading.RLock()
-        self._update_count: Dict[int, int] = defaultdict(int)
 
         logger.info(
             "SparseOnlineUserAdapter created: emb_dim=%d, lr=%.4f, l2=%.1e, "
@@ -471,19 +499,32 @@ class SparseOnlineUserAdapter(nn.Module):
                 r_new = r_new * (self.clip / float(n))
 
             self._embeddings[uid] = r_new
-            self._update_count[uid] += 1
+            with self._count_lock:
+                self._update_count[uid] += 1
             return float(torch.dot(r_new, r_new))
+
+    def _drop_update_count(self, user_id: int) -> None:
+        """Eviction hook: drop a user's update count when its embedding is evicted.
+
+        Wired into :class:`SparseEmbeddingTable` so the count side table cannot
+        outlive the embeddings and grow without bound. Called from inside the
+        table lock; only touches ``_count_lock`` to avoid a lock-ordering cycle.
+        """
+        with self._count_lock:
+            self._update_count.pop(int(user_id), None)
 
     def updates_for(self, user_id: int) -> int:
         """Return the number of SGD updates applied for *user_id*."""
-        return int(self._update_count.get(int(user_id), 0))
+        with self._count_lock:
+            return int(self._update_count.get(int(user_id), 0))
 
     def reset_user(self, user_id: int) -> None:
         """Reset a user's residual to zero and clear update count."""
         uid = int(user_id)
         with self._lock:
+            # evict() fires _drop_update_count via the table's on_evict hook,
+            # which clears the count under _count_lock.
             self._embeddings.evict(uid)
-            self._update_count.pop(uid, None)
         logger.debug("Reset user %d in SparseOnlineUserAdapter", uid)
 
     @property

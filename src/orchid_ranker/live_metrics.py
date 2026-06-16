@@ -65,6 +65,14 @@ __all__ = [
     "ProgressionGuardrail",
 ]
 
+# Process-wide set of policy labels currently driving Prometheus emission.
+# The progression gauges in observability.py are process-global and keyed only
+# by ``policy``, so two monitors that both emit under the same policy string
+# would clobber each other's gauge values. We track active emitting policies
+# here and warn on collision (rather than raise, to stay backward compatible).
+_EMITTING_POLICIES: Set[str] = set()
+_EMITTING_POLICIES_LOCK = threading.Lock()
+
 
 # ---------------------------------------------------------------------------
 # Rolling monitor
@@ -150,6 +158,13 @@ class RollingProgressionMonitor:
     policy : str
         Label attached to all Prometheus gauges (e.g. ``"adaptive"``,
         ``"baseline"``). Lets you compare the adaptive loop against a control.
+        **Must be unique per emitting monitor in a process:** the progression
+        gauges in :mod:`orchid_ranker.observability` are process-global and keyed
+        only by ``policy``, so two monitors that emit under the same policy label
+        clobber each other's values. Constructing a second emitting monitor with
+        a policy already in use logs a warning. The paired
+        :class:`ProgressionGuardrail` reuses this label for its (also
+        policy-labeled) halted gauge.
     window_size : int
         Max events retained. Older events are evicted FIFO. 200-2000 is a
         good range; larger windows smooth noise at the cost of slower
@@ -234,6 +249,24 @@ class RollingProgressionMonitor:
         self.success_threshold = float(success_threshold)
         self.stretch_width = float(stretch_width)
         self.emit_prometheus = bool(emit_prometheus)
+        # Guard against two emitting monitors sharing a policy label, which would
+        # make them race on the same process-global gauge. This is advisory: we
+        # warn rather than raise so existing single-monitor setups and tests that
+        # recreate a monitor with the same policy keep working.
+        if self.emit_prometheus:
+            with _EMITTING_POLICIES_LOCK:
+                if self.policy in _EMITTING_POLICIES:
+                    _w.warn(
+                        f"Another RollingProgressionMonitor is already emitting "
+                        f"Prometheus metrics for policy={self.policy!r}; the "
+                        f"process-global progression gauges are keyed only by "
+                        f"policy and the two monitors will clobber each other. "
+                        f"Use a unique policy label per emitting monitor, or set "
+                        f"emit_prometheus=False on all but one.",
+                        stacklevel=2,
+                    )
+                else:
+                    _EMITTING_POLICIES.add(self.policy)
         self._prereq: Dict[int, Set[int]] = (
             {int(k): set(int(x) for x in v) for k, v in prerequisite_graph.items()}
             if prerequisite_graph is not None
@@ -382,9 +415,13 @@ class RollingProgressionMonitor:
         # sequence_adherence: per-user, average across users in window
         if self._prereq:
             per_user_rates = []
-            seen_users = {ev.user_id for ev in events}
-            for u in seen_users:
-                user_events = [ev for ev in events if ev.user_id == u]
+            # Group events by user once (O(n)) instead of re-scanning all events
+            # per user (O(users x events)); preserves chronological order since we
+            # iterate `events` in order.
+            events_by_user: Dict[int, list] = defaultdict(list)
+            for ev in events:
+                events_by_user[ev.user_id].append(ev)
+            for u, user_events in events_by_user.items():
                 successes_in_window = {
                     ev.item_id
                     for ev in user_events
@@ -513,6 +550,9 @@ class ProgressionGuardrail:
         cfg: Optional[GuardrailConfig] = None,
     ) -> None:
         self.monitor = monitor
+        # Mirror the monitor's policy so the (now labeled) halted gauge is keyed
+        # per policy and two guardrails for different policies don't clobber it.
+        self._policy = str(getattr(monitor, "policy", "adaptive"))
         self.cfg = cfg or GuardrailConfig()
         self._halted = False
         self._violation_streak = 0
@@ -587,7 +627,9 @@ class ProgressionGuardrail:
 
     def _update_gauge(self) -> None:
         try:
-            PROGRESSION_GUARDRAIL_HALTED.set(1.0 if self._halted else 0.0)
+            PROGRESSION_GUARDRAIL_HALTED.labels(policy=self._policy).set(
+                1.0 if self._halted else 0.0
+            )
         except Exception:  # noqa: BLE001
             pass
 

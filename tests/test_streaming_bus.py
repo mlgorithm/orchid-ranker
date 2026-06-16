@@ -22,6 +22,7 @@ from orchid_ranker.streaming import StreamingAdaptiveRanker
 from orchid_ranker.streaming_bus import (
     InMemoryEventBus,
     InteractionEvent,
+    InteractionEventBus,
     StreamingIngestor,
 )
 
@@ -88,6 +89,22 @@ class TestInteractionEvent:
             InteractionEvent.from_mapping(
                 {"user_id": 1, "item_id": 2, "correct": 2}
             )
+
+    def test_bus_token_excluded_from_equality(self):
+        # FIX 5: the internal bus_token must not change value semantics, so two
+        # otherwise-identical interactions still compare (and hash) equal.
+        import dataclasses
+
+        a = InteractionEvent(1, 2, True)
+        b = dataclasses.replace(a, bus_token=42)
+        c = dataclasses.replace(a, bus_token=99)
+        assert a == b == c
+        assert hash(a) == hash(b) == hash(c)
+        assert b.bus_token == 42 and c.bus_token == 99
+        # Default is None for events created from the wire schema.
+        assert InteractionEvent.from_mapping(
+            {"user_id": 1, "item_id": 2, "correct": 1}
+        ).bus_token is None
 
 
 # ---------------------------------------------------------------------------
@@ -198,6 +215,72 @@ class TestStreamingIngestor:
         ingestor.drain()
         assert seen == [2, 5]
 
+    def test_single_error_does_not_trip_degraded(self, ranker):
+        # FIX 4: one apply error must not flip the degraded health signal.
+        bus = InMemoryEventBus()
+        ingestor = StreamingIngestor(
+            bus, ranker, poll_timeout_s=0.02,
+            max_consecutive_apply_errors=3,
+        )
+        bus.publish(InteractionEvent(user_id=999, item_id=0, correct=True))  # bad
+        bus.publish(InteractionEvent(user_id=1, item_id=0, correct=True))    # good
+        ingestor.drain()
+        assert ingestor.metrics.apply_errors == 1
+        assert ingestor.metrics.degraded is False
+        # The good event reset the streak.
+        assert ingestor.metrics.consecutive_apply_errors == 0
+
+    def test_consecutive_errors_trip_degraded(self, ranker):
+        # FIX 4: a deterministically-failing observe() must trip the health
+        # signal after the configured threshold and fire on_degraded.
+        bus = InMemoryEventBus()
+        degraded_calls: list = []
+        ingestor = StreamingIngestor(
+            bus, ranker, poll_timeout_s=0.02,
+            max_consecutive_apply_errors=3,
+            on_degraded=lambda ing: degraded_calls.append(ing),
+        )
+        for _ in range(5):
+            bus.publish(InteractionEvent(user_id=999, item_id=0, correct=True))
+        ingestor.drain()
+        assert ingestor.metrics.degraded is True
+        assert ingestor.metrics.consecutive_apply_errors >= 3
+        # on_degraded fires exactly once on the transition.
+        assert len(degraded_calls) == 1
+        assert degraded_calls[0] is ingestor
+
+    def test_degraded_reraise_propagates(self, ranker):
+        # FIX 4: with reraise_on_degraded, drain raises IngestorDegraded so a
+        # supervisor can restart the worker.
+        from orchid_ranker.streaming_bus import IngestorDegraded
+
+        bus = InMemoryEventBus()
+        ingestor = StreamingIngestor(
+            bus, ranker, poll_timeout_s=0.02,
+            max_consecutive_apply_errors=2,
+            reraise_on_degraded=True,
+            on_degraded=lambda ing: None,  # avoid touching global readiness
+        )
+        for _ in range(3):
+            bus.publish(InteractionEvent(user_id=999, item_id=0, correct=True))
+        with pytest.raises(IngestorDegraded):
+            ingestor.drain()
+
+    def test_consecutive_counter_resets_on_success(self, ranker):
+        bus = InMemoryEventBus()
+        ingestor = StreamingIngestor(
+            bus, ranker, poll_timeout_s=0.02,
+            max_consecutive_apply_errors=10,
+        )
+        # bad, bad, good -> streak must be 0 after the good one.
+        bus.publish(InteractionEvent(user_id=999, item_id=0, correct=True))
+        bus.publish(InteractionEvent(user_id=998, item_id=0, correct=True))
+        bus.publish(InteractionEvent(user_id=2, item_id=0, correct=True))
+        ingestor.drain()
+        assert ingestor.metrics.consecutive_apply_errors == 0
+        assert ingestor.metrics.apply_errors == 2
+        assert not ingestor.metrics.degraded
+
 
 # ---------------------------------------------------------------------------
 # Kafka adapter — smoke test only (no broker dependency)
@@ -219,3 +302,68 @@ class TestKafkaEventBus:
         monkeypatch.setattr(builtins, "__import__", fake_import)
         with pytest.raises(ImportError, match="confluent-kafka"):
             sb.KafkaEventBus(brokers="localhost:9092", topic="t")
+
+
+# ---------------------------------------------------------------------------
+# Pending-message bookkeeping (FIX 5): stable token + prune on failure
+# ---------------------------------------------------------------------------
+class _PendingBus(InteractionEventBus):
+    """Minimal bus that mimics Kafka's per-message pending bookkeeping using the
+    stable ``bus_token`` carried on the event. ``ack`` and ``fail`` both prune
+    the pending entry; nothing leaks on either path."""
+
+    stop_on_apply_error = False
+
+    def __init__(self, events):
+        self._events = list(events)
+        self._seq = 0
+        self.pending = {}
+        self.acked = []
+        self.failed = []
+
+    def poll(self, max_events=100, timeout_s=0.5):
+        import dataclasses
+
+        out = []
+        while self._events and len(out) < max_events:
+            ev = self._events.pop(0)
+            token = self._seq
+            self._seq += 1
+            self.pending[token] = ev  # stand-in for the broker message
+            out.append(dataclasses.replace(ev, bus_token=token))
+        return out
+
+    def ack(self, event):
+        if event.bus_token is not None:
+            self.pending.pop(event.bus_token, None)
+            self.acked.append(event.bus_token)
+
+    def fail(self, event):
+        if event.bus_token is not None:
+            self.pending.pop(event.bus_token, None)
+            self.failed.append(event.bus_token)
+
+
+class TestPendingBookkeeping:
+    def test_pending_pruned_on_success_and_failure(self, ranker):
+        # One good event (acked) and one bad event (failed) -- after draining,
+        # nothing must remain pending, regardless of outcome.
+        bus = _PendingBus([
+            InteractionEvent(user_id=1, item_id=0, correct=True),    # ok -> ack
+            InteractionEvent(user_id=999, item_id=0, correct=True),  # bad -> fail
+        ])
+        ingestor = StreamingIngestor(bus, ranker, poll_timeout_s=0.02)
+        ingestor.drain()
+        assert bus.pending == {}, "no pending entry may leak on ack or fail"
+        assert len(bus.acked) == 1
+        assert len(bus.failed) == 1
+
+    def test_distinct_tokens_per_message(self, ranker):
+        evs = [InteractionEvent(user_id=1, item_id=0, correct=True) for _ in range(5)]
+        bus = _PendingBus(evs)
+        polled = bus.poll(max_events=10)
+        tokens = [e.bus_token for e in polled]
+        assert len(set(tokens)) == len(tokens), "tokens must be unique per message"
+        # Identical-valued events still get distinct tokens (id() reuse would not
+        # guarantee this).
+        assert tokens == sorted(tokens)

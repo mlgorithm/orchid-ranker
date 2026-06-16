@@ -104,8 +104,16 @@ class MultiUserOrchestrator:
         self._seen_by_user: Dict[int, set] = {int(u.user_id): set() for u in self.users}
         self._accepted_by_user: Dict[int, List[int]] = {int(u.user_id): [] for u in self.users}
 
-        # Per-user history centroid in item-embedding space (computed on-demand)
+        # Per-user history centroid in item-embedding space (computed on-demand).
+        # _hist_centroid_len records how many accepted items the cached centroid
+        # was built from, so we recompute when the user's accepted history grows
+        # instead of serving a stale centroid forever.
         self._hist_centroid: Dict[int, torch.Tensor] = {}
+        self._hist_centroid_len: Dict[int, int] = {}
+
+        # Cap on per-user "seen" sets so novelty bookkeeping cannot grow without
+        # bound over a long-running session. Most-recent items are retained.
+        self._seen_cap: int = int(getattr(cfg, "seen_cap", 0) or 0) or 10_000
 
         # Handy handles
         self._core = rec.teacher if isinstance(rec, DualRecommender) else rec
@@ -383,7 +391,7 @@ class MultiUserOrchestrator:
                 n += 1
             hist["mean_diff"] = float(m)
             hist["n"] = int(n)
-        seen_before.update(accepted_ids)
+        self._bounded_seen_add(seen_before, accepted_ids, self._seen_cap)
 
     def _candidate_pool(self, min_candidates: int) -> torch.Tensor:
         N = self.item_matrix.shape[0]
@@ -425,6 +433,24 @@ class MultiUserOrchestrator:
         return float((arr <= float(val)).mean())
 
 
+    # ------------------ memory bounding ------------------
+    @staticmethod
+    def _bounded_seen_add(seen: set, items, cap: int) -> None:
+        """Add *items* to *seen* and trim it back to *cap* if it overflows.
+
+        Keeps the per-user "seen" sets from growing without bound over a long
+        run. ``seen`` stays a plain ``set`` for backward compatibility; because
+        sets are unordered, the specific entries dropped on overflow are
+        unspecified (this only affects the heuristic novelty metric, never
+        correctness of recommendations).
+        """
+        seen.update(items)
+        if cap > 0 and len(seen) > cap:
+            # Drop the oldest-ish excess. set.pop() removes an arbitrary element;
+            # this is acceptable for a novelty heuristic and keeps memory bounded.
+            for _ in range(len(seen) - cap):
+                seen.pop()
+
     # ------------------ metrics ------------------
     def _novelty_user(self, uid: int, items_ext: List[int]) -> float:
         seen = self._seen_by_user.get(int(uid), set())
@@ -462,8 +488,14 @@ class MultiUserOrchestrator:
             items_ext = [self.pos2id[p] for p in item_pos]
             return self._novelty_pop(items_ext)
 
-        # cache centroid if not already
-        if int(uid) not in self._hist_centroid:
+        # (Re)compute the centroid when it is missing OR when the user's accepted
+        # history has changed length since the centroid was cached. Caching once
+        # and never invalidating would serve a stale centroid as history grows.
+        uid_i = int(uid)
+        if (
+            uid_i not in self._hist_centroid
+            or self._hist_centroid_len.get(uid_i) != len(hist_ext)
+        ):
             hist_pos = [self.id2pos.get(int(e), None) for e in hist_ext]
             hist_pos = [p for p in hist_pos if p is not None]
             if not hist_pos:
@@ -472,8 +504,9 @@ class MultiUserOrchestrator:
             H = torch.tensor(hist_pos, dtype=torch.long, device=self._device)
             Hrep = self._item_reps(H)  # [H, D]
             cen = torch.nn.functional.normalize(Hrep.mean(dim=0, keepdim=True), dim=-1)  # [1, D]
-            self._hist_centroid[int(uid)] = cen.detach()
-        cen = self._hist_centroid[int(uid)]
+            self._hist_centroid[uid_i] = cen.detach()
+            self._hist_centroid_len[uid_i] = len(hist_ext)
+        cen = self._hist_centroid[uid_i]
 
         # item reps for current items
         P = torch.tensor(item_pos, dtype=torch.long, device=self._device)
@@ -1077,10 +1110,12 @@ class MultiUserOrchestrator:
                     for iid in accepted_ids:
                         if iid not in prev_seen:
                             novel_hits += 1
-                        prev_seen.add(iid)
-                        policy_seen.add(iid)
                         pop_counts[iid] += 1
                     novel_den += len(accepted_ids)
+                    # Bound both seen-sets so they cannot grow without limit over
+                    # a long run (novelty counting above already consumed prev_seen).
+                    self._bounded_seen_add(prev_seen, accepted_ids, self._seen_cap)
+                    self._bounded_seen_add(policy_seen, accepted_ids, self._seen_cap)
 
                     if (item_reps is not None) and (item_reps.shape[0] == len(chosen_item_ids)):
                         acc_pos = [chosen_item_ids.index(a) for a in accepted_ids if a in chosen_item_ids]

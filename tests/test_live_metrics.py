@@ -202,8 +202,8 @@ class TestProgressionGuardrail:
         assert g.evaluate() is False
         assert g.is_halted
         assert g.halt_reason == "accept_rate_below_floor"
-        # Gauge reflects halt
-        assert _gauge_value(PROGRESSION_GUARDRAIL_HALTED) == 1.0
+        # Gauge reflects halt (now labeled by policy)
+        assert _gauge_value(PROGRESSION_GUARDRAIL_HALTED, policy="g3") == 1.0
 
     def test_single_blip_does_not_halt(self):
         m = RollingProgressionMonitor(policy="g4", emit_prometheus=False)

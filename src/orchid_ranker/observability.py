@@ -4,7 +4,7 @@ from __future__ import annotations
 import json
 import threading
 from http.server import BaseHTTPRequestHandler, HTTPServer
-from typing import Optional
+from typing import Any, Optional
 
 from prometheus_client import (
     CONTENT_TYPE_LATEST,
@@ -144,7 +144,9 @@ ROLLING_ACCEPT_RATE = Gauge(
 
 PROGRESSION_GUARDRAIL_HALTED = Gauge(
     "orchid_progression_guardrail_halted",
-    "1 if the progression guardrail has halted the adaptive policy, else 0.",
+    "1 if the progression guardrail has halted the adaptive policy, else 0. "
+    "Labeled by policy so multiple guardrails do not clobber each other.",
+    ["policy"],
     registry=_REGISTRY,
 )
 
@@ -343,6 +345,11 @@ def setup_opentelemetry(service_name: str = "orchid-ranker") -> None:
     from opentelemetry.sdk.trace import TracerProvider
     from opentelemetry.sdk.trace.export import BatchSpanProcessor
 
+    # Annotated as Any because the gRPC and HTTP OTLP exporters are distinct
+    # types selected at runtime; without this, mypy infers the gRPC type from the
+    # first branch and rejects the HTTP fallback assignments below.
+    trace_exporter: Any
+    metric_exporter: Any
     try:
         from opentelemetry.exporter.otlp.proto.grpc.metric_exporter import (
             OTLPMetricExporter as GrpcMetricExporter,

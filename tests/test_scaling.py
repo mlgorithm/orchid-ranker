@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import threading
+import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
 import pytest
@@ -196,6 +197,36 @@ class TestSparseOnlineUserAdapter:
         for uid in range(10):
             adapter.observe(uid, u, v, 1.0)
         assert adapter.active_users <= 5
+
+    def test_update_count_evicted_with_embedding(self) -> None:
+        # FIX 3b: the per-user update-count side table must not outlive the
+        # embeddings; evicting an embedding must drop its count too.
+        adapter = SparseOnlineUserAdapter(emb_dim=4, max_active_users=5)
+        u = torch.randn(4)
+        v = torch.randn(4)
+        for uid in range(50):
+            adapter.observe(uid, u, v, 1.0)
+        # Embeddings are capped at 5, and the count dict must be bounded the same
+        # way (it would otherwise have 50 entries).
+        assert adapter.active_users <= 5
+        assert len(adapter._update_count) <= 5
+        # The earliest users were evicted, so their counts are gone (0).
+        assert adapter.updates_for(0) == 0
+
+    def test_update_count_dropped_on_ttl_eviction(self) -> None:
+        adapter = SparseOnlineUserAdapter(
+            emb_dim=4, max_active_users=100,
+            eviction_policy="ttl", ttl_seconds=0.05,
+        )
+        u = torch.randn(4)
+        v = torch.randn(4)
+        adapter.observe(1, u, v, 1.0)
+        assert adapter.updates_for(1) == 1
+        time.sleep(0.1)
+        # Any table access triggers TTL eviction, which must clear the count too.
+        _ = adapter.active_users
+        assert len(adapter._update_count) == 0
+        assert adapter.updates_for(1) == 0
 
     def test_api_compatible_with_original(self) -> None:
         """The observe() signature matches the dense OnlineUserAdapter."""

@@ -80,6 +80,32 @@ class TestBKTStateProvider:
         with pytest.raises(ValueError):
             BKTStateProvider(state_dim=5)
 
+    def test_lru_cap_bounds_tracked_users(self):
+        # FIX 3a: the dense provider must evict LRU users instead of growing
+        # without bound when no ScalingConfig is supplied.
+        sp = BKTStateProvider(max_users=5)
+        for uid in range(20):
+            sp.observe(uid, correct=True)
+        assert len(sp._trackers) <= 5
+        assert len(sp._telemetry) <= 5
+        assert len(sp._access_order) <= 5
+
+    def test_lru_cap_keeps_recent_user(self):
+        sp = BKTStateProvider(max_users=3)
+        for uid in range(3):
+            sp.observe(uid, correct=True)
+        # Touch user 0 via a read so it is most-recently-used.
+        _ = sp.state_vec(0)
+        # Inserting two more users evicts the least-recently-used (1, then 2),
+        # but user 0 must survive because it was just read.
+        sp.observe(99, correct=True)
+        sp.observe(100, correct=True)
+        assert 0 in sp._trackers, "recently-read user must not be evicted"
+
+    def test_rejects_nonpositive_max_users(self):
+        with pytest.raises(ValueError):
+            BKTStateProvider(max_users=0)
+
 
 # ---------------------------------------------------------------------------
 # OnlineUserAdapter

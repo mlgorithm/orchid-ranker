@@ -38,7 +38,7 @@ import threading
 import time
 from abc import ABC, abstractmethod
 from collections import deque
-from dataclasses import dataclass
+from dataclasses import dataclass, field, replace
 from typing import Any, Callable, Deque, Dict, Iterable, List, Mapping, Optional
 
 from orchid_ranker._labels import parse_binary_label
@@ -53,7 +53,14 @@ __all__ = [
     "KafkaEventBus",
     "StreamingIngestor",
     "IngestorMetrics",
+    "IngestorDegraded",
 ]
+
+
+class IngestorDegraded(RuntimeError):
+    """Raised from the poll loop when consecutive apply errors trip the health
+    threshold and ``reraise_on_degraded`` is enabled, so a supervisor can
+    restart the worker."""
 
 
 def _parse_correct(value: Any) -> bool:
@@ -75,6 +82,12 @@ class InteractionEvent:
     correct: bool
     skill: Optional[str] = None
     timestamp: Optional[float] = None
+    #: Bus-internal, stable per-message token used to correlate this event with
+    #: the underlying broker message for acknowledgement. Set by the bus at poll
+    #: time (e.g. :class:`KafkaEventBus`); ``None`` for events created from the
+    #: wire schema. Excluded from equality / repr so the public value semantics
+    #: are unchanged and identical interactions still compare equal.
+    bus_token: Optional[int] = field(default=None, compare=False, repr=False)
 
     @classmethod
     def from_mapping(cls, payload: Mapping[str, Any]) -> "InteractionEvent":
@@ -124,6 +137,13 @@ class InteractionEventBus(ABC):
 
     def ack(self, event: InteractionEvent) -> None:  # pragma: no cover - trivial default
         """Acknowledge successful application of an event, if the bus supports it."""
+
+    def fail(self, event: InteractionEvent) -> None:  # pragma: no cover - trivial default
+        """Signal terminal failure to apply an event, if the bus supports it.
+
+        Lets the bus release any per-message bookkeeping (e.g. a pending offset)
+        so it cannot leak on the failure path. Default is a no-op.
+        """
 
 
 class InMemoryEventBus(InteractionEventBus):
@@ -226,7 +246,13 @@ class KafkaEventBus(InteractionEventBus):
         self._consumer.subscribe([topic])
         self._topic = topic
         self._closed = False
+        # Keyed by a stable, monotonically-increasing token (NOT id(event)):
+        # id() can be reused after GC, which would let ack() commit the wrong
+        # message; and id()-keyed entries leaked on any non-ack path. The token
+        # is carried on the event so ack()/fail() can find the exact message.
         self._pending: Dict[int, Any] = {}
+        self._seq = 0
+        self._pending_lock = threading.Lock()
         self.parse_errors = 0
 
     def poll(self, max_events: int = 100, timeout_s: float = 0.5) -> List[InteractionEvent]:  # pragma: no cover - requires broker
@@ -245,8 +271,14 @@ class KafkaEventBus(InteractionEventBus):
                 logger.warning("kafka error: %s", msg.error())
                 continue
             try:
-                event = InteractionEvent.from_json(msg.value())
-                self._pending[id(event)] = msg
+                parsed = InteractionEvent.from_json(msg.value())
+                with self._pending_lock:
+                    token = self._seq
+                    self._seq += 1
+                    self._pending[token] = msg
+                # Carry the token on the event so ack()/fail() can correlate it
+                # back to this exact message without relying on id().
+                event = replace(parsed, bus_token=token)
                 out.append(event)
             except ValueError as exc:
                 self.parse_errors += 1
@@ -258,10 +290,27 @@ class KafkaEventBus(InteractionEventBus):
         return out
 
     def ack(self, event: InteractionEvent) -> None:  # pragma: no cover - requires broker
-        msg = self._pending.pop(id(event), None)
+        token = event.bus_token
+        if token is None:
+            return
+        with self._pending_lock:
+            msg = self._pending.pop(token, None)
         if msg is None or self._closed:
             return
         self._consumer.commit(message=msg, asynchronous=False)
+
+    def fail(self, event: InteractionEvent) -> None:  # pragma: no cover - requires broker
+        """Release a pending message after a terminal apply failure.
+
+        The offset is intentionally NOT committed, so the broker can redeliver
+        the message; we only drop the bookkeeping entry so ``_pending`` cannot
+        leak on the failure path (it was previously only pruned on ack).
+        """
+        token = event.bus_token
+        if token is None:
+            return
+        with self._pending_lock:
+            self._pending.pop(token, None)
 
     def close(self) -> None:  # pragma: no cover - requires broker
         if not self._closed:
@@ -277,13 +326,21 @@ class KafkaEventBus(InteractionEventBus):
 # ---------------------------------------------------------------------------
 @dataclass
 class IngestorMetrics:
-    """Snapshot of ingestor counters. All fields monotonic."""
+    """Snapshot of ingestor counters.
+
+    All counters except ``consecutive_apply_errors`` and ``degraded`` are
+    monotonic. ``consecutive_apply_errors`` resets to 0 on any successful apply;
+    ``degraded`` flips to True once the consecutive-error threshold trips and the
+    ingestor surfaces an unhealthy signal.
+    """
     events_consumed: int = 0
     events_applied: int = 0
     parse_errors: int = 0
     apply_errors: int = 0
     last_event_ts: float = 0.0
     polls: int = 0
+    consecutive_apply_errors: int = 0
+    degraded: bool = False
 
     def as_dict(self) -> dict:
         return {
@@ -293,6 +350,8 @@ class IngestorMetrics:
             "apply_errors": self.apply_errors,
             "last_event_ts": self.last_event_ts,
             "polls": self.polls,
+            "consecutive_apply_errors": self.consecutive_apply_errors,
+            "degraded": self.degraded,
         }
 
 
@@ -310,7 +369,14 @@ class StreamingIngestor:
       that also serves rank requests from the same ranker.
 
     Errors in ``ranker.observe`` are caught, logged, and counted; a single
-    bad event never kills the loop.
+    bad event never kills the loop. However, a *deterministically*-failing
+    observe() (e.g. a model that is wedged) would otherwise silently stop the
+    model from adapting while polls keep incrementing. To catch this, the
+    ingestor tracks the number of *consecutive* apply errors (reset on any
+    success) and, once it reaches ``max_consecutive_apply_errors``, surfaces an
+    unhealthy signal: it marks readiness ``False`` (so k8s/readyz takes the pod
+    out of rotation) and, if ``reraise_on_degraded`` is set, re-raises so the
+    poll loop exits and orchestration restarts the worker.
 
     Parameters
     ----------
@@ -323,6 +389,18 @@ class StreamingIngestor:
         the shutdown latency at the cost of slightly more CPU when idle.
     on_event : callable, optional
         Called with each applied event. Useful for custom telemetry hooks.
+    max_consecutive_apply_errors : int
+        Number of back-to-back observe() failures tolerated before the ingestor
+        trips its health signal. ``0`` disables the check (legacy behaviour:
+        errors are only counted). Defaults to 50.
+    on_degraded : callable, optional
+        Invoked once (with this ingestor) the first time the consecutive-error
+        threshold trips. Defaults to flipping ``observability.set_ready(False)``.
+        Pass a no-op to opt out of the default readiness side effect.
+    reraise_on_degraded : bool
+        When True, after tripping the health signal the worker re-raises an
+        :class:`IngestorDegraded` from the drain loop so a supervisor can
+        restart it. Defaults to False (stay alive, but marked unready).
     """
 
     def __init__(
@@ -333,17 +411,54 @@ class StreamingIngestor:
         batch_size: int = 64,
         poll_timeout_s: float = 0.5,
         on_event: Optional[Callable[[InteractionEvent], None]] = None,
+        max_consecutive_apply_errors: int = 50,
+        on_degraded: Optional[Callable[["StreamingIngestor"], None]] = None,
+        reraise_on_degraded: bool = False,
     ) -> None:
         self.bus = bus
         self.ranker = ranker
         self.batch_size = int(batch_size)
         self.poll_timeout_s = float(poll_timeout_s)
         self._on_event = on_event
+        self.max_consecutive_apply_errors = int(max_consecutive_apply_errors)
+        self._on_degraded = on_degraded
+        self.reraise_on_degraded = bool(reraise_on_degraded)
         self.metrics = IngestorMetrics()
         self._stop = threading.Event()
         self._thread: Optional[threading.Thread] = None
 
     # ---- internal ----
+    def _trip_degraded(self) -> None:
+        """Surface an unhealthy signal once the consecutive-error threshold trips.
+
+        Idempotent: only fires the side effects on the first transition into the
+        degraded state. The default action marks the service unready so health
+        probes pull the worker out of rotation; callers may override via
+        ``on_degraded``.
+        """
+        if self.metrics.degraded:
+            return
+        self.metrics.degraded = True
+        logger.error(
+            "StreamingIngestor degraded: %d consecutive apply errors "
+            "(threshold=%d); observe() appears wedged, marking unhealthy",
+            self.metrics.consecutive_apply_errors,
+            self.max_consecutive_apply_errors,
+        )
+        if self._on_degraded is not None:
+            try:
+                self._on_degraded(self)
+            except Exception:  # noqa: BLE001
+                logger.exception("on_degraded hook raised")
+        else:
+            # Default: take the worker out of rotation via the readiness probe.
+            try:
+                from orchid_ranker.observability import set_ready
+
+                set_ready(False)
+            except Exception:  # noqa: BLE001
+                logger.exception("failed to set readiness False on degraded ingestor")
+
     def _apply(self, event: InteractionEvent) -> bool:
         try:
             self.ranker.observe(
@@ -355,6 +470,8 @@ class StreamingIngestor:
             )
             self.metrics.events_applied += 1
             self.metrics.last_event_ts = time.time()
+            # A successful apply clears the consecutive-error streak.
+            self.metrics.consecutive_apply_errors = 0
             if self._on_event is not None:
                 try:
                     self._on_event(event)
@@ -367,7 +484,20 @@ class StreamingIngestor:
             return True
         except Exception:  # noqa: BLE001
             self.metrics.apply_errors += 1
+            self.metrics.consecutive_apply_errors += 1
             logger.exception("failed to apply event: %r", event)
+            # Release any per-message bookkeeping on the bus so it cannot leak on
+            # the failure path (Kafka: drops the pending entry without committing,
+            # so the message is redelivered).
+            try:
+                self.bus.fail(event)
+            except Exception:  # noqa: BLE001
+                logger.exception("bus.fail hook raised for event: %r", event)
+            if (
+                self.max_consecutive_apply_errors > 0
+                and self.metrics.consecutive_apply_errors >= self.max_consecutive_apply_errors
+            ):
+                self._trip_degraded()
             return False
 
     def _drain_once(self) -> int:
@@ -383,8 +513,17 @@ class StreamingIngestor:
         for ev in batch:
             if self._apply(ev):
                 applied += 1
-            elif getattr(self.bus, "stop_on_apply_error", False):
+                continue
+            # Apply failed. Stop draining this batch if the bus wants ordered
+            # delivery, or if we've just tripped the degraded health signal.
+            if self.metrics.degraded or getattr(self.bus, "stop_on_apply_error", False):
                 break
+        # If we degraded and the caller wants a hard restart, propagate so the
+        # poll loop / supervisor can act.
+        if self.metrics.degraded and self.reraise_on_degraded:
+            raise IngestorDegraded(
+                f"{self.metrics.consecutive_apply_errors} consecutive apply errors"
+            )
         return applied
 
     # ---- public API ----
@@ -405,6 +544,12 @@ class StreamingIngestor:
         while not self._stop.is_set():
             try:
                 self._drain_once()
+            except IngestorDegraded:
+                # Health threshold tripped and reraise_on_degraded is set: exit
+                # the loop so a supervisor restarts the worker. Readiness has
+                # already been flipped to False by _trip_degraded().
+                logger.error("ingestor poll loop exiting: degraded health signal")
+                raise
             except Exception:  # noqa: BLE001
                 # Bus-level errors: log and back off so we don't tight-loop.
                 logger.exception("ingestor poll loop error; backing off")
