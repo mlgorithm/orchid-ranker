@@ -77,6 +77,10 @@ class CQLDiscretePolicy:
         self.global_action_values_: dict[Any, float] = {}
         self.actions_by_context_: dict[Any, set[Any]] = {}
         self.default_value_: float = 0.0
+        # Conservative floor on the trained-Q scale and the ceiling of the raw-reward
+        # signal used to rank unseen actions below it. Populated during ``fit``.
+        self.q_floor_: float = 0.0
+        self.global_value_ceiling_: float = 0.0
         self.report_: Optional[CQLTrainingReport] = None
 
     @property
@@ -98,6 +102,8 @@ class CQLDiscretePolicy:
         self.global_action_values_ = {}
         self.actions_by_context_ = {}
         self.default_value_ = 0.0
+        self.q_floor_ = 0.0
+        self.global_value_ceiling_ = 0.0
         self.report_ = None
         work = validate_logged_decisions(
             decisions,
@@ -138,6 +144,14 @@ class CQLDiscretePolicy:
                 context, candidates, action, reward, update_weight = rows[int(row_id)]
                 losses.append(self._update_one(context, candidates, action, reward, update_weight=update_weight))
             final_loss = float(np.mean(losses)) if losses else 0.0
+
+        # Anchor unseen-action scores to the trained-Q scale, not raw rewards. ``q_floor_``
+        # is the most conservative trained value; unseen actions are ranked strictly below
+        # it (see ``_score_one``). ``global_value_ceiling_`` is the top of the raw-reward
+        # signal, used only to order unseen actions relative to each other.
+        self.q_floor_ = float(min(self.q_values_.values())) if self.q_values_ else self.default_value_
+        global_signals = list(self.global_action_values_.values()) + [self.default_value_]
+        self.global_value_ceiling_ = float(max(global_signals))
 
         all_actions = {action for actions in self.actions_by_context_.values() for action in actions}
         self.report_ = CQLTrainingReport(
@@ -207,14 +221,20 @@ class CQLDiscretePolicy:
         mean = float(np.mean(clipped))
         if mean <= 0.0 or not np.isfinite(mean):
             return np.ones(clipped.shape, dtype=float)
-        return clipped / mean
+        return np.asarray(clipped / mean, dtype=float)
 
     def _score_one(self, context: Any, action: Any) -> float:
         if (context, action) in self.q_values_:
             return float(self.q_values_[(context, action)])
-        if action in self.global_action_values_:
-            return float(self.global_action_values_[action] - self.unseen_penalty)
-        return float(self.default_value_ - self.unseen_penalty)
+        # Unseen (context, action): the raw-reward signal (global_action_values_ /
+        # default_value_) is on a different scale than the conservatively-shrunk trained Q,
+        # so returning it directly could rank an unsupported action above a supported one.
+        # Instead, anchor every unseen action strictly below the trained-Q floor
+        # (q_floor_ - unseen_penalty) and use the raw signal only to order unseen actions
+        # relative to each other, offsetting downward from the raw ceiling so the band
+        # stays beneath the floor.
+        raw_signal = self.global_action_values_.get(action, self.default_value_)
+        return float(self.q_floor_ - self.unseen_penalty - (self.global_value_ceiling_ - raw_signal))
 
     def _require_fitted(self) -> None:
         if not self.is_fitted:

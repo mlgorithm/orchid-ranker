@@ -63,6 +63,10 @@ class LoggedPolicyReport:
         Importance-weight diagnostics.
     clipped_fraction:
         Fraction of raw weights clipped by ``max_weight``.
+    propensity_floored_fraction:
+        Fraction of logged events whose raw logging propensity fell below
+        ``min_propensity`` and was floored. A nonzero value signals support
+        violations that the importance weights silently mask.
     """
 
     n_events: int
@@ -81,6 +85,7 @@ class LoggedPolicyReport:
     weight_mean: float
     weight_max: float
     clipped_fraction: float
+    propensity_floored_fraction: float = 0.0
 
     def to_dict(self) -> dict[str, Any]:
         return cast(dict[str, Any], _jsonable(asdict(self)))
@@ -463,6 +468,7 @@ def evaluate_rollout_gate(
     min_ess_fraction: float = 0.05,
     min_coverage: float = 0.05,
     max_clipped_fraction: float = 0.20,
+    max_propensity_floored_fraction: float = 0.0,
 ) -> OPERolloutGateReport:
     """Gate a candidate adaptive policy before live rollout.
 
@@ -470,6 +476,13 @@ def evaluate_rollout_gate(
     comparison reports, ``effect`` is target-minus-baseline uplift. Bootstrap
     reports use bootstrap percentile intervals; plain reports use normal
     approximation intervals.
+
+    Support diagnostics (coverage, effective sample size, clipped fraction, and
+    floored-propensity fraction) are read from the *target* policy only
+    (``diagnostics[0]`` in every report shape); a healthy baseline cannot vouch
+    for an unsupported target. ``max_propensity_floored_fraction`` defaults to
+    ``0.0`` so that any logged-propensity flooring -- a support violation that
+    importance weights silently mask -- blocks the rollout.
     """
     if not 0.0 <= min_ess_fraction <= 1.0:
         raise ValueError("min_ess_fraction must be in [0, 1]")
@@ -477,16 +490,24 @@ def evaluate_rollout_gate(
         raise ValueError("min_coverage must be in [0, 1]")
     if not 0.0 <= max_clipped_fraction <= 1.0:
         raise ValueError("max_clipped_fraction must be in [0, 1]")
+    if not 0.0 <= max_propensity_floored_fraction <= 1.0:
+        raise ValueError("max_propensity_floored_fraction must be in [0, 1]")
 
     effect, ci_low, ci_high, estimator, diagnostics = _rollout_gate_parts(report)
     n_events = max((diag.n_events for diag in diagnostics), default=0)
-    ess = min((diag.effective_sample_size for diag in diagnostics), default=0.0)
-    ess_fraction = min(
-        (float(diag.effective_sample_size / diag.n_events) if diag.n_events > 0 else 0.0 for diag in diagnostics),
-        default=0.0,
-    )
-    coverage = min((diag.coverage for diag in diagnostics), default=0.0)
-    clipped = max((diag.clipped_fraction for diag in diagnostics), default=0.0)
+    # Support diagnostics describe the *target* policy (diagnostics[0] in every report
+    # shape: single (report,), bootstrap-single (base,), comparison (target, baseline),
+    # bootstrap-comparison (target, baseline)). A baseline's healthy coverage/ESS must
+    # not paper over an unsupported target.
+    target = diagnostics[0] if diagnostics else None
+    if target is not None:
+        ess = float(target.effective_sample_size)
+        ess_fraction = float(target.effective_sample_size / target.n_events) if target.n_events > 0 else 0.0
+        coverage = float(target.coverage)
+        clipped = float(target.clipped_fraction)
+        floored = float(getattr(target, "propensity_floored_fraction", 0.0))
+    else:
+        ess = ess_fraction = coverage = clipped = floored = 0.0
 
     reasons: list[str] = []
     if not np.isfinite(effect) or not np.isfinite(ci_low) or not np.isfinite(ci_high):
@@ -503,6 +524,10 @@ def evaluate_rollout_gate(
         reasons.append(f"coverage {coverage:.3f} is below {float(min_coverage):.3f}")
     if clipped > float(max_clipped_fraction):
         reasons.append(f"clipped fraction {clipped:.3f} exceeds {float(max_clipped_fraction):.3f}")
+    if floored > float(max_propensity_floored_fraction):
+        reasons.append(
+            f"propensity floored fraction {floored:.3f} exceeds {float(max_propensity_floored_fraction):.3f}"
+        )
 
     return OPERolloutGateReport(
         allowed=not reasons,
@@ -559,7 +584,10 @@ def _estimate_logged_policy(
         raise ValueError(f"{propensity_col} values must be finite and in (0, 1]")
     # min_propensity is a numerical floor on the IPS denominator, not a hard validation
     # bound: clip tiny-but-valid propensities up to it so they cannot blow up the importance
-    # weights (consistent with callers that accept any propensity in (0, 1]).
+    # weights (consistent with callers that accept any propensity in (0, 1]). Capture the
+    # raw propensities first so we can surface how much logged support was floored.
+    raw_propensities = propensities
+    propensity_floored_fraction = float(np.mean(raw_propensities < min_propensity))
     propensities = np.clip(propensities, min_propensity, 1.0)
     if np.any(policy_probs < 0.0) or np.any(policy_probs > 1.0):
         raise ValueError(f"{policy_probability_col} values must be in [0, 1]")
@@ -599,12 +627,22 @@ def _estimate_logged_policy(
         terms = snips + weights * (rewards - snips) / weight_mean
         estimator = "snips"
         value = snips
+    elif weight_sum == 0.0:
+        # No support: the target policy assigns zero probability to every logged action,
+        # so every importance weight is zero. IPS-of-zeros would report a confident
+        # value=0.0 with se=0; that is undefined, not "the policy is worth nothing".
+        terms = weighted_rewards
+        estimator = "undefined"
+        value = float("nan")
     else:
         terms = weighted_rewards
         estimator = "ips"
         value = ips
 
-    se, low, high = _normal_ci(terms, ci)
+    if estimator == "undefined":
+        se = low = high = float("nan")
+    else:
+        se, low, high = _normal_ci(terms, ci)
     report = LoggedPolicyReport(
         n_events=int(len(events)),
         logging_reward=float(np.mean(rewards)),
@@ -622,6 +660,7 @@ def _estimate_logged_policy(
         weight_mean=weight_mean,
         weight_max=weight_max,
         clipped_fraction=clipped_fraction,
+        propensity_floored_fraction=propensity_floored_fraction,
     )
     return _Estimate(report=report, terms=terms)
 

@@ -297,3 +297,115 @@ def test_to_dict_serializes_unsupported_snips_as_none():
 
     assert math.isnan(report.snips)
     assert report.to_dict()["snips"] is None
+
+
+def test_zero_support_returns_undefined_value_not_confident_zero():
+    # Target assigns zero probability to every logged action: no support at all. The
+    # estimate must be undefined (NaN), not a confident value=0.0 with a zero-width CI.
+    frame = pd.DataFrame(
+        {
+            "reward": [1.0, 0.0, 1.0],
+            "propensity": [0.5, 0.5, 0.5],
+            "target_prob": [0.0, 0.0, 0.0],
+        }
+    )
+
+    report = evaluate_logged_policy(
+        frame,
+        reward_col="reward",
+        propensity_col="propensity",
+        target_probability_col="target_prob",
+    )
+
+    assert report.estimator == "undefined"
+    assert math.isnan(report.value)
+    assert math.isnan(report.standard_error)
+    assert math.isnan(report.ci_low)
+    assert math.isnan(report.ci_high)
+    assert report.coverage == 0.0
+    assert report.to_dict()["value"] is None
+
+
+def test_propensity_floored_fraction_is_reported():
+    # Two of three rows have raw propensity below the floor; the report must surface that
+    # half-or-more of the logged support was floored even though IPS weights hide it.
+    frame = pd.DataFrame(
+        {
+            "reward": [1.0, 0.0, 1.0],
+            "propensity": [1e-9, 1e-9, 0.5],
+            "target_prob": [1.0, 1.0, 0.0],
+        }
+    )
+
+    report = evaluate_logged_policy(
+        frame,
+        reward_col="reward",
+        propensity_col="propensity",
+        target_probability_col="target_prob",
+        min_propensity=1e-3,
+    )
+
+    assert report.propensity_floored_fraction == pytest.approx(2 / 3)
+    assert report.to_dict()["propensity_floored_fraction"] == pytest.approx(2 / 3)
+
+
+def test_no_flooring_reports_zero_floored_fraction():
+    report = evaluate_logged_policy(
+        _paired_uniform_log(),
+        reward_col="reward",
+        propensity_col="propensity",
+        target_probability_col="target_prob",
+    )
+
+    assert report.propensity_floored_fraction == 0.0
+
+
+def test_rollout_gate_blocks_on_floored_propensity_by_default():
+    # Even with otherwise strong support, any floored logging propensity is a support
+    # violation that must block the rollout under the default threshold of 0.0.
+    frame = pd.DataFrame(
+        {
+            "reward": [1.0, 1.0, 1.0, 0.0],
+            "propensity": [1e-9, 0.5, 0.5, 0.5],
+            "target_prob": [1.0, 1.0, 1.0, 0.0],
+        }
+    )
+    report = evaluate_logged_policy(
+        frame,
+        reward_col="reward",
+        propensity_col="propensity",
+        target_probability_col="target_prob",
+        min_propensity=1e-3,
+    )
+
+    blocked = evaluate_rollout_gate(report, min_effect=0.0, min_ess_fraction=0.0, min_coverage=0.0)
+    assert blocked.allowed is False
+    assert any("floored" in reason for reason in blocked.reasons)
+
+    # Relaxing the threshold above the observed floored fraction lets it through.
+    relaxed = evaluate_rollout_gate(
+        report,
+        min_effect=0.0,
+        min_ess_fraction=0.0,
+        min_coverage=0.0,
+        max_propensity_floored_fraction=0.5,
+    )
+    assert all("floored" not in reason for reason in relaxed.reasons)
+
+
+def test_rollout_gate_support_diagnostics_are_target_only():
+    # The comparison's baseline has full coverage while the target only covers half the
+    # logged events. The gate must report the target's coverage, not the baseline's.
+    comparison = compare_logged_policies(
+        _paired_uniform_log(),
+        reward_col="reward",
+        propensity_col="propensity",
+        target_probability_col="target_prob",
+        baseline_probability_col="baseline_prob",
+    )
+
+    assert comparison.target.coverage == 0.5
+    assert comparison.baseline.coverage == 1.0
+
+    gate = evaluate_rollout_gate(comparison, min_effect=-1.0, min_ess_fraction=0.0, min_coverage=0.0)
+    assert gate.coverage == pytest.approx(comparison.target.coverage)

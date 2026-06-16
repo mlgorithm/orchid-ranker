@@ -143,7 +143,11 @@ class TabularFQE:
             for idx in rng.permutation(len(rows)):
                 context, action, reward, next_context, target_action, done = rows[int(idx)]
                 current = self.q_values_.get((context, action), 0.0)
-                bootstrap = 0.0 if done else self.q_values_.get((next_context, target_action), 0.0)
+                # Bootstrap from V^pi(next_context) = Q^pi(next_context, pi(next_context)),
+                # using the canonical per-context policy action recovered for the whole
+                # dataset rather than this row's possibly-inconsistent target_action.
+                next_policy_action = policy_action_by_context.get(next_context, target_action)
+                bootstrap = 0.0 if done else self.q_values_.get((next_context, next_policy_action), 0.0)
                 target = reward + self.gamma * bootstrap
                 error = current - target
                 self.q_values_[(context, action)] = float(current - self.learning_rate * error)
@@ -178,12 +182,21 @@ class TabularFQE:
         return float(self.q_values_.get((context, action), 0.0))
 
     def value(self, contexts: list[Any], actions: list[Any]) -> float:
+        """Mean Q value over the queried ``(context, action)`` pairs.
+
+        Returns NaN when *any* queried pair was never seen during ``fit``: an
+        unseen pair has no learned value, and silently treating it as ``0.0``
+        would dilute the average toward zero and disguise the missing support.
+        """
         self._require_fitted()
         if len(contexts) != len(actions):
             raise ValueError("contexts and actions must have the same length")
         if not contexts:
             return 0.0
-        return float(np.mean([self.q_values_.get((context, action), 0.0) for context, action in zip(contexts, actions)]))
+        pairs = list(zip(contexts, actions))
+        if any(pair not in self.q_values_ for pair in pairs):
+            return float("nan")
+        return float(np.mean([self.q_values_[pair] for pair in pairs]))
 
     def _require_fitted(self) -> None:
         if self.report_ is None:
