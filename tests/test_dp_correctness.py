@@ -184,27 +184,35 @@ class TestNoiseInjection:
             "With zero noise multiplier, runs should be deterministic"
 
     def test_noise_scale_statistical_test(self):
-        """Test noise std ≈ sigma * max_grad_norm (statistical check)."""
-        # We'll sample noise from multiple runs and verify statistics
+        """Noise std on the averaged gradient must equal sigma * max_grad_norm / B.
+
+        With fixed data and identical model init, the summed clipped gradient is
+        deterministic, so the only across-run variation in ``p.grad`` is the injected
+        Gaussian noise divided by the batch size B. Measuring the empirical std of
+        ``p.grad`` over many runs therefore verifies the actual noise scale -- the one
+        numeric property that makes the (eps, delta) accounting valid.
+        """
+        torch.manual_seed(0)
         device = torch.device("cpu")
-        n_runs = 50
         sigma = 1.5
         max_grad_norm = 2.0
+        batch_size = 4
 
-        for _ in range(n_runs):
-            # Simple model and batch
+        init = nn.Linear(5, 1)
+        init_state = {k: v.clone() for k, v in init.state_dict().items()}
+        x = torch.randn(batch_size, 5)
+        y = torch.randn(batch_size, 1)
+
+        grads = []
+        for _ in range(400):
             model = nn.Linear(5, 1)
+            model.load_state_dict(init_state)
             params = list(model.parameters())
+            optimizer = torch.optim.SGD(params, lr=0.0)  # lr=0: read grad, don't move params
 
-            x = torch.randn(4, 5)
-            y = torch.randn(4, 1)
+            def loss_fn(x_batch, y_batch, _m=model):
+                return torch.mean((_m(x_batch) - y_batch) ** 2)
 
-            def loss_fn(x_batch, y_batch):
-                return torch.mean((model(x_batch) - y_batch) ** 2)
-
-            optimizer = torch.optim.SGD(params, lr=0.01)
-
-            # Run step with noise
             dp_sgd_step(
                 model=model,
                 params=params,
@@ -215,12 +223,18 @@ class TestNoiseInjection:
                 noise_multiplier=sigma,
                 device=device,
             )
+            grads.append(model.weight.grad.detach().flatten().clone())
 
-            # Extract noise implicitly through gradient changes
-            # (This is a proxy; we're checking the effect is there)
+        stacked = torch.stack(grads)  # (runs, n_weights)
+        empirical_std = float(stacked.std(dim=0, unbiased=True).mean())
+        expected_std = sigma * max_grad_norm / batch_size
+        assert empirical_std == pytest.approx(expected_std, rel=0.15), (
+            f"empirical noise std {empirical_std:.4f} != expected {expected_std:.4f}"
+        )
 
-        # At least verify the function runs without error
-        assert True, "Noise injection should execute without error"
+        # Mean across runs should be ~the deterministic clipped-grad mean (noise mean 0):
+        # the per-run noise has mean 0, so averaging many runs concentrates on the signal.
+        assert torch.isfinite(stacked).all()
 
     def test_noise_nonzero_with_positive_multiplier(self):
         """Test that positive noise multiplier produces different parameter updates."""
@@ -304,10 +318,15 @@ class TestAccountantFormula:
         # Sum of all increments should equal final cumulative (with tolerance)
         assert abs(sum(increments) - accountant.eps) < 1e-9
 
-    def test_accountant_formula_abadi(self):
-        """Test epsilon formula matches Abadi et al. (2016) bound.
+    def test_accountant_formula_heuristic_closed_form(self):
+        """Epsilon matches the documented HEURISTIC closed form.
 
         ε(T) ≈ q * sqrt(2*T*log(1/δ)) / σ + T*q^2 / (2*σ^2)
+
+        NOTE: this is the lightweight heuristic implemented by ``SimpleDPAccountant``,
+        NOT the Abadi et al. (2016) moments accountant. It is not guaranteed to
+        upper-bound the true privacy loss; use the Opacus RDP accountant for a
+        compliance-grade (ε, δ) guarantee.
         """
         q, sigma, delta = 0.1, 1.5, 1e-5
         T = 100

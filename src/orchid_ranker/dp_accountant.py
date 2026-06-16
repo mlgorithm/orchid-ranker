@@ -11,6 +11,11 @@ except ImportError:  # pragma: no cover - handled at runtime
     opacus_rdp = None
 
 
+def opacus_available() -> bool:
+    """Return True when the Opacus RDP accountant can be used."""
+    return opacus_rdp is not None
+
+
 class _NullAccountant:
     """No-op accountant used when DP is disabled."""
 
@@ -146,4 +151,4 @@ def build_accountant(engine: str, cfg: SimpleDPConfig):
     )
 
 
-__all__ = ["build_accountant", "OpacusAccountant", "SimpleAccountantAdapter"]
+__all__ = ["build_accountant", "OpacusAccountant", "SimpleAccountantAdapter", "opacus_available"]

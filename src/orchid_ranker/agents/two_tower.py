@@ -18,7 +18,7 @@ import torch.nn as nn
 from orchid_ranker._labels import parse_binary_float
 from orchid_ranker.agents.policies import BootTS, LinUCBPolicy
 from orchid_ranker.agents.simple_dp import SimpleDPConfig
-from orchid_ranker.dp_accountant import build_accountant
+from orchid_ranker.dp_accountant import build_accountant, opacus_available
 from orchid_ranker.native.fast_score import fast_score
 from orchid_ranker.security import AuditLogger
 
@@ -289,7 +289,49 @@ class TwoTowerRecommender(nn.Module):
             sample_rate=float(self.dp_cfg.get("sample_rate", 0.02)),
             delta=float(self.dp_cfg.get("delta", 1e-5)),
         )
-        self._dp_accountant = build_accountant(self.dp_engine, self.dp_settings)
+        # Subsampling amplification is only valid if we ACTUALLY Poisson-subsample
+        # each step. The per-sample update processes the full provided batch, so by
+        # default no subsampling happens. Claiming amplification (q < 1) in that case
+        # would under-report epsilon, i.e. overstate privacy. Default to no subsampling
+        # and account at q = 1.0 so the reported epsilon never overstates the true loss.
+        self._dp_poisson_subsample = bool(self.dp_cfg.get("poisson_subsample", False))
+        self._dp_effective_sample_rate = (
+            float(self.dp_settings.sample_rate) if self._dp_poisson_subsample else 1.0
+        )
+        if (
+            self.dp_settings.enabled
+            and not self._dp_poisson_subsample
+            and float(self.dp_settings.sample_rate) < 1.0
+        ):
+            warnings.warn(
+                "DP is enabled with sample_rate<1.0 but poisson_subsample=False; the "
+                "trainer processes the full batch each step, so subsampling amplification "
+                "does NOT apply. Accounting at q=1.0 to avoid overstating privacy. Set "
+                "dp_cfg['poisson_subsample']=True to actually subsample and benefit from "
+                "amplification.",
+                stacklevel=2,
+            )
+        # Prefer the sound Opacus RDP accountant when available and the engine was not
+        # explicitly pinned; otherwise fall back to the heuristic with a clear warning.
+        if self.dp_settings.enabled and "engine" not in self.dp_cfg and opacus_available():
+            self.dp_engine = "opacus"
+        accountant_cfg = SimpleDPConfig(
+            enabled=self.dp_settings.enabled,
+            noise_multiplier=self.dp_settings.noise_multiplier,
+            max_grad_norm=self.dp_settings.max_grad_norm,
+            sample_rate=self._dp_effective_sample_rate,
+            delta=self.dp_settings.delta,
+        )
+        self._dp_accountant = build_accountant(self.dp_engine, accountant_cfg)
+        self._dp_accountant_method = "opacus_rdp" if self.dp_engine == "opacus" else "heuristic"
+        if self.dp_settings.enabled and self._dp_accountant_method == "heuristic":
+            warnings.warn(
+                "DP accounting is using the heuristic SimpleDPAccountant, which is NOT a "
+                "validated upper bound on privacy loss. Install opacus for a sound RDP "
+                "accountant (pip install 'orchid-ranker[privacy]') or pass "
+                "dp_cfg['engine']='opacus'.",
+                stacklevel=2,
+            )
         self.eps_cum = 0.0
         self.eps_last = 0.0
         self._dp_steps_total = 0
@@ -978,15 +1020,20 @@ class TwoTowerRecommender(nn.Module):
         preview = self._dp_accountant.fork()
         steps = 0
         MAX_STEPS = 32
+        # Bound the CUMULATIVE epsilon by tgt: take a step only while the running total
+        # stays within budget. The previous code compared each step's MARGINAL cost to
+        # the total target, so it never actually capped cumulative epsilon and almost
+        # always ran to MAX_STEPS.
         while steps < MAX_STEPS:
-            inc, _ = preview.step(1)
-            if inc <= 0.0:
-                if inc == 0.0:
-                    steps += 1
-                break
-            if inc > tgt:
-                break
+            inc, cum = preview.step(1)
+            if cum > tgt:
+                break  # taking this step would exceed the cumulative epsilon budget
             steps += 1
+            if inc <= 0.0:
+                break  # accountant not advancing; stop to avoid a futile loop
+
+        if steps >= MAX_STEPS:
+            _d(f"DP begin: hit MAX_STEPS cap ({MAX_STEPS}); step budget truncated")
 
         self._dp_steps_budget = max(0, steps)
         _d(f"DP begin: tgt_eps={tgt:.4f} -> steps_budget={self._dp_steps_budget}")
@@ -1246,15 +1293,10 @@ class TwoTowerRecommender(nn.Module):
                 loss = bce(logits, y) + kl_pen
                 loss.backward()
 
-                if dp_enabled:
-                    torch.nn.utils.clip_grad_norm_(trainable, max_norm=C)
-                    with torch.no_grad():
-                        for p in trainable:
-                            if p.grad is None:
-                                continue
-                            noise = self._dp_noise(p, sigma * C, shape=p.grad.shape)
-                            p.grad.add_(noise)
-
+                # Non-DP path: plain (non-private) update. DP-enabled training always
+                # goes through the per-sample branch above; batch-level clip_grad_norm_
+                # is NOT per-sample clipping and would provide no DP guarantee, so it is
+                # intentionally absent here.
                 self._opt.step()
                 executed_steps += 1
                 loss_val = float(loss.detach().item())
@@ -1304,7 +1346,12 @@ class TwoTowerRecommender(nn.Module):
             "epsilon_cum": float(getattr(self, "eps_cum", 0.0)),
             "noise_multiplier": (sigma if dp_enabled else None),
             "delta": (delta if dp_enabled else None),
-            "sample_rate": (q if dp_enabled else None),
+            # sample_rate is the rate the accountant ACTUALLY used (q=1.0 unless real
+            # Poisson subsampling is enabled); configured_sample_rate is the raw config.
+            "sample_rate": (self._dp_effective_sample_rate if dp_enabled else None),
+            "configured_sample_rate": (q if dp_enabled else None),
+            "poisson_subsample": (bool(self._dp_poisson_subsample) if dp_enabled else None),
+            "dp_accountant": (self._dp_accountant_method if dp_enabled else None),
         }
 
         if self.audit_logger is not None:
@@ -1315,6 +1362,9 @@ class TwoTowerRecommender(nn.Module):
                 "noise_multiplier": stats_out["noise_multiplier"],
                 "delta": stats_out["delta"],
                 "sample_rate": stats_out["sample_rate"],
+                "configured_sample_rate": stats_out["configured_sample_rate"],
+                "poisson_subsample": stats_out["poisson_subsample"],
+                "dp_accountant": stats_out["dp_accountant"],
                 "steps_total": getattr(self, "_dp_steps_total", 0),
                 "dp_enabled": bool(dp_enabled),
             }
@@ -1394,23 +1444,39 @@ class TwoTowerRecommender(nn.Module):
         sum_grads = [torch.zeros_like(p, device=device) for p in trainable]
         total_loss = 0.0
         B = len(per_sample_losses)
+
+        # Poisson subsampling: when enabled, each sample is independently included with
+        # probability q -- this is precisely what makes the accountant's amplification
+        # valid. When disabled (default), every sample is included and the accountant is
+        # built with q=1.0 (no amplification claimed). The lot-size normalizer is the
+        # expected lot size q*B under subsampling, else the batch size B.
+        if self._dp_poisson_subsample and B > 0:
+            q_sub = float(self.dp_settings.sample_rate)
+            include = torch.bernoulli(torch.full((B,), q_sub, device=device))
+            lot_size = max(1.0, q_sub * B)
+        else:
+            include = None
+            lot_size = float(max(1, B))
+
         for idx, loss_sample in enumerate(per_sample_losses):
             for p in trainable:
                 if p.grad is not None:
                     p.grad.zero_()
             loss_sample.backward(retain_graph=idx < B - 1)
+            total_loss += float(loss_sample.detach().item())
+            if include is not None and float(include[idx]) == 0.0:
+                continue  # sample not drawn into this Poisson lot
             grads = [p.grad.detach().clone() if p.grad is not None else torch.zeros_like(p, device=device) for p in trainable]
             norm_sq = sum(float(torch.sum(g.pow(2))) for g in grads)
             l2 = math.sqrt(max(norm_sq, 1e-12))
             clip = min(1.0, C / l2)
             for j, g in enumerate(grads):
                 sum_grads[j].add_(g * clip)
-            total_loss += float(loss_sample.detach().item())
 
         std = float(sigma) * float(C)
         for j, p in enumerate(trainable):
             noise = self._dp_noise(p, std)
-            p.grad = (sum_grads[j] + noise) / max(1, B)
+            p.grad = (sum_grads[j] + noise) / lot_size
 
         self._opt.step()
         return float(total_loss / max(1, B))

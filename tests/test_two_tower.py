@@ -463,6 +463,49 @@ class TestTwoTowerUpdate:
         assert model._dp_steps_budget == 1
         assert result["epsilon_delta"] > 0.0
 
+    def test_begin_dp_step_bounds_cumulative_epsilon(self):
+        """begin_dp_step must cap CUMULATIVE epsilon at the target, not per-step cost."""
+        device = torch.device("cpu")
+        model = TwoTowerRecommender(
+            num_users=5,
+            num_items=10,
+            user_dim=4,
+            item_dim=4,
+            emb_dim=8,
+            lr=0.01,
+            dp_cfg={
+                "enabled": True,
+                "noise_multiplier": 1.0,
+                "sample_rate": 1.0,
+                "delta": 1e-5,
+                "max_grad_norm": 1.0,
+                "engine": "per_sample",  # deterministic heuristic accountant
+            },
+            device=device,
+        ).to(device)
+
+        tgt = 20.0
+        model.begin_dp_step(tgt)
+        budget = model._dp_steps_budget
+        assert budget >= 1
+
+        # Running exactly `budget` steps must stay within the cumulative target...
+        acc = model._dp_accountant.fork()
+        cum = 0.0
+        for _ in range(budget):
+            _, cum = acc.step(1)
+        assert cum <= tgt + 1e-9
+
+        # ...and (unless capped by MAX_STEPS) one more step would exceed it, proving the
+        # budget is the maximal affordable number of steps -- not the old "always 32".
+        if budget < 32:
+            _, cum_over = acc.step(1)
+            assert cum_over > tgt
+
+        # A larger target grants at least as many steps.
+        model.begin_dp_step(tgt * 4)
+        assert model._dp_steps_budget >= budget
+
 
 class TestLinUCBPolicy:
     """Test LinUCBPolicy exploration policy."""
