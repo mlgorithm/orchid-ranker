@@ -28,6 +28,8 @@ spec:
             - containerPort: {{ .Values.health.port }}
               name: health
           args:
+            # Bind all interfaces inside the pod (serve defaults to loopback).
+            - "--host=0.0.0.0"
             - "--port={{ .Values.service.port }}"
             - "--health-port={{ .Values.health.port }}"
             {{- if .Values.metrics.enabled }}

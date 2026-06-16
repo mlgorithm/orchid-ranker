@@ -20,4 +20,6 @@ USER orchid
 
 EXPOSE 8000 8081 9090
 
-ENTRYPOINT ["python", "-m", "orchid_ranker.cli.serve"]
+# serve defaults to binding 127.0.0.1 (safe by default); inside a container we
+# must bind all interfaces so the published ports are reachable.
+ENTRYPOINT ["python", "-m", "orchid_ranker.cli.serve", "--host", "0.0.0.0"]

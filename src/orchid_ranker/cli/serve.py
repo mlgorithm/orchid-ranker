@@ -49,7 +49,15 @@ def _start_status_server(port: int, addr: str) -> HTTPServer:
 
 def main(argv: Sequence[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Run Orchid Ranker health and metrics endpoints.")
-    parser.add_argument("--host", default="0.0.0.0")
+    parser.add_argument(
+        "--host",
+        default="127.0.0.1",
+        help=(
+            "Interface to bind. Defaults to 127.0.0.1 (loopback) so the unauthenticated "
+            "endpoints are not exposed by accident. Pass --host 0.0.0.0 to bind all "
+            "interfaces (e.g. inside a container)."
+        ),
+    )
     parser.add_argument("--port", type=int, default=8000)
     parser.add_argument("--metrics-port", type=int, default=9090)
     parser.add_argument("--health-port", type=int, default=8081)

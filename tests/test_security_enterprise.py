@@ -191,6 +191,101 @@ class TestAuditHashChain:
         result = verify_log_integrity(log_path, wrong_key)
         assert result.valid is False
 
+    def test_records_carry_monotonic_seq(self, tmp_path: Path):
+        """Each signed record must carry a 0-based, +1 incrementing _seq field."""
+        log_path = tmp_path / "audit.jsonl"
+        self._write_events(log_path, n=4)
+
+        seqs = [
+            json.loads(line)["_seq"]
+            for line in log_path.read_text().splitlines()
+            if line.strip()
+        ]
+        assert seqs == [0, 1, 2, 3]
+
+    def test_integrity_detects_tail_truncation(self, tmp_path: Path):
+        """A tail-truncated log must fail verification against an expected count.
+
+        Pure tail-truncation to a clean prefix is self-consistent (records
+        0,1,2 still chain correctly), so it cannot be caught from the file
+        alone. The signed _seq makes the record count meaningful: passing the
+        out-of-band expected_records anchor surfaces the dropped tail.
+        """
+        log_path = tmp_path / "audit.jsonl"
+        self._write_events(log_path, n=5)
+
+        lines = [l for l in log_path.read_text().splitlines() if l.strip()]
+        # Drop the last two records (tail truncation).
+        log_path.write_text("\n".join(lines[:3]) + "\n")
+
+        # The surviving prefix is internally consistent...
+        assert verify_log_integrity(log_path, HMAC_KEY).valid is True
+        # ...but verifying against the known original length detects the loss.
+        result = verify_log_integrity(log_path, HMAC_KEY, expected_records=5)
+        assert result.valid is False
+        assert result.error_message is not None
+        assert "truncat" in result.error_message.lower()
+
+    def test_seq_gap_detected(self, tmp_path: Path):
+        """A gap in the sequence (deleting an interior record) must fail.
+
+        Deleting an interior record breaks BOTH the prev-hash chain and the
+        sequence (0,1,3,...). The signed _seq makes the deletion unambiguous
+        even without an expected-count anchor.
+        """
+        log_path = tmp_path / "audit.jsonl"
+        self._write_events(log_path, n=5)
+
+        lines = [l for l in log_path.read_text().splitlines() if l.strip()]
+        # Remove an interior record so seq jumps 0,1,3,4 (gap at 2).
+        del lines[2]
+        log_path.write_text("\n".join(lines) + "\n")
+
+        result = verify_log_integrity(log_path, HMAC_KEY)
+        assert result.valid is False
+        assert result.first_error_line is not None
+
+    def test_tail_truncation_then_replayed_append_detected(self, tmp_path: Path):
+        """Truncating the tail and replaying an old record must fail.
+
+        Concrete exploit: an attacker truncates recent records and re-appends a
+        previously valid line to keep the count looking right. The replayed
+        record carries a stale signed _seq, so the monotonic-increment check
+        fails even without an expected-count anchor.
+        """
+        log_path = tmp_path / "audit.jsonl"
+        self._write_events(log_path, n=5)
+
+        lines = [l for l in log_path.read_text().splitlines() if l.strip()]
+        # Keep records 0,1; replay record 1 (seq=1) into position 2.
+        forged = [lines[0], lines[1], lines[1]]
+        log_path.write_text("\n".join(forged) + "\n")
+
+        result = verify_log_integrity(log_path, HMAC_KEY)
+        assert result.valid is False
+        assert result.first_error_line is not None
+
+    def test_reordering_detected(self, tmp_path: Path):
+        """Swapping two records must fail verification."""
+        log_path = tmp_path / "audit.jsonl"
+        self._write_events(log_path, n=4)
+
+        lines = [l for l in log_path.read_text().splitlines() if l.strip()]
+        lines[1], lines[2] = lines[2], lines[1]
+        log_path.write_text("\n".join(lines) + "\n")
+
+        result = verify_log_integrity(log_path, HMAC_KEY)
+        assert result.valid is False
+
+    def test_expected_records_passes_on_intact_log(self, tmp_path: Path):
+        """The expected_records anchor must accept an intact, full-length log."""
+        log_path = tmp_path / "audit.jsonl"
+        self._write_events(log_path, n=4)
+
+        result = verify_log_integrity(log_path, HMAC_KEY, expected_records=4)
+        assert result.valid is True
+        assert result.lines_checked == 4
+
 
 class TestEncryptedAuditIntegrity:
     """Encrypted audit logs must verify with the decryption key."""
@@ -236,6 +331,76 @@ class TestEncryptedAuditIntegrity:
         )
         assert result.valid is True
         assert result.lines_checked == 3
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# 2b. Audit HMAC downgrade is not silent
+# ═══════════════════════════════════════════════════════════════════════════
+
+
+class TestAuditHmacDowngrade:
+    """Constructing an AuditLogger without an HMAC key must not be silent."""
+
+    def test_no_hmac_key_warns(self, tmp_path: Path, recwarn):
+        """A logger built without an HMAC key emits a UserWarning."""
+        AuditLogger(tmp_path / "audit.jsonl")
+        messages = [str(w.message) for w in recwarn.list]
+        assert any("WITHOUT an HMAC key" in m for m in messages), messages
+
+    def test_no_hmac_key_logs_warning(self, tmp_path: Path, caplog):
+        """A logger built without an HMAC key also logs a warning."""
+        with caplog.at_level(logging.WARNING):
+            AuditLogger(tmp_path / "audit.jsonl")
+        assert "without an hmac key" in caplog.text.lower()
+
+    def test_hmac_key_does_not_warn(self, tmp_path: Path, recwarn):
+        """Providing an HMAC key must not emit the downgrade warning."""
+        AuditLogger(tmp_path / "audit.jsonl", hmac_key=HMAC_KEY)
+        messages = [str(w.message) for w in recwarn.list]
+        assert not any("WITHOUT an HMAC key" in m for m in messages), messages
+
+    def test_require_hmac_raises_without_key(self, tmp_path: Path):
+        """require_hmac=True must raise when no HMAC key is supplied."""
+        with pytest.raises(ValueError, match="requires an HMAC key"):
+            AuditLogger(tmp_path / "audit.jsonl", require_hmac=True)
+
+    def test_require_hmac_ok_with_key(self, tmp_path: Path):
+        """require_hmac=True must succeed when an HMAC key is supplied."""
+        logger = AuditLogger(
+            tmp_path / "audit.jsonl", hmac_key=HMAC_KEY, require_hmac=True
+        )
+        assert logger.hmac_key == HMAC_KEY
+
+    def test_from_env_require_hmac_env_var_raises(self, tmp_path: Path, monkeypatch):
+        """ORCHID_AUDIT_REQUIRE_HMAC=1 must make from_env raise without a key."""
+        monkeypatch.delenv("ORCHID_AUDIT_HMAC_KEY", raising=False)
+        monkeypatch.delenv("ORCHID_AUDIT_ENDPOINT", raising=False)
+        monkeypatch.delenv("ORCHID_AUDIT_API_KEY", raising=False)
+        monkeypatch.setenv("ORCHID_AUDIT_REQUIRE_HMAC", "1")
+        with pytest.raises(ValueError, match="requires an HMAC key"):
+            AuditLogger.from_env(tmp_path / "audit.jsonl")
+
+    def test_from_env_require_hmac_env_var_ok_with_key(
+        self, tmp_path: Path, monkeypatch
+    ):
+        """from_env honors the require flag and succeeds when the key is set."""
+        monkeypatch.setenv("ORCHID_AUDIT_HMAC_KEY", HMAC_KEY.hex())
+        monkeypatch.setenv("ORCHID_AUDIT_REQUIRE_HMAC", "true")
+        monkeypatch.delenv("ORCHID_AUDIT_ENDPOINT", raising=False)
+        monkeypatch.delenv("ORCHID_AUDIT_API_KEY", raising=False)
+        logger = AuditLogger.from_env(tmp_path / "audit.jsonl")
+        assert logger.hmac_key == HMAC_KEY
+
+    def test_from_env_explicit_require_hmac_overrides_env(
+        self, tmp_path: Path, monkeypatch
+    ):
+        """An explicit require_hmac argument wins over the env var."""
+        monkeypatch.delenv("ORCHID_AUDIT_HMAC_KEY", raising=False)
+        monkeypatch.delenv("ORCHID_AUDIT_ENDPOINT", raising=False)
+        monkeypatch.delenv("ORCHID_AUDIT_API_KEY", raising=False)
+        monkeypatch.setenv("ORCHID_AUDIT_REQUIRE_HMAC", "1")
+        # Explicitly opting out must not raise even though the env var is set.
+        AuditLogger.from_env(tmp_path / "audit.jsonl", require_hmac=False)
 
 
 # ═══════════════════════════════════════════════════════════════════════════
