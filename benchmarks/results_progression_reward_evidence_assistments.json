@@ -1,0 +1,381 @@
+{
+  "assumptions": {
+    "confound_controls": [
+      "partial_spearman|p_correct,competence",
+      "within_competence_bin_strata"
+    ],
+    "future_window": 5.0,
+    "max_events": 8000.0,
+    "realized_gain": "normalized future same-concept improvement (observational proxy)",
+    "split": "chronological_by_user",
+    "target_correct": 0.7
+  },
+  "dataset": "data/assistments_kt/interactions.csv",
+  "runs": [
+    {
+      "ablations": {
+        "competence_only_spearman": -0.056515104355128826,
+        "correctness_only_spearman": 0.03232184742766272,
+        "random_spearman": -0.02308528295463602
+      },
+      "n_decisions": 8000.0,
+      "n_with_realized_gain": 5171.0,
+      "overall_spearman": {
+        "ci_high": 0.012081528138807494,
+        "ci_low": -0.046550368162172256,
+        "estimate": -0.016415296442847845
+      },
+      "partial_spearman_given_pcorrect_competence": {
+        "ci_high": -0.04714634174916926,
+        "ci_low": -0.10443224077863826,
+        "estimate": -0.0768434602662358
+      },
+      "per_term": {
+        "difficulty_bonus": {
+          "partial_spearman": -0.08899533310856057,
+          "sign_in_reward": 1,
+          "spearman": -0.07300433412357683
+        },
+        "easy_penalty": {
+          "partial_spearman": 0.00022385295425853338,
+          "sign_in_reward": -1,
+          "spearman": NaN
+        },
+        "expected_outcome_value": {
+          "partial_spearman": -0.09094700988315971,
+          "sign_in_reward": 1,
+          "spearman": -0.06059319978701202
+        },
+        "hard_penalty": {
+          "partial_spearman": 0.00022385295425853338,
+          "sign_in_reward": -1,
+          "spearman": NaN
+        },
+        "mastery_gain": {
+          "partial_spearman": -0.01985846515765014,
+          "sign_in_reward": 1,
+          "spearman": 0.052437503178032155
+        },
+        "repetition_penalty": {
+          "partial_spearman": 0.009379873843327832,
+          "sign_in_reward": -1,
+          "spearman": 0.006971437308670758
+        },
+        "stretch_fit": {
+          "partial_spearman": -0.009160471145183265,
+          "sign_in_reward": 1,
+          "spearman": 0.03341197118284792
+        }
+      },
+      "seed": 11,
+      "split": {
+        "test_events": 80124.0,
+        "test_users": 3940.0,
+        "train_events": 317194.0
+      },
+      "stratified": {
+        "mean_within_stratum_monotonicity": -0.6249999999999999,
+        "strata": [
+          {
+            "bucket_mean_gain": [
+              0.5665328228335755,
+              0.5521192911599415,
+              0.5290326059681464,
+              0.5476512414097308,
+              0.5592563840465095
+            ],
+            "competence_bin": "(-0.001, 0.5]",
+            "n": 2077.0,
+            "reward_vs_gain_monotonicity": -0.3
+          },
+          {
+            "bucket_mean_gain": [
+              0.5832679414500792,
+              0.5717571782014517,
+              0.5619130733859963,
+              0.5837818109825206,
+              0.5373199329455308
+            ],
+            "competence_bin": "(0.5, 0.625]",
+            "n": 516.0,
+            "reward_vs_gain_monotonicity": -0.39999999999999997
+          },
+          {
+            "bucket_mean_gain": [
+              0.5663900873112474,
+              0.5811375825885027,
+              0.554006613538054,
+              0.5523154157633875,
+              0.5321284883509518
+            ],
+            "competence_bin": "(0.625, 0.8]",
+            "n": 1359.0,
+            "reward_vs_gain_monotonicity": -0.8999999999999998
+          },
+          {
+            "bucket_mean_gain": [
+              0.5346604545666872,
+              0.527919126926957,
+              0.5208956932866197,
+              0.52159828354345,
+              0.4853290501147346
+            ],
+            "competence_bin": "(0.8, 1.0]",
+            "n": 1219.0,
+            "reward_vs_gain_monotonicity": -0.8999999999999998
+          }
+        ]
+      },
+      "verdict": {
+        "evidenced": false,
+        "rule": "partial Spearman CI excludes 0 (low>0) AND overall >= correctness-only Spearman"
+      }
+    },
+    {
+      "ablations": {
+        "competence_only_spearman": -0.056515104355128826,
+        "correctness_only_spearman": 0.01224880507919902,
+        "random_spearman": 0.014531871489361657
+      },
+      "n_decisions": 8000.0,
+      "n_with_realized_gain": 5171.0,
+      "overall_spearman": {
+        "ci_high": 0.00667685594489511,
+        "ci_low": -0.04593147770777092,
+        "estimate": -0.01877537458682183
+      },
+      "partial_spearman_given_pcorrect_competence": {
+        "ci_high": -0.050608840243573046,
+        "ci_low": -0.10161706966338516,
+        "estimate": -0.07654180526507502
+      },
+      "per_term": {
+        "difficulty_bonus": {
+          "partial_spearman": -0.09002129271762038,
+          "sign_in_reward": 1,
+          "spearman": -0.07300433412357683
+        },
+        "easy_penalty": {
+          "partial_spearman": -0.000599755438718952,
+          "sign_in_reward": -1,
+          "spearman": NaN
+        },
+        "expected_outcome_value": {
+          "partial_spearman": -0.09003547418318472,
+          "sign_in_reward": 1,
+          "spearman": -0.06772880413796595
+        },
+        "hard_penalty": {
+          "partial_spearman": -0.000599755438718952,
+          "sign_in_reward": -1,
+          "spearman": NaN
+        },
+        "mastery_gain": {
+          "partial_spearman": 0.0013599109074932557,
+          "sign_in_reward": 1,
+          "spearman": 0.0552387127972834
+        },
+        "repetition_penalty": {
+          "partial_spearman": 0.008891685003121142,
+          "sign_in_reward": -1,
+          "spearman": 0.006971437308670758
+        },
+        "stretch_fit": {
+          "partial_spearman": -0.015413485999148074,
+          "sign_in_reward": 1,
+          "spearman": 0.017782165434803442
+        }
+      },
+      "seed": 17,
+      "split": {
+        "test_events": 80124.0,
+        "test_users": 3940.0,
+        "train_events": 317194.0
+      },
+      "stratified": {
+        "mean_within_stratum_monotonicity": -0.6499999999999999,
+        "strata": [
+          {
+            "bucket_mean_gain": [
+              0.5715433324714048,
+              0.5487110409496658,
+              0.5329605585614959,
+              0.5450894536502869,
+              0.5562830509259723
+            ],
+            "competence_bin": "(-0.001, 0.5]",
+            "n": 2077.0,
+            "reward_vs_gain_monotonicity": -0.3
+          },
+          {
+            "bucket_mean_gain": [
+              0.592791177972387,
+              0.5676904197070977,
+              0.557878463452495,
+              0.5745902585124892,
+              0.5449971587140969
+            ],
+            "competence_bin": "(0.5, 0.625]",
+            "n": 516.0,
+            "reward_vs_gain_monotonicity": -0.7
+          },
+          {
+            "bucket_mean_gain": [
+              0.5570706358982944,
+              0.5833621893443314,
+              0.56480837198751,
+              0.5516248175034336,
+              0.5291518851658147
+            ],
+            "competence_bin": "(0.625, 0.8]",
+            "n": 1359.0,
+            "reward_vs_gain_monotonicity": -0.7
+          },
+          {
+            "bucket_mean_gain": [
+              0.5295203141623833,
+              0.5351574817438268,
+              0.5218169415704345,
+              0.5137055357460116,
+              0.4902061108235128
+            ],
+            "competence_bin": "(0.8, 1.0]",
+            "n": 1219.0,
+            "reward_vs_gain_monotonicity": -0.8999999999999998
+          }
+        ]
+      },
+      "verdict": {
+        "evidenced": false,
+        "rule": "partial Spearman CI excludes 0 (low>0) AND overall >= correctness-only Spearman"
+      }
+    },
+    {
+      "ablations": {
+        "competence_only_spearman": -0.056515104355128826,
+        "correctness_only_spearman": -0.035036150039993066,
+        "random_spearman": 0.0008790186270062354
+      },
+      "n_decisions": 8000.0,
+      "n_with_realized_gain": 5171.0,
+      "overall_spearman": {
+        "ci_high": 0.008087057226438444,
+        "ci_low": -0.04995669430875623,
+        "estimate": -0.02169787052379356
+      },
+      "partial_spearman_given_pcorrect_competence": {
+        "ci_high": -0.04766893094370668,
+        "ci_low": -0.09969154548699917,
+        "estimate": -0.07511936024649003
+      },
+      "per_term": {
+        "difficulty_bonus": {
+          "partial_spearman": -0.09193239707099284,
+          "sign_in_reward": 1,
+          "spearman": -0.07300433412357683
+        },
+        "easy_penalty": {
+          "partial_spearman": 0.0003063117924512441,
+          "sign_in_reward": -1,
+          "spearman": NaN
+        },
+        "expected_outcome_value": {
+          "partial_spearman": -0.0936222586825108,
+          "sign_in_reward": 1,
+          "spearman": -0.08361319598106547
+        },
+        "hard_penalty": {
+          "partial_spearman": 0.0003063117924512441,
+          "sign_in_reward": -1,
+          "spearman": NaN
+        },
+        "mastery_gain": {
+          "partial_spearman": 0.029351901495120857,
+          "sign_in_reward": 1,
+          "spearman": 0.06101540398258463
+        },
+        "repetition_penalty": {
+          "partial_spearman": 0.009294370462192125,
+          "sign_in_reward": -1,
+          "spearman": 0.006971437308670758
+        },
+        "stretch_fit": {
+          "partial_spearman": -0.003651004345993136,
+          "sign_in_reward": 1,
+          "spearman": 0.003382474709055106
+        }
+      },
+      "seed": 23,
+      "split": {
+        "test_events": 80124.0,
+        "test_users": 3940.0,
+        "train_events": 317194.0
+      },
+      "stratified": {
+        "mean_within_stratum_monotonicity": -0.5249999999999999,
+        "strata": [
+          {
+            "bucket_mean_gain": [
+              0.5817947942136715,
+              0.5297488069303903,
+              0.5468905642239683,
+              0.5391027766639688,
+              0.5570240067735983
+            ],
+            "competence_bin": "(-0.001, 0.5]",
+            "n": 2077.0,
+            "reward_vs_gain_monotonicity": -0.09999999999999999
+          },
+          {
+            "bucket_mean_gain": [
+              0.5895561087112396,
+              0.5611041490796315,
+              0.5799295996915561,
+              0.5683147816258727,
+              0.5390742476896947
+            ],
+            "competence_bin": "(0.5, 0.625]",
+            "n": 516.0,
+            "reward_vs_gain_monotonicity": -0.7
+          },
+          {
+            "bucket_mean_gain": [
+              0.5700211037863411,
+              0.5791708007783575,
+              0.5603556885838802,
+              0.5464136115129233,
+              0.5300403250783097
+            ],
+            "competence_bin": "(0.625, 0.8]",
+            "n": 1359.0,
+            "reward_vs_gain_monotonicity": -0.8999999999999998
+          },
+          {
+            "bucket_mean_gain": [
+              0.5175253097517568,
+              0.5403248586004875,
+              0.5267466712656171,
+              0.5228382213031008,
+              0.48299152693543274
+            ],
+            "competence_bin": "(0.8, 1.0]",
+            "n": 1219.0,
+            "reward_vs_gain_monotonicity": -0.39999999999999997
+          }
+        ]
+      },
+      "verdict": {
+        "evidenced": false,
+        "rule": "partial Spearman CI excludes 0 (low>0) AND overall >= correctness-only Spearman"
+      }
+    }
+  ],
+  "summary": {
+    "evidenced_fraction": 0.0,
+    "mean_correctness_only_spearman": 0.003178167488956223,
+    "mean_overall_spearman": -0.018962847184487746,
+    "mean_partial_spearman": -0.07616820859260028,
+    "mean_within_stratum_monotonicity": -0.6,
+    "n_seeds": 3.0
+  }
+}

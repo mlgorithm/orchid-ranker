@@ -107,6 +107,8 @@ def parse_args(argv: Optional[list[str]] = None) -> argparse.Namespace:
     parser.add_argument("--epochs", type=int, default=1)
     parser.add_argument("--batch-size", type=int, default=512)
     parser.add_argument("--target-correct", type=float, default=0.70)
+    parser.add_argument("--competence-blend", type=float, default=0.0,
+                        help="Weight on tracer-derived concept ability in the ZPD competence (0=empirical).")
     parser.add_argument("--device", default="cpu")
     parser.add_argument("--output", type=Path, default=None)
     return parser.parse_args(argv)
@@ -177,6 +179,7 @@ def _run_seed(frame: pd.DataFrame, *, args: argparse.Namespace, seed: int) -> di
         candidate_size=args.candidate_size,
         max_events=args.max_events,
         target_correct=args.target_correct,
+        competence_blend=args.competence_blend,
         seed=seed,
     )
     realized = attach_delayed_gain_rewards(
@@ -250,6 +253,7 @@ def _collect_decisions(
     candidate_size: int,
     max_events: int,
     target_correct: float,
+    competence_blend: float = 0.0,
     seed: int,
 ) -> pd.DataFrame:
     rng = np.random.default_rng(seed)
@@ -261,6 +265,7 @@ def _collect_decisions(
         difficulty_by_item=difficulty_by_item,
         concept_by_item=concept_by_item,
         config=config,
+        competence_blend=competence_blend,
     ).seed_history(
         split.train,
         user_col=split.user_col,

@@ -100,6 +100,35 @@ JSON with a per-seed `runs` block and an aggregated `summary`:
 - `verdict` — `evidenced` flag and the rule applied
 - `summary` — seed-averaged headline numbers and `evidenced_fraction`
 
+## Measured results (ASSISTments 2009, faithful AKT, 3 seeds)
+
+Run with `--model akt` on the full ASSISTments 2009 skill-builder data (~398k
+interactions; ~5,171 scored decisions per seed). These are the honest current
+numbers — they do **not** support the progression-reward claim:
+
+| competence_blend | overall ρ | partial ρ (CI) | corr-only ρ | evidenced |
+|---|---|---|---|---|
+| 0.0 (default) | −0.019 | **−0.077** ([−0.10, −0.05]) | 0.003 | 0 / 3 |
+| 0.5 | −0.060 | −0.104 | 0.003 | 0 / 3 |
+
+The partial Spearman is small but **robustly negative** (CI excludes 0 across
+all seeds): after controlling for predicted correctness and competence, the
+reward's extra structure mildly *anti*-predicts realized same-concept gain.
+Blending tracer competence in (`competence_blend=0.5`) makes it worse, so the
+shipped default stays 0.0.
+
+Caveats: realized gain is a noisy observational proxy and |ρ| ≈ 0.08 is small.
+But the result is stable and signed, and it **reversed** an earlier weakly
+positive number measured against a less-faithful, below-baseline KT model — so
+the safe reading is "no credible evidence the current reward predicts learning
+gain." The reward weights need a redesign grounded in a stronger outcome signal
+(ideally an online/counterfactual experiment), not just retuning.
+
+Related: on this data the lightweight in-repo neural tracers underperform the
+item-mean baseline (AUC: item-mean 0.69, AKT 0.66, SAKT 0.60) at 3 epochs /
+d_model 64 — they learn and rank AKT > SAKT as expected, but are undertrained
+relative to published KT results and a trivial baseline.
+
 ## Interpreting results
 
 - **Evidenced, positive partial Spearman:** the reward's pedagogical shape adds
