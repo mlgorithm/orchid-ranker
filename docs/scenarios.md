@@ -114,10 +114,8 @@ identity, deployment metadata, and audit requirements.
 **Algorithm path:** adaptive-learning recommender, progression guardrail,
 hashed event IDs, plus the audit-logging and RBAC primitives
 (`AuditLogger`, `AccessControl`) that you wire into your own service. Note that
-the `AdaptiveLearningEngine` does not itself apply differential privacy or emit
-audit events; you call `AuditLogger.log_event(...)` and enforce `AccessControl`
-at your API boundary. Opt-in DP-SGD is available only on the experimental
-two-tower agent path (see [Differential Privacy Notes](privacy.md)).
+the `AdaptiveLearningEngine` does not itself emit audit events; you call
+`AuditLogger.log_event(...)` and enforce `AccessControl` at your API boundary.
 
 ```python
 from orchid_ranker import AdaptiveLearningEngine, AuditLogger

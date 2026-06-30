@@ -37,7 +37,6 @@ class TestMultiConfig:
         assert cfg.top_k_base == 5
         assert cfg.zpd_margin == 0.12
         assert cfg.min_candidates == 100
-        assert cfg.epsilon_total_global == 0.0
         assert cfg.novelty_bonus == 0.10
         assert cfg.mmr_lambda == 0.25
         assert cfg.log_path is None
@@ -45,11 +44,10 @@ class TestMultiConfig:
         assert cfg.share_signals is False
 
     def test_custom_values(self):
-        cfg = MultiConfig(rounds=50, top_k_base=10, zpd_margin=0.2, epsilon_total_global=1.0)
+        cfg = MultiConfig(rounds=50, top_k_base=10, zpd_margin=0.2)
         assert cfg.rounds == 50
         assert cfg.top_k_base == 10
         assert cfg.zpd_margin == 0.2
-        assert cfg.epsilon_total_global == 1.0
 
     def test_tuple_bounds(self):
         cfg = MultiConfig(alpha_bounds=(0.2, 0.9), k_bounds=(3, 8))
@@ -554,20 +552,6 @@ class TestDualRecommender:
         dual.mmr_lambda = 0.4
         assert dual.mmr_lambda == 0.4
 
-    def test_dp_settings_passthrough(self, teacher_student):
-        from orchid_ranker.agents.dual_recommender import DualRecommender
-        teacher, student, device = teacher_student
-        dual = DualRecommender(teacher, student, device=device)
-        # dp_settings is read from student
-        result = dual.dp_settings
-        assert result is getattr(student, "dp_settings", None)
-
-    def test_eps_cum_passthrough(self, teacher_student):
-        from orchid_ranker.agents.dual_recommender import DualRecommender
-        teacher, student, device = teacher_student
-        dual = DualRecommender(teacher, student, device=device)
-        assert dual.eps_cum == 0.0
-
     def test_decide_delegates_to_teacher(self, teacher_student):
         from orchid_ranker.agents.dual_recommender import DualRecommender
         teacher, student, device = teacher_student
@@ -712,7 +696,6 @@ class TestRecShim:
         ).to(device)
         shim = RecShim(rec)
         assert shim.device == device
-        assert shim.eps_cum == 0.0
 
     def test_think_passthrough(self):
         from orchid_ranker.agents.rec_shim import RecShim
@@ -751,8 +734,6 @@ class TestRecShim:
         class DummyRec:
             def __init__(self):
                 self.device = torch.device("cpu")
-                self.dp_cfg = {"enabled": False}
-                self.eps_cum = 0.0
                 self.pos2id_map = {0: 100, 1: 200}
                 self.received_feedback = None
 

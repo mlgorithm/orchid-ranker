@@ -45,7 +45,6 @@ def main() -> int:
         hidden=32,
         emb_dim=16,
         device=str(device),
-        dp_cfg={"enabled": False},
         use_native_scoring=args.native_score,
     )
     model.eval()

@@ -26,33 +26,8 @@ from orchid_ranker.streaming import StreamingAdaptiveRanker
 from orchid_ranker.streaming_bus import KafkaEventBus
 
 
-def test_dp_train_step_adds_noise_and_accounts_privacy() -> None:
-    torch.manual_seed(0)
-    rec = TwoTowerRecommender(
-        num_users=2,
-        num_items=3,
-        user_dim=2,
-        item_dim=2,
-        hidden=4,
-        emb_dim=3,
-        device="cpu",
-        dp_cfg={"enabled": True, "noise_multiplier": 1.0, "sample_rate": 0.5, "delta": 1e-5},
-    )
-    out = rec.train_step(
-        {
-            "user_ids": torch.tensor([0, 0]),
-            "item_ids": torch.tensor([0, 1]),
-            "labels": torch.tensor([1.0, 0.0]),
-            "item_matrix": torch.randn(3, 2),
-            "state_vec": torch.zeros(2, 4),
-        }
-    )
-    assert out["epsilon_cum"] > 0.0
-    assert rec.eps_cum == pytest.approx(out["epsilon_cum"])
-
-
 def test_rec_shim_casts_list_inputs_and_passes_decide_defaults() -> None:
-    rec = TwoTowerRecommender(1, 2, 2, 2, hidden=4, emb_dim=3, device="cpu", dp_cfg={"enabled": False})
+    rec = TwoTowerRecommender(1, 2, 2, 2, hidden=4, emb_dim=3, device="cpu")
     shim = RecShim(rec)
     logits = shim.think(
         user_vec=[[0.1, 0.2]],
@@ -126,7 +101,7 @@ def test_streaming_observe_is_transactional_on_bad_item() -> None:
     torch.manual_seed(0)
     user_features = torch.randn(2, 3)
     item_features = torch.randn(2, 3)
-    tower = TwoTowerRecommender(2, 2, 3, 3, hidden=4, emb_dim=3, device="cpu", dp_cfg={"enabled": False}).eval()
+    tower = TwoTowerRecommender(2, 2, 3, 3, hidden=4, emb_dim=3, device="cpu").eval()
     ranker = StreamingAdaptiveRanker(tower, user_features, item_features)
 
     with pytest.raises(IndexError):

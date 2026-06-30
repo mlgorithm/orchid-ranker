@@ -12,8 +12,6 @@ class RecShim:
     def __init__(self, rec) -> None:
         self.rec = rec
         self.device = rec.device
-        self.dp_cfg = getattr(rec, "dp_cfg", {"enabled": False})
-        self.eps_cum = getattr(rec, "eps_cum", 0.0)
 
     def _to_t(self, x, dtype=torch.float32):
         if isinstance(x, torch.Tensor): return x.to(self.device)
@@ -94,7 +92,6 @@ class RecShim:
         normalized_feedback = self._normalize_feedback_keys(feedback, iids)
         out = self.rec.update(feedback=normalized_feedback, user_vec=u, state_vec=s, user_ids=uids,
                               item_matrix=Xi, item_ids=iids, epochs=int(epochs))
-        self.eps_cum = float(getattr(self.rec, "eps_cum", self.eps_cum))
         return out
 
     # pass-through setters the agents change

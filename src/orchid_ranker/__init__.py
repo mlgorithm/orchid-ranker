@@ -150,7 +150,6 @@ _OPTIONAL_LAZY = {
     "plot_acceptance_heatmap": (".visualization", "plot_acceptance_heatmap"),
     "plot_round_comparison": (".visualization", "plot_round_comparison"),
     "plot_knowledge_trajectory": (".visualization", "plot_knowledge_trajectory"),
-    "get_dp_config": (".dp", "get_dp_config"),
     "configure_logging": (".logging", "configure_logging"),
     "AccessControl": (".security", "AccessControl"),
     "DEFAULT_POLICY": (".security", "DEFAULT_POLICY"),

@@ -279,7 +279,7 @@ class TestRankerIntegration:
         tower = TwoTowerRecommender(
             num_users=8, num_items=12, user_dim=4, item_dim=4,
             hidden=8, emb_dim=8, state_dim=4,
-            device="cpu", dp_cfg={"enabled": False},
+            device="cpu",
         ).eval()
         return StreamingAdaptiveRanker(
             tower, uf, ifeat, monitor=monitor, item_difficulties=difficulties,

@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import copy
 import logging
-import math
 import os
 import threading
 import warnings
@@ -17,8 +16,6 @@ import torch.nn as nn
 
 from orchid_ranker._labels import parse_binary_float
 from orchid_ranker.agents.policies import BootTS, LinUCBPolicy
-from orchid_ranker.agents.simple_dp import SimpleDPConfig
-from orchid_ranker.dp_accountant import build_accountant, opacus_available
 from orchid_ranker.native.fast_score import fast_score
 from orchid_ranker.security import AuditLogger
 
@@ -39,10 +36,6 @@ def _d(*args) -> None:
     """Debug logging helper."""
     if _DEBUG_REC:
         logger.debug("%s", " ".join(str(a) for a in args))
-
-
-def _entropy_seed() -> int:
-    return int.from_bytes(os.urandom(8), "little") % (2**63 - 1)
 
 
 def _bernoulli_symmetric_kl(student_logits: torch.Tensor, teacher_logits: torch.Tensor) -> torch.Tensor:
@@ -91,8 +84,6 @@ class TwoTowerRecommender(nn.Module):
         Learning rate (default: 1e-2).
     seed : int, optional
         Random seed (default: 42).
-    dp_cfg : dict, optional
-        Differential privacy config (default: None).
     mmr_lambda : float, optional
         Relevance–diversity tradeoff for Maximal Marginal Relevance (MMR).
         0.0 = pure relevance (no diversity), 1.0 = pure diversity (ignore
@@ -130,7 +121,6 @@ class TwoTowerRecommender(nn.Module):
         state_dim: int = 4,   # [knowledge, fatigue, trust, engagement]
         lr: float = 1e-2,
         seed: int = 42,
-        dp_cfg: Optional[dict] = None,
         mmr_lambda: float = 0.3,
         novelty_bonus: float = 0.10,
         zpd_width: float = 0.10,
@@ -279,63 +269,6 @@ class TwoTowerRecommender(nn.Module):
                 nn.Linear(3 * emb_dim + 1, 64), nn.ReLU(), nn.Linear(64, 1)
             )
 
-        # --- DP config ---
-        self.dp_cfg = (dp_cfg or {})
-        self.dp_engine = str(self.dp_cfg.get("engine", "per_sample")).lower()
-        self.dp_settings = SimpleDPConfig(
-            enabled=bool(self.dp_cfg.get("enabled", False)),
-            noise_multiplier=float(self.dp_cfg.get("noise_multiplier", self.dp_cfg.get("sigma", 1.0))),
-            max_grad_norm=float(self.dp_cfg.get("max_grad_norm", self.dp_cfg.get("max_grad", 1.0))),
-            sample_rate=float(self.dp_cfg.get("sample_rate", 0.02)),
-            delta=float(self.dp_cfg.get("delta", 1e-5)),
-        )
-        # Subsampling amplification is only valid if we ACTUALLY Poisson-subsample
-        # each step. The per-sample update processes the full provided batch, so by
-        # default no subsampling happens. Claiming amplification (q < 1) in that case
-        # would under-report epsilon, i.e. overstate privacy. Default to no subsampling
-        # and account at q = 1.0 so the reported epsilon never overstates the true loss.
-        self._dp_poisson_subsample = bool(self.dp_cfg.get("poisson_subsample", False))
-        self._dp_effective_sample_rate = (
-            float(self.dp_settings.sample_rate) if self._dp_poisson_subsample else 1.0
-        )
-        if (
-            self.dp_settings.enabled
-            and not self._dp_poisson_subsample
-            and float(self.dp_settings.sample_rate) < 1.0
-        ):
-            warnings.warn(
-                "DP is enabled with sample_rate<1.0 but poisson_subsample=False; the "
-                "trainer processes the full batch each step, so subsampling amplification "
-                "does NOT apply. Accounting at q=1.0 to avoid overstating privacy. Set "
-                "dp_cfg['poisson_subsample']=True to actually subsample and benefit from "
-                "amplification.",
-                stacklevel=2,
-            )
-        # Prefer the sound Opacus RDP accountant when available and the engine was not
-        # explicitly pinned; otherwise fall back to the heuristic with a clear warning.
-        if self.dp_settings.enabled and "engine" not in self.dp_cfg and opacus_available():
-            self.dp_engine = "opacus"
-        accountant_cfg = SimpleDPConfig(
-            enabled=self.dp_settings.enabled,
-            noise_multiplier=self.dp_settings.noise_multiplier,
-            max_grad_norm=self.dp_settings.max_grad_norm,
-            sample_rate=self._dp_effective_sample_rate,
-            delta=self.dp_settings.delta,
-        )
-        self._dp_accountant = build_accountant(self.dp_engine, accountant_cfg)
-        self._dp_accountant_method = "opacus_rdp" if self.dp_engine == "opacus" else "heuristic"
-        if self.dp_settings.enabled and self._dp_accountant_method == "heuristic":
-            warnings.warn(
-                "DP accounting is using the heuristic SimpleDPAccountant, which is NOT a "
-                "validated upper bound on privacy loss. Install opacus for a sound RDP "
-                "accountant (pip install 'orchid-ranker[privacy]') or pass "
-                "dp_cfg['engine']='opacus'.",
-                stacklevel=2,
-            )
-        self.eps_cum = 0.0
-        self.eps_last = 0.0
-        self._dp_steps_total = 0
-
         # Loss
         self.criterion = nn.BCEWithLogitsLoss(reduction="mean")
 
@@ -362,7 +295,6 @@ class TwoTowerRecommender(nn.Module):
         self._adapted_nov: Optional[float] = None
 
         self.device = device
-        self._dp_noise_generators: Dict[str, torch.Generator] = {}
         self.per_user_only = False
         self._compiled = False
         self.to(self.device)
@@ -686,46 +618,6 @@ class TwoTowerRecommender(nn.Module):
         )
         return logits  # [1,K]
 
-    def _dp_noise(
-        self,
-        parameter: torch.nn.Parameter,
-        std: float,
-        *,
-        shape: Optional[torch.Size] = None,
-    ) -> torch.Tensor:
-        """Draw DP noise from an instance-private generator instead of global torch RNG."""
-        noise_shape = parameter.shape if shape is None else shape
-        key = str(parameter.device)
-        generators = getattr(self, "_dp_noise_generators", None)
-        if generators is None:
-            generators = {}
-            self._dp_noise_generators = generators
-        generator = generators.get(key)
-        if generator is None:
-            try:
-                generator = torch.Generator(device=parameter.device)
-            except RuntimeError:
-                generator = torch.Generator()
-            generator.manual_seed(_entropy_seed())
-            generators[key] = generator
-        try:
-            return torch.normal(
-                mean=0.0,
-                std=float(std),
-                size=noise_shape,
-                device=parameter.device,
-                dtype=parameter.dtype,
-                generator=generator,
-            )
-        except RuntimeError:
-            return torch.normal(
-                mean=0.0,
-                std=float(std),
-                size=noise_shape,
-                device=parameter.device,
-                dtype=parameter.dtype,
-            )
-
     # ---------------- uncertainty widths for policy mapping (paper §3.1) ----------------
     def uncertainty_widths(self, phi_np: np.ndarray, item_ids: List[int]) -> List[float]:
         """Return per-item uncertainty widths σ(i) in [0, +∞), with a small floor.
@@ -1005,39 +897,6 @@ class TwoTowerRecommender(nn.Module):
         return sel_item_ids, selected_scores
 
     # ---------------- training/update (adds KL anchor; optional TS updates) ----------------
-    def begin_dp_step(self, eps_target: float):
-        tgt = max(0.0, float(eps_target))
-        if not getattr(self, "dp_settings", None) or not self.dp_settings.enabled or tgt <= 0.0:
-            self._dp_steps_budget = 0
-            _d(f"DP begin: disabled or tgt<=0 (tgt={tgt})")
-            return
-        sigma = float(self.dp_settings.noise_multiplier or 0.0)
-        q     = float(self.dp_settings.sample_rate or 0.0)
-        if sigma <= 0.0 or q <= 0.0:
-            self._dp_steps_budget = 0
-            _d("DP begin: invalid sigma/q -> no budget")
-            return
-        preview = self._dp_accountant.fork()
-        steps = 0
-        MAX_STEPS = 32
-        # Bound the CUMULATIVE epsilon by tgt: take a step only while the running total
-        # stays within budget. The previous code compared each step's MARGINAL cost to
-        # the total target, so it never actually capped cumulative epsilon and almost
-        # always ran to MAX_STEPS.
-        while steps < MAX_STEPS:
-            inc, cum = preview.step(1)
-            if cum > tgt:
-                break  # taking this step would exceed the cumulative epsilon budget
-            steps += 1
-            if inc <= 0.0:
-                break  # accountant not advancing; stop to avoid a futile loop
-
-        if steps >= MAX_STEPS:
-            _d(f"DP begin: hit MAX_STEPS cap ({MAX_STEPS}); step budget truncated")
-
-        self._dp_steps_budget = max(0, steps)
-        _d(f"DP begin: tgt_eps={tgt:.4f} -> steps_budget={self._dp_steps_budget}")
-
     @torch.no_grad()
     def infer(
         self,
@@ -1144,7 +1003,7 @@ class TwoTowerRecommender(nn.Module):
            scope: str = "global",
            **kwargs) -> Dict[str, float]:
         """
-        DP-aware update + KL regularization against a frozen anchor copy.
+        Online update + KL regularization against a frozen anchor copy.
         """
         device = next(self.parameters()).device
         self.train()
@@ -1181,92 +1040,41 @@ class TwoTowerRecommender(nn.Module):
                f"trainable_params={sum(p.numel() for p in trainable)}")
 
         if not feedback:
-            return {
-                "loss": 0.0,
-                "epsilon_delta": 0.0,
-                "epsilon_cum": float(getattr(self, "eps_cum", 0.0)),
-                "noise_multiplier": None,
-                "delta": None,
-                "sample_rate": None,
-            }
+            return {"loss": 0.0}
 
         with torch.no_grad():
             idx, y_vals = self._resolve_feedback_indices(feedback, item_ids)
             if not idx:
                 _d("update: no matching item_ids for feedback keys; skip")
-                return {
-                    "loss": 0.0,
-                    "epsilon_delta": 0.0,
-                    "epsilon_cum": float(getattr(self, "eps_cum", 0.0)),
-                    "noise_multiplier": None,
-                    "delta": None,
-                    "sample_rate": None,
-                }
+                return {"loss": 0.0}
             idx_t = torch.tensor(idx, dtype=torch.long, device=device)
             y = torch.tensor(y_vals, dtype=torch.float32, device=device)
 
-        # DP settings
-        sigma = float(getattr(self.dp_settings, "noise_multiplier", 0.0) or 0.0)
-        q = float(getattr(self.dp_settings, "sample_rate", 0.0) or 0.0)
-        delta = float(getattr(self.dp_settings, "delta", 1e-5))
-        C = float(getattr(self.dp_settings, "max_grad_norm", 1.0))
-        dp_enabled = bool(getattr(self.dp_settings, "enabled", False))
-        if dp_enabled and (sigma <= 0.0 or q <= 0.0 or C <= 0.0):
-            raise ValueError("DP updates require positive noise_multiplier, sample_rate, and max_grad_norm")
         requested_steps = max(0, int(epochs))
-
-        float(getattr(self, "eps_cum", 0.0) or 0.0)
         bce = torch.nn.BCEWithLogitsLoss(reduction="mean")
 
-        if dp_enabled:
-            if hasattr(self, "_dp_steps_budget"):
-                steps_budget = max(0, int(getattr(self, "_dp_steps_budget", 0)))
-                steps_done = min(requested_steps, steps_budget)
-            else:
-                steps_budget = requested_steps
-                steps_done = requested_steps
-        else:
-            steps_budget = requested_steps
-            steps_done = requested_steps
+        steps_done = requested_steps
 
         if steps_done <= 0:
-            return {
-                "loss": 0.0,
-                "epsilon_delta": 0.0,
-                "epsilon_cum": float(getattr(self, "eps_cum", 0.0)),
-                "noise_multiplier": (sigma if dp_enabled else None),
-                "delta": (delta if dp_enabled else None),
-                "sample_rate": (q if dp_enabled else None),
-            }
+            return {"loss": 0.0}
 
-        if dp_enabled and hasattr(self, "_dp_steps_budget"):
-            self._dp_steps_budget = max(0, steps_budget - steps_done)
+        loss_val = 0.0
+        for step in range(steps_done):
+            self._opt.zero_grad(set_to_none=True)
 
-        executed_steps = 0
-        if dp_enabled:
-            loss_val = 0.0
-            for step in range(steps_done):
-                loss_val = self._dp_update_per_sample(
-                    idx_t=idx_t,
-                    y=y,
-                    user_vec=user_vec,
-                    state_vec=state_vec,
-                    user_ids=user_ids,
-                    item_matrix=item_matrix,
-                    item_ids=item_ids,
-                    trainable=trainable,
-                    sigma=sigma,
-                    C=C,
-                )
-                executed_steps += 1
-                if _DEBUG_REC:
-                    _d(f"update: per-sample step {step+1}/{steps_done} loss={loss_val:.4f}")
-        else:
-            loss_val = 0.0
-            for step in range(steps_done):
-                self._opt.zero_grad(set_to_none=True)
+            logits_all, _u, _I = self._scores_logits(
+                user_vec.to(device),
+                item_matrix.to(device),
+                user_ids.to(device),
+                item_ids.to(device),
+                state_vec=state_vec.to(device),
+                cohort_ids=None,
+            )
+            logits_all = torch.nan_to_num(logits_all, nan=-1e9, posinf=1e9, neginf=-1e9)
+            logits = logits_all[0, idx_t]
 
-                logits_all, _u, _I = self._scores_logits(
+            with torch.no_grad():
+                t_logits_all, _tu, _tI = self.anchor._scores_logits(
                     user_vec.to(device),
                     item_matrix.to(device),
                     user_ids.to(device),
@@ -1274,45 +1082,17 @@ class TwoTowerRecommender(nn.Module):
                     state_vec=state_vec.to(device),
                     cohort_ids=None,
                 )
-                logits_all = torch.nan_to_num(logits_all, nan=-1e9, posinf=1e9, neginf=-1e9)
-                logits = logits_all[0, idx_t]
+                t_logits_all = torch.nan_to_num(t_logits_all, nan=-1e9, posinf=1e9, neginf=-1e9)
+            kl_stu = _bernoulli_symmetric_kl(logits_all[0, idx_t], t_logits_all[0, idx_t])
+            kl_pen = self.kl_beta * kl_stu.mean()
 
-                with torch.no_grad():
-                    t_logits_all, _tu, _tI = self.anchor._scores_logits(
-                        user_vec.to(device),
-                        item_matrix.to(device),
-                        user_ids.to(device),
-                        item_ids.to(device),
-                        state_vec=state_vec.to(device),
-                        cohort_ids=None,
-                    )
-                    t_logits_all = torch.nan_to_num(t_logits_all, nan=-1e9, posinf=1e9, neginf=-1e9)
-                kl_stu = _bernoulli_symmetric_kl(logits_all[0, idx_t], t_logits_all[0, idx_t])
-                kl_pen = self.kl_beta * kl_stu.mean()
+            loss = bce(logits, y) + kl_pen
+            loss.backward()
 
-                loss = bce(logits, y) + kl_pen
-                loss.backward()
-
-                # Non-DP path: plain (non-private) update. DP-enabled training always
-                # goes through the per-sample branch above; batch-level clip_grad_norm_
-                # is NOT per-sample clipping and would provide no DP guarantee, so it is
-                # intentionally absent here.
-                self._opt.step()
-                executed_steps += 1
-                loss_val = float(loss.detach().item())
-                if _DEBUG_REC:
-                    _d(f"update: step {step+1}/{steps_done} loss={loss_val:.4f}")
-
-        # ----- DP accountant (RDP approx) -----
-        eps_delta = 0.0
-        if dp_enabled:
-            eps_delta, self.eps_cum = self._dp_accountant.step(int(executed_steps))
-            self._dp_steps_total += int(executed_steps)
-            self.eps_last = eps_delta
-        else:
-            self.eps_cum = 0.0
-            self.eps_last = 0.0
-            self._dp_steps_total = 0
+            self._opt.step()
+            loss_val = float(loss.detach().item())
+            if _DEBUG_REC:
+                _d(f"update: step {step+1}/{steps_done} loss={loss_val:.4f}")
 
         rewards_np = y.detach().cpu().numpy()
 
@@ -1337,149 +1117,19 @@ class TwoTowerRecommender(nn.Module):
                 pass
 
         if _DEBUG_REC:
-            _d(f"update: done loss={loss_val:.4f} dp={'ON' if dp_enabled else 'OFF'} "
-               f"eps+={eps_delta:.4f} eps_cum={getattr(self, 'eps_cum', 0.0):.4f}")
+            _d(f"update: done loss={loss_val:.4f}")
 
-        stats_out = {
-            "loss": float(loss_val),
-            "epsilon_delta": float(eps_delta),
-            "epsilon_cum": float(getattr(self, "eps_cum", 0.0)),
-            "noise_multiplier": (sigma if dp_enabled else None),
-            "delta": (delta if dp_enabled else None),
-            # sample_rate is the rate the accountant ACTUALLY used (q=1.0 unless real
-            # Poisson subsampling is enabled); configured_sample_rate is the raw config.
-            "sample_rate": (self._dp_effective_sample_rate if dp_enabled else None),
-            "configured_sample_rate": (q if dp_enabled else None),
-            "poisson_subsample": (bool(self._dp_poisson_subsample) if dp_enabled else None),
-            "dp_accountant": (self._dp_accountant_method if dp_enabled else None),
-        }
+        stats_out = {"loss": float(loss_val)}
 
         if self.audit_logger is not None:
-            payload = {
-                "loss": stats_out["loss"],
-                "epsilon_delta": stats_out["epsilon_delta"],
-                "epsilon_cum": stats_out["epsilon_cum"],
-                "noise_multiplier": stats_out["noise_multiplier"],
-                "delta": stats_out["delta"],
-                "sample_rate": stats_out["sample_rate"],
-                "configured_sample_rate": stats_out["configured_sample_rate"],
-                "poisson_subsample": stats_out["poisson_subsample"],
-                "dp_accountant": stats_out["dp_accountant"],
-                "steps_total": getattr(self, "_dp_steps_total", 0),
-                "dp_enabled": bool(dp_enabled),
-            }
+            payload = {"loss": stats_out["loss"]}
             try:
-                self.audit_logger.log_event("dp_update", self._audit_actor, payload)
+                self.audit_logger.log_event("update", self._audit_actor, payload)
             except Exception:
                 if _DEBUG_REC:
                     _d("audit logger failed", payload)
 
         return stats_out
-
-    def _dp_update_per_sample(
-        self,
-        *,
-        idx_t: torch.Tensor,
-        y: torch.Tensor,
-        user_vec: torch.Tensor,
-        state_vec: torch.Tensor,
-        user_ids: torch.Tensor,
-        item_matrix: torch.Tensor,
-        item_ids: torch.Tensor,
-        trainable: List[torch.nn.Parameter],
-        sigma: float,
-        C: float,
-    ) -> float:
-        device = next(self.parameters()).device
-
-        logits_all, _u, _I = self._scores_logits(
-            user_vec.to(device),
-            item_matrix.to(device),
-            user_ids.to(device),
-            item_ids.to(device),
-            state_vec=state_vec.to(device),
-            cohort_ids=None,
-        )
-        logits_all = torch.nan_to_num(logits_all, nan=-1e9, posinf=1e9, neginf=-1e9)
-        teacher = self.anchor
-        if teacher is not None:
-            # ensure frozen anchor has runtime attributes expected by think()
-            defaults = {
-                "use_linucb": getattr(self, "use_linucb", False),
-                "linucb": copy.deepcopy(getattr(self, "linucb", None)) if getattr(self, "use_linucb", False) else None,
-                "use_bootts": getattr(self, "use_bootts", False),
-                "bootts": copy.deepcopy(getattr(self, "bootts", None)) if getattr(self, "use_bootts", False) else None,
-                "ts_alpha": getattr(self, "ts_alpha", 0.0),
-                "entropy_lambda": getattr(self, "entropy_lambda", 0.0),
-                "info_gain_lambda": getattr(self, "info_gain_lambda", 0.0),
-                "pos2id_map": getattr(self, "pos2id_map", {}),
-                "use_dwell": getattr(self, "use_dwell", False),
-                "dwell_head": copy.deepcopy(getattr(self, "dwell_head", None)),
-                "_rep_cache": {},
-                "_rep_cache_cap": getattr(self, "_rep_cache_cap", 16),
-                "_cached_item_matrix": None,
-                "_last_item_reps": None,
-                "_last_item_ids": None,
-            }
-            for attr, val in defaults.items():
-                if not hasattr(teacher, attr):
-                    setattr(teacher, attr, val)
-
-        with torch.no_grad():
-            t_logits_all, _tu, _tI = teacher._scores_logits(
-                user_vec.to(device),
-                item_matrix.to(device),
-                user_ids.to(device),
-                item_ids.to(device),
-                state_vec=state_vec.to(device),
-                cohort_ids=None,
-            )
-            t_logits_all = torch.nan_to_num(t_logits_all, nan=-1e9, posinf=1e9, neginf=-1e9)
-
-        logits = logits_all[0, idx_t]
-        kl_stu = _bernoulli_symmetric_kl(logits, t_logits_all[0, idx_t])
-        bce_per = torch.nn.functional.binary_cross_entropy_with_logits(logits, y, reduction="none")
-        per_sample_losses = bce_per + self.kl_beta * kl_stu
-
-        sum_grads = [torch.zeros_like(p, device=device) for p in trainable]
-        total_loss = 0.0
-        B = len(per_sample_losses)
-
-        # Poisson subsampling: when enabled, each sample is independently included with
-        # probability q -- this is precisely what makes the accountant's amplification
-        # valid. When disabled (default), every sample is included and the accountant is
-        # built with q=1.0 (no amplification claimed). The lot-size normalizer is the
-        # expected lot size q*B under subsampling, else the batch size B.
-        if self._dp_poisson_subsample and B > 0:
-            q_sub = float(self.dp_settings.sample_rate)
-            include = torch.bernoulli(torch.full((B,), q_sub, device=device))
-            lot_size = max(1.0, q_sub * B)
-        else:
-            include = None
-            lot_size = float(max(1, B))
-
-        for idx, loss_sample in enumerate(per_sample_losses):
-            for p in trainable:
-                if p.grad is not None:
-                    p.grad.zero_()
-            loss_sample.backward(retain_graph=idx < B - 1)
-            total_loss += float(loss_sample.detach().item())
-            if include is not None and float(include[idx]) == 0.0:
-                continue  # sample not drawn into this Poisson lot
-            grads = [p.grad.detach().clone() if p.grad is not None else torch.zeros_like(p, device=device) for p in trainable]
-            norm_sq = sum(float(torch.sum(g.pow(2))) for g in grads)
-            l2 = math.sqrt(max(norm_sq, 1e-12))
-            clip = min(1.0, C / l2)
-            for j, g in enumerate(grads):
-                sum_grads[j].add_(g * clip)
-
-        std = float(sigma) * float(C)
-        for j, p in enumerate(trainable):
-            noise = self._dp_noise(p, std)
-            p.grad = (sum_grads[j] + noise) / lot_size
-
-        self._opt.step()
-        return float(total_loss / max(1, B))
 
     # src/agents/agents.py  (inside the TwoTowerRecommender class)
     def _user_vec_from_ids(self, user_ids: torch.Tensor) -> torch.Tensor:
@@ -1568,17 +1218,6 @@ class TwoTowerRecommender(nn.Module):
             item_matrix=Xi,
         )
 
-        if getattr(self, "dp_settings", None) and self.dp_settings.enabled:
-            return self._dp_train_step_pairwise(
-                user_ids=user_ids,
-                item_ids=item_ids,
-                labels=labels,
-                item_matrix=Xi,
-                state_vec=state_vec,
-                distill=batch.get("distill_scores"),
-                distill_lambda=float(batch.get("distill_lambda", 0.0)) if "distill_lambda" in batch else 0.0,
-            )
-
         loss = torch.nn.functional.binary_cross_entropy_with_logits(logits, labels)
         # Optional Funk-style distillation: encourage tower scores to match auxiliary MF scores
         distill = batch.get("distill_scores")
@@ -1598,85 +1237,6 @@ class TwoTowerRecommender(nn.Module):
         if _DEBUG_REC:
             _d(f"train_step: B={int(user_ids.numel())} loss={out['loss']:.4f}")
         return out
-
-    def _dp_train_step_pairwise(
-        self,
-        *,
-        user_ids: torch.Tensor,
-        item_ids: torch.Tensor,
-        labels: torch.Tensor,
-        item_matrix: torch.Tensor,
-        state_vec: torch.Tensor,
-        distill: Optional[torch.Tensor],
-        distill_lambda: float,
-    ) -> dict:
-        sigma = float(getattr(self.dp_settings, "noise_multiplier", 0.0) or 0.0)
-        q = float(getattr(self.dp_settings, "sample_rate", 0.0) or 0.0)
-        delta = float(getattr(self.dp_settings, "delta", 1e-5))
-        C = float(getattr(self.dp_settings, "max_grad_norm", 1.0) or 0.0)
-        if sigma <= 0.0 or q <= 0.0 or C <= 0.0:
-            raise ValueError("DP train_step requires positive noise_multiplier, sample_rate, and max_grad_norm")
-        if hasattr(self, "_dp_steps_budget") and int(getattr(self, "_dp_steps_budget", 0)) <= 0:
-            return {
-                "loss": 0.0,
-                "epsilon_delta": 0.0,
-                "epsilon_cum": float(getattr(self, "eps_cum", 0.0)),
-                "noise_multiplier": sigma,
-                "delta": delta,
-                "sample_rate": q,
-            }
-
-        trainable = [
-            p
-            for group in self.optimizer.param_groups
-            for p in group["params"]
-            if p.requires_grad
-        ]
-        logits = self._pairwise_logits(
-            user_ids=user_ids,
-            item_ids=item_ids,
-            state_vec=state_vec,
-            item_matrix=item_matrix,
-        )
-        per_sample_losses = torch.nn.functional.binary_cross_entropy_with_logits(logits, labels, reduction="none")
-        if distill is not None and distill_lambda > 0.0:
-            distill_t = distill.to(self.device).view_as(logits)
-            per_sample_losses = per_sample_losses + distill_lambda * (torch.sigmoid(logits) - distill_t).pow(2)
-
-        sum_grads = [torch.zeros_like(p, device=self.device) for p in trainable]
-        total_loss = 0.0
-        batch_size = int(per_sample_losses.numel())
-        self.optimizer.zero_grad(set_to_none=False)
-        for idx, loss_sample in enumerate(per_sample_losses):
-            for p in trainable:
-                if p.grad is not None:
-                    p.grad.zero_()
-            loss_sample.backward(retain_graph=idx < batch_size - 1)
-            grads = [p.grad.detach().clone() if p.grad is not None else torch.zeros_like(p, device=self.device) for p in trainable]
-            norm_sq = sum(float(torch.sum(g.pow(2))) for g in grads)
-            clip = min(1.0, C / math.sqrt(max(norm_sq, 1e-12)))
-            for j, grad in enumerate(grads):
-                sum_grads[j].add_(grad * clip)
-            total_loss += float(loss_sample.detach().item())
-
-        std = sigma * C
-        for j, p in enumerate(trainable):
-            noise = self._dp_noise(p, std)
-            p.grad = (sum_grads[j] + noise) / max(1, batch_size)
-        self.optimizer.step()
-        eps_delta, self.eps_cum = self._dp_accountant.step(1)
-        self._dp_steps_total += 1
-        self.eps_last = eps_delta
-        if hasattr(self, "_dp_steps_budget"):
-            self._dp_steps_budget = max(0, int(self._dp_steps_budget) - 1)
-        return {
-            "loss": float(total_loss / max(1, batch_size)),
-            "epsilon_delta": float(eps_delta),
-            "epsilon_cum": float(self.eps_cum),
-            "noise_multiplier": sigma,
-            "delta": delta,
-            "sample_rate": q,
-        }
 
 
 __all__ = [

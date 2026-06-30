@@ -24,7 +24,6 @@ import numpy as np
 import pandas as pd
 
 from orchid_ranker._compat import get_matplotlib_pyplot
-from orchid_ranker.dp import get_dp_config
 from orchid_ranker.experiments import RankingExperiment
 
 logger = logging.getLogger(__name__)
@@ -61,18 +60,7 @@ DATASET_ADJUSTMENTS = {
     "ednet": {"blend_increment": 0.18, "entropy_lambda": 0.09, "info_gain_lambda": 0.14},
     "oulad": {"blend_increment": 0.16},
 }
-DP_STRENGTH_BASE = {
-    "none": {},
-    "standard": {"entropy_lambda": 0.11, "info_gain_lambda": 0.20},
-    "locked": {"entropy_lambda": 0.11, "info_gain_lambda": 0.20},
-    "strong": {"hidden": 128, "emb_dim": 64, "kl_beta": 0.015, "entropy_lambda": 0.12, "info_gain_lambda": 0.24},
-}
-DP_POLICY_SCALE = {
-    "none": {"linucb_alpha": 1.6, "ts_alpha": 0.95},
-    "standard": {"linucb_alpha": 1.85, "ts_alpha": 1.05},
-    "locked": {"linucb_alpha": 1.85, "ts_alpha": 1.05},
-    "strong": {"linucb_alpha": 2.2, "ts_alpha": 1.15},
-}
+POLICY_SCALE = {"linucb_alpha": 1.6, "ts_alpha": 0.95}
 
 # -----------------------------
 # Config overrides
@@ -86,17 +74,6 @@ BASE_CONFIG_OVERRIDES = {
     "zpd_bounds": (0.06, 0.22),
     "zpd_margin": 0.1,
 }
-DP_CONFIG_OVERRIDES = {
-    "policy_gain": 1.85,
-    "alpha_bounds": (0.05, 0.9),
-    "k_bounds": (2, 9),
-    "zpd_bounds": (0.05, 0.24),
-}
-DP_CONFIG_OVERRIDES_STRONG = {
-    **DP_CONFIG_OVERRIDES,
-    "policy_gain": 2.1,
-    "zpd_bounds": (0.05, 0.26),
-}
 
 # -----------------------------
 # Plans (save_dir derived automatically)
@@ -105,10 +82,8 @@ EDNET_RUNS = [
     {
         "name": "open_nodp",
         "modes": ["adaptive", "linucb", "als", "fixed"],
-        "dp": "off",
         "config_overrides": {**BASE_CONFIG_OVERRIDES},
         "adaptive_policy": "linucb",
-        "dp_strength": "none",
         "warm_start": WARM_START_CFG,
     },
 ]
@@ -116,10 +91,8 @@ OULAD_RUNS = [
     {
         "name": "open_nodp",
         "modes": ["adaptive", "linucb", "als", "fixed"],
-        "dp": "off",
         "config_overrides": {**BASE_CONFIG_OVERRIDES},
         "adaptive_policy": "bootts",
-        "dp_strength": "none",
         "warm_start": WARM_START_CFG,
     },
 ]
@@ -196,17 +169,6 @@ def sanitize_filename(s: str) -> str:
 # =============================
 # Policy helpers
 # =============================
-def _infer_dp_strength(run: Dict) -> str:
-    name = str(run.get("name", "")).lower()
-    if "strong" in name:
-        return "strong"
-    if "locked" in name:
-        return "locked"
-    dp_cfg = run.get("dp", {})
-    if isinstance(dp_cfg, dict) and dp_cfg.get("enabled"):
-        return "standard"
-    return "none"
-
 def _resolve_adaptive_policy(dataset: str, run: Dict) -> str:
     policy = str(run.get("adaptive_policy", "auto")).lower()
     if policy == "auto":
@@ -215,19 +177,14 @@ def _resolve_adaptive_policy(dataset: str, run: Dict) -> str:
         return policy
     raise ValueError(f"Unknown adaptive_policy '{policy}'")
 
-def _build_adaptive_overrides(dataset: str, run: Dict, dp_cfg: Dict) -> Dict[str, object]:
+def _build_adaptive_overrides(dataset: str, run: Dict) -> Dict[str, object]:
     dataset_key = dataset.lower()
-    dp_strength = run.get("dp_strength") or _infer_dp_strength(run)
-    if (dp_strength in (None, "none")) and isinstance(dp_cfg, dict) and dp_cfg.get("enabled"):
-        dp_strength = "standard"
-    dp_strength = str(dp_strength or "none").lower()
     policy = _resolve_adaptive_policy(dataset_key, run)
 
     cfg: Dict[str, object] = dict(ADAPTIVE_BASE_PARAMS)
     cfg.update(DATASET_ADJUSTMENTS.get(dataset_key, {}))
-    cfg.update(DP_STRENGTH_BASE.get(dp_strength, {}))
 
-    scale = DP_POLICY_SCALE.get(dp_strength, DP_POLICY_SCALE["none"])
+    scale = POLICY_SCALE
     use_linucb = policy in {"linucb", "hybrid"}
     use_bootts = policy in {"bootts", "hybrid"}
     cfg["use_linucb"] = use_linucb
@@ -484,9 +441,6 @@ def run_plan(plan: Dict) -> None:
         paths = build_paths(dataset, experiment)
         ensure_dirs(paths)
 
-        dp_cfg_in = run["dp"]
-        dp_cfg = get_dp_config(dp_cfg_in) if isinstance(dp_cfg_in, str) else dict(dp_cfg_in)
-
         mode_to_user_rounds: Dict[str, pd.DataFrame] = {}
         mode_to_rounds: Dict[str, pd.DataFrame] = {}
         summary_rows: List[Dict] = []
@@ -495,13 +449,11 @@ def run_plan(plan: Dict) -> None:
             logger.info(f"Running {dataset} / {experiment} / {mode}")
             adaptive_kwargs = None
             if mode == "adaptive":
-                adaptive_kwargs = _build_adaptive_overrides(dataset, run, dp_cfg)
+                adaptive_kwargs = _build_adaptive_overrides(dataset, run)
             logger.debug(f"adaptive_kwargs={adaptive_kwargs}")
 
             res = runner.run(
                 mode,
-                dp_enabled=dp_cfg.get("enabled", False),
-                dp_params=dict(dp_cfg),
                 config_overrides=run.get("config_overrides"),
                 log_path=str(paths["logs"] / f"{mode}.jsonl"),
                 adaptive_kwargs=adaptive_kwargs,
@@ -565,12 +517,9 @@ __all__ = [
     "INITIAL_PROFILES",
     "ADAPTIVE_BASE_PARAMS",
     "DATASET_ADJUSTMENTS",
-    "DP_STRENGTH_BASE",
-    "DP_POLICY_SCALE",
+    "POLICY_SCALE",
     "WARM_START_CFG",
     "BASE_CONFIG_OVERRIDES",
-    "DP_CONFIG_OVERRIDES",
-    "DP_CONFIG_OVERRIDES_STRONG",
     "EDNET_RUNS",
     "OULAD_RUNS",
     "PLANS",

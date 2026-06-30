@@ -29,7 +29,6 @@ class MultiConfig:
     # (derived from cfg.log_path parent). You can override the folder via pool_cache_dir.
     persistent_pool: bool = False
     pool_cache_dir: Optional[str] = None
-    epsilon_total_global: float = 0.0
     novelty_bonus: float = 0.10
     mmr_lambda: float = 0.25
     log_path: Optional[str] = None
@@ -41,7 +40,6 @@ class MultiConfig:
     # privacy flags (left here for compatibility with prior code)
     privacy_mode: str = "standard"
     share_signals: bool = False
-    per_round_eps_target: float = 0.0
 
     # adaptive policy bounds (shown in banner; tuning occurs in students)
     alpha_bounds: Tuple[float, float] = (0.10, 0.80)

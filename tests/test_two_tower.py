@@ -32,26 +32,6 @@ class TestTwoTowerRecommenderConstruction:
         assert model.item_emb.num_embeddings == 20
         assert model.user_dim == 5
         assert model.item_dim == 8
-        assert model.dp_settings.enabled is False
-
-    def test_construction_honors_max_grad_norm(self):
-        """Test that DP config uses the documented clipping field."""
-        model = TwoTowerRecommender(
-            num_users=10,
-            num_items=20,
-            user_dim=5,
-            item_dim=8,
-            dp_cfg={
-                "enabled": True,
-                "noise_multiplier": 1.0,
-                "sample_rate": 0.1,
-                "delta": 1e-6,
-                "max_grad_norm": 0.25,
-            },
-            device="cpu",
-        )
-
-        assert model.dp_settings.max_grad_norm == 0.25
 
     def test_construction_with_custom_params(self):
         """Test construction with custom parameters."""
@@ -355,7 +335,6 @@ class TestTwoTowerUpdate:
             item_dim=4,
             emb_dim=8,
             lr=0.01,
-            dp_cfg={"enabled": False},
             device=device,
         ).to(device)
         model.pos2id_map = {0: 100, 1: 200}
@@ -377,134 +356,6 @@ class TestTwoTowerUpdate:
 
         assert isinstance(result["loss"], float)
         assert result["loss"] > 0.0
-
-    def test_update_respects_zero_dp_budget(self):
-        """Test that DP updates become a no-op when no privacy budget remains."""
-        device = torch.device("cpu")
-        model = TwoTowerRecommender(
-            num_users=5,
-            num_items=10,
-            user_dim=4,
-            item_dim=4,
-            emb_dim=8,
-            lr=0.01,
-            dp_cfg={
-                "enabled": True,
-                "noise_multiplier": 0.5,
-                "sample_rate": 1.0,
-                "delta": 1e-5,
-                "max_grad_norm": 1.0,
-                "engine": "per_sample",
-            },
-            device=device,
-        ).to(device)
-
-        initial_params = [p.detach().clone() for p in model.parameters()]
-        model.begin_dp_step(0.0)
-
-        result = model.update(
-            feedback={0: 1},
-            user_vec=torch.randn(1, 4, device=device),
-            state_vec=torch.randn(1, model.state_dim, device=device),
-            user_ids=torch.tensor([0], dtype=torch.long, device=device),
-            item_matrix=torch.randn(10, 4, device=device),
-            item_ids=torch.tensor([0, 1], dtype=torch.long, device=device),
-            epochs=5,
-        )
-
-        assert result["loss"] == 0.0
-        assert result["epsilon_delta"] == 0.0
-        assert result["epsilon_cum"] == 0.0
-        assert model._dp_steps_budget == 0
-        for initial, current in zip(initial_params, model.parameters()):
-            assert torch.allclose(initial, current)
-
-    def test_per_sample_update_runs_requested_number_of_steps(self):
-        """Test that per-sample DP updates charge only the steps they actually execute."""
-        device = torch.device("cpu")
-        model = TwoTowerRecommender(
-            num_users=5,
-            num_items=10,
-            user_dim=4,
-            item_dim=4,
-            emb_dim=8,
-            lr=0.01,
-            dp_cfg={
-                "enabled": True,
-                "noise_multiplier": 0.5,
-                "sample_rate": 1.0,
-                "delta": 1e-5,
-                "max_grad_norm": 1.0,
-                "engine": "per_sample",
-            },
-            device=device,
-        ).to(device)
-
-        model._dp_steps_budget = 4
-        calls = {"count": 0}
-        original = model._dp_update_per_sample
-
-        def wrapped(**kwargs):
-            calls["count"] += 1
-            return original(**kwargs)
-
-        model._dp_update_per_sample = wrapped
-        result = model.update(
-            feedback={0: 1},
-            user_vec=torch.randn(1, 4, device=device),
-            state_vec=torch.randn(1, model.state_dim, device=device),
-            user_ids=torch.tensor([0], dtype=torch.long, device=device),
-            item_matrix=torch.randn(10, 4, device=device),
-            item_ids=torch.tensor([0, 1], dtype=torch.long, device=device),
-            epochs=3,
-        )
-
-        assert calls["count"] == 3
-        assert model._dp_steps_budget == 1
-        assert result["epsilon_delta"] > 0.0
-
-    def test_begin_dp_step_bounds_cumulative_epsilon(self):
-        """begin_dp_step must cap CUMULATIVE epsilon at the target, not per-step cost."""
-        device = torch.device("cpu")
-        model = TwoTowerRecommender(
-            num_users=5,
-            num_items=10,
-            user_dim=4,
-            item_dim=4,
-            emb_dim=8,
-            lr=0.01,
-            dp_cfg={
-                "enabled": True,
-                "noise_multiplier": 1.0,
-                "sample_rate": 1.0,
-                "delta": 1e-5,
-                "max_grad_norm": 1.0,
-                "engine": "per_sample",  # deterministic heuristic accountant
-            },
-            device=device,
-        ).to(device)
-
-        tgt = 20.0
-        model.begin_dp_step(tgt)
-        budget = model._dp_steps_budget
-        assert budget >= 1
-
-        # Running exactly `budget` steps must stay within the cumulative target...
-        acc = model._dp_accountant.fork()
-        cum = 0.0
-        for _ in range(budget):
-            _, cum = acc.step(1)
-        assert cum <= tgt + 1e-9
-
-        # ...and (unless capped by MAX_STEPS) one more step would exceed it, proving the
-        # budget is the maximal affordable number of steps -- not the old "always 32".
-        if budget < 32:
-            _, cum_over = acc.step(1)
-            assert cum_over > tgt
-
-        # A larger target grants at least as many steps.
-        model.begin_dp_step(tgt * 4)
-        assert model._dp_steps_budget >= budget
 
 
 class TestLinUCBPolicy:

@@ -44,7 +44,6 @@ def world():
         emb_dim=EMB_DIM,
         state_dim=4,
         device="cpu",
-        dp_cfg={"enabled": False},
     ).eval()
     return tower, user_feats, item_feats
 

@@ -107,13 +107,11 @@ _SCENARIOS: tuple[ScenarioRecipe, ...] = (
             "adaptive-learning recommender",
             "guardrail policy",
             "audit logging",
-            "privacy hooks",
         ),
         entrypoints=(
             "AdaptiveLearningRecommender",
             "ProgressionGuardrail",
             "AuditLogger",
-            "get_dp_config",
         ),
         docs_anchor="regulated-training-or-clinical-workflows",
         tags=("regulated", "training", "audit"),

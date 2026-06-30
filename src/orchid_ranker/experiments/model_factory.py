@@ -117,7 +117,6 @@ def build_adaptive(
     user_matrix: torch.Tensor,
     item_matrix: torch.Tensor,
     pos2id: Dict[int, int],
-    dp_cfg: dict,
     adaptive_defaults: Dict[str, object],
     warm_start_defaults: Dict[str, object],
     warm_cache: Optional[Tuple[np.ndarray, np.ndarray, np.ndarray]],
@@ -140,8 +139,6 @@ def build_adaptive(
         Item feature matrix.
     pos2id : Dict[int, int]
         Mapping from position to item ID.
-    dp_cfg : dict
-        Differential privacy configuration.
     adaptive_defaults : Dict[str, object]
         Default adaptive model parameters.
     warm_start_defaults : Dict[str, object]
@@ -186,7 +183,6 @@ def build_adaptive(
         num_items=num_items,
         user_dim=user_matrix.shape[1],
         item_dim=item_matrix.shape[1],
-        dp_cfg={**dp_cfg, "enabled": False},
         **tower_kwargs,
     )
     student = TwoTowerRecommender(
@@ -194,7 +190,6 @@ def build_adaptive(
         num_items=num_items,
         user_dim=user_matrix.shape[1],
         item_dim=item_matrix.shape[1],
-        dp_cfg=dp_cfg,
         **tower_kwargs,
     )
 
@@ -237,7 +232,6 @@ def build_fixed(
     user_matrix: torch.Tensor,
     item_matrix: torch.Tensor,
     pos2id: Dict[int, int],
-    dp_cfg: dict,
 ) -> TwoTowerRecommender:
     """Build a fixed (non-adaptive) TwoTowerRecommender model.
 
@@ -253,8 +247,6 @@ def build_fixed(
         Item feature matrix.
     pos2id : Dict[int, int]
         Mapping from position to item ID.
-    dp_cfg : dict
-        Differential privacy configuration.
 
     Returns
     -------
@@ -266,7 +258,6 @@ def build_fixed(
         num_items=num_items,
         user_dim=user_matrix.shape[1],
         item_dim=item_matrix.shape[1],
-        dp_cfg=dp_cfg,
     )
     setattr(model, "user_matrix", user_matrix)
     setattr(model, "item_matrix", item_matrix)

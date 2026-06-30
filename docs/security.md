@@ -10,7 +10,7 @@
 - The `orchid-serve` CLI exposes only health/metrics endpoints and has no `--role` flag (its flags are `--host`, `--port`, `--metrics-port`, `--health-port`, `--no-metrics`, `--ready-on-start`).
 
 ## Audit Logging
-- `AuditLogger` emits JSONL audit records and is a library primitive you wire into your own pipeline. The experimental `TwoTowerRecommender.update()` (not part of the public `__all__`) is the only built-in caller: when an audit logger is attached it writes `dp_update` events capturing epsilon deltas, noise multiplier, and total DP steps. The flagship `AdaptiveRanker`/`AdaptiveLearningEngine` APIs do not emit audit events themselves; call `AuditLogger.log_event(...)` from your service to record their decisions.
+- `AuditLogger` emits JSONL audit records and is a library primitive you wire into your own pipeline. The experimental `TwoTowerRecommender.update()` (not part of the public `__all__`) is the only built-in caller: when an audit logger is attached it writes `update` events capturing the training loss. The flagship `AdaptiveRanker`/`AdaptiveLearningEngine` APIs do not emit audit events themselves; call `AuditLogger.log_event(...)` from your service to record their decisions.
 - Configure automatic forwarding with environment variables `ORCHID_AUDIT_ENDPOINT`, `ORCHID_AUDIT_API_KEY`, and `ORCHID_AUDIT_TIMEOUT` (seconds). `AuditLogger.from_env()` builds a logger that posts each event to the configured SIEM endpoint.
 - Use `scripts/ship_audit_logs.py` to forward JSONL audit streams to a SIEM/Webhook endpoint in batch or cron workflows.
 

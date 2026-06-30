@@ -16,12 +16,7 @@
 - Set `--safe-eb --safe-eb-dr --safe-eb-accept-floor <target>` on benchmarks or orchestration services.
 - Monitor `safe_gate` telemetry (stored per round) for p-values and acceptance LCBs.
 
-## 4. Differential Privacy
-
-- Follow the DP tutorial (`docs/tutorial_dp.md`) to set noise/clipping parameters.
-- Track `epsilon_cum` in telemetry; alert if it exceeds the declared budget.
-
-## 5. Compliance artefacts
+## 4. Compliance artefacts
 
 - Data retention policy: see `docs/compliance/data_retention.md`.
 - FERPA/GDPR alignment: see `docs/compliance/ferpa_gdpr_alignment.md`.

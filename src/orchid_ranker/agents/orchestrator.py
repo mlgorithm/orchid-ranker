@@ -22,7 +22,7 @@ from orchid_ranker.agents.two_tower import TwoTowerRecommender
 
 
 class MultiUserOrchestrator:
-    """Multi-user agentic recommendation orchestrator with online learning and privacy budgeting.
+    """Multi-user agentic recommendation orchestrator with online learning.
 
     Coordinates recommendation rounds across users, tracks online metrics, handles student
     training, popularity tracking, and logging.
@@ -571,15 +571,6 @@ class MultiUserOrchestrator:
         if self._safe_gate and is_adaptive:
             logger.info("SafeSwitchDR enabled: non-regression guard active.")
 
-        # DP owner: student if adaptive, otherwise the single model
-        dp_owner = self.rec.student if is_adaptive else self.rec
-        dp_cfg = getattr(dp_owner, "dp_settings", None)
-        dp_enabled  = bool(getattr(dp_cfg, "enabled", False)) if dp_cfg else False
-        dp_sigma    = float(getattr(dp_cfg, "noise_multiplier", float("nan"))) if dp_cfg else float("nan")
-        dp_q        = float(getattr(dp_cfg, "sample_rate", float("nan"))) if dp_cfg else float("nan")
-        dp_delta    = float(getattr(dp_cfg, "delta", float("nan"))) if dp_cfg else float("nan")
-        dp_max_grad = float(getattr(dp_cfg, "max_grad_norm", float("nan"))) if dp_cfg else float("nan")
-
         # Ensure we have a logger
         if not hasattr(self, "logger") or self.logger is None:
             try:
@@ -709,10 +700,6 @@ class MultiUserOrchestrator:
 
         # ---------- header ----------
         if self.cfg.console:
-            dp_detail = (
-                f"  DP sigma / q / delta     : {dp_sigma} / {dp_q} / {dp_delta}\n"
-                f"  DP max_grad_norm         : {dp_max_grad}"
-            ) if dp_cfg else "  DP config                : <none>"
             logger.info(
                 "\n--- Orchestrator run info --------------------------------\n"
                 f"  policy mode              : {mode_label}\n"
@@ -720,13 +707,9 @@ class MultiUserOrchestrator:
                 f"  zpd_margin               : {self.cfg.zpd_margin}\n"
                 f"  mmr_lambda / novelty     : {self.cfg.mmr_lambda} / {self.cfg.novelty_bonus}\n"
                 f"  min_candidates           : {self.cfg.min_candidates}\n"
-                f"  DP online training       : {dp_enabled}\n"
-                f"{dp_detail}\n"
                 f"  log_path                 : {self.cfg.log_path}\n"
                 "-----------------------------------------------------------"
             )
-
-        eps_cum = float(getattr(dp_owner, "eps_cum", 0.0) or 0.0)
 
         # ---------- main loop ----------
         for r in range(1, rounds + 1):
@@ -758,14 +741,6 @@ class MultiUserOrchestrator:
             order = list(range(len(self.users)))
             if self.cfg.shuffle_users_each_round:
                 random.shuffle(order)
-
-            # Optional DP per-round budget
-            if dp_enabled and hasattr(self.rec, "begin_dp_step") and callable(self.rec.begin_dp_step):
-                eps_target = float(getattr(self.cfg, "per_round_eps_target", 0.0) or 0.0)
-                try:
-                    self.rec.begin_dp_step(eps_target)
-                except Exception:
-                    pass
 
             for idx in order:
                 ux = self.users[idx]
@@ -1072,8 +1047,6 @@ class MultiUserOrchestrator:
                         uid_ext=uid_ext,
                         ux=ux,
                         mode_label=mode_label,
-                        dp_enabled=dp_enabled,
-                        eps_cum=float(getattr(dp_owner, "eps_cum", eps_cum)),
                         top_k=int(top_k),
                         zpd_delta=float(zpd_delta),
                         mmr_lambda=float(params.lam if params else self.cfg.mmr_lambda),
@@ -1212,9 +1185,6 @@ class MultiUserOrchestrator:
             mean_t = (sum_t / max(1, n_users))
             mean_accept_at4 = (sum_accept_at4 / max(1, n_users_accept_at4)) if n_users_accept_at4 else float("nan")
 
-            # update epsilon cumulative (if available)
-            eps_cum = float(getattr(dp_owner, "eps_cum", eps_cum))
-
             gate_info = None
             if self._safe_gate and self._is_adaptive:
                 qa_pred = adaptive_pred_sum / max(pred_count, 1) if pred_count else 0.0
@@ -1236,9 +1206,7 @@ class MultiUserOrchestrator:
             if self.cfg.console:
                 logger.info(
                     f"Round {r:03d}/{rounds} | "
-                    f"mode={self._mode_label.upper()} "
-                    f"DP={'ON' if dp_enabled else 'OFF'} "
-                    f"eps_cum={eps_cum:.3f} | "
+                    f"mode={self._mode_label.upper()} | "
                     f"shown={shown_total} acc={accept_total} cor={correct_total} "
                     f"acc_rate={acc_rate:.3f} accept_rate={accept_rate:.3f} at4={(mean_accept_at4 if not math.isnan(mean_accept_at4) else float('nan')):0.3f} "
                     f"novel={novelty_rate:.3f} serend={('nan' if math.isnan(serendipity) else f'{serendipity:.3f}')} | "
@@ -1252,14 +1220,6 @@ class MultiUserOrchestrator:
                         "type": "round_summary",
                         "round": int(r),
                         "mode": self._mode_label,
-                        "dp": {
-                            "enabled": bool(dp_enabled),
-                            "sigma": float(dp_sigma),
-                            "sample_rate": float(dp_q),
-                            "delta": float(dp_delta),
-                            "max_grad_norm": float(dp_max_grad),
-                            "epsilon_cum": float(eps_cum),
-                        },
                         "safe_gate": gate_info,
                         "metrics": {
                             "shown": int(shown_total),
@@ -1306,7 +1266,7 @@ class MultiUserOrchestrator:
                 "novelty_rate": float(novelty_rate),
             })
 
-        return {"epsilon_cum": float(eps_cum)}
+        return {}
 
     def _extract_student_state(self, student):
         import numpy as np
@@ -1331,8 +1291,6 @@ class MultiUserOrchestrator:
         uid_ext: int,
         ux: "UserCtx",
         mode_label: str,
-        dp_enabled: bool,
-        eps_cum: float,
         top_k: int,
         zpd_delta: float,
         mmr_lambda: float,
@@ -1396,10 +1354,6 @@ class MultiUserOrchestrator:
             "post_fatigue": float(post.get("fatigue", 0.2)),
 
             # keep nested blocks too (RankingExperiment flatteners may already expect them)
-            "dp": {
-                "enabled": bool(dp_enabled),
-                "epsilon_cum": float(eps_cum),
-            },
             "knobs": {
                 "top_k": int(top_k),
                 "zpd_margin": float(zpd_delta),

@@ -43,12 +43,12 @@ def run_once(args) -> dict:
     X, pos2id, id2pos, item_ids_pos, meta = build_items(args.items, args.dim, device)
 
     # Fixed
-    fixed = TwoTowerRecommender(args.users, args.items, args.dim, args.dim, hidden=32, emb_dim=16, device=str(device), dp_cfg={"enabled": False})
+    fixed = TwoTowerRecommender(args.users, args.items, args.dim, args.dim, hidden=32, emb_dim=16, device=str(device))
     fixed.user_matrix = U.clone().to(device)
 
     # Adaptive with warm start + replay + exploration
-    teacher = TwoTowerRecommender(args.users, args.items, args.dim, args.dim, hidden=32, emb_dim=16, device=str(device), dp_cfg={"enabled": False}, use_bootts=True, ts_heads=16)
-    student = TwoTowerRecommender(args.users, args.items, args.dim, args.dim, hidden=32, emb_dim=16, device=str(device), dp_cfg={"enabled": False}, use_bootts=True, ts_heads=16)
+    teacher = TwoTowerRecommender(args.users, args.items, args.dim, args.dim, hidden=32, emb_dim=16, device=str(device), use_bootts=True, ts_heads=16)
+    student = TwoTowerRecommender(args.users, args.items, args.dim, args.dim, hidden=32, emb_dim=16, device=str(device), use_bootts=True, ts_heads=16)
     student.blend_increment = 0.3
     student.teacher_ema = 0.85
     adaptive = DualRecommender(teacher=teacher, student=student, device=str(device), warm_start=True, replay_size=256, replay_steps=1)

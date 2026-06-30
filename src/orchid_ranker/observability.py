@@ -45,12 +45,6 @@ TRAINING_DURATION = Histogram(
     registry=_REGISTRY,
 )
 
-DP_EPSILON = Gauge(
-    "orchid_dp_epsilon_cumulative",
-    "Latest cumulative epsilon reported by DP accountant",
-    registry=_REGISTRY,
-)
-
 # Inference metrics (new)
 INFERENCE_LATENCY = Histogram(
     "orchid_inference_latency_seconds",
@@ -90,12 +84,6 @@ ACTIVE_USERS = Gauge(
 MODEL_STALENESS = Gauge(
     "orchid_model_staleness_seconds",
     "Seconds since last model update",
-    registry=_REGISTRY,
-)
-
-DP_BUDGET_REMAINING = Gauge(
-    "orchid_dp_budget_remaining",
-    "DP budget remaining (1 - current_epsilon / max_epsilon)",
     registry=_REGISTRY,
 )
 
@@ -212,23 +200,18 @@ def metrics_content_type() -> str:
 # Training Recording
 # ============================================================================
 
-def record_training(duration_seconds: float, epsilon: Optional[float] = None) -> None:
+def record_training(duration_seconds: float) -> None:
     """Record metrics from a completed training run.
 
-    Increments training run counter, observes duration, and optionally sets
-    the cumulative DP epsilon.
+    Increments training run counter and observes duration.
 
     Parameters
     ----------
     duration_seconds : float
         Training duration in seconds.
-    epsilon : float, optional
-        Cumulative DP epsilon, if applicable.
     """
     TRAINING_RUNS.inc()
     TRAINING_DURATION.observe(duration_seconds)
-    if epsilon is not None:
-        DP_EPSILON.set(epsilon)
 
 
 # ============================================================================
@@ -294,20 +277,6 @@ def set_model_staleness(seconds: float) -> None:
         Seconds since last model update.
     """
     MODEL_STALENESS.set(seconds)
-
-
-def set_dp_budget_remaining(current_epsilon: float, max_epsilon: float) -> None:
-    """Update the DP budget remaining gauge.
-
-    Parameters
-    ----------
-    current_epsilon : float
-        Current cumulative epsilon spent.
-    max_epsilon : float
-        Maximum allowed epsilon.
-    """
-    remaining = max(0.0, 1.0 - current_epsilon / max_epsilon) if max_epsilon > 0 else 0.0
-    DP_BUDGET_REMAINING.set(remaining)
 
 
 # ============================================================================
@@ -506,14 +475,12 @@ __all__ = [
     # Metrics
     "TRAINING_RUNS",
     "TRAINING_DURATION",
-    "DP_EPSILON",
     "INFERENCE_LATENCY",
     "INFERENCE_REQUESTS",
     "INFERENCE_ERRORS",
     "RECOMMENDATION_LIST_SIZE",
     "ACTIVE_USERS",
     "MODEL_STALENESS",
-    "DP_BUDGET_REMAINING",
     # Registry & server
     "metrics_registry",
     "start_metrics_server",
@@ -526,7 +493,6 @@ __all__ = [
     # State
     "set_active_users",
     "set_model_staleness",
-    "set_dp_budget_remaining",
     # OpenTelemetry
     "setup_opentelemetry",
     # Health checks

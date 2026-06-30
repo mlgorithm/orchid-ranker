@@ -161,28 +161,6 @@ class DualRecommender:
         self._sync_knobs()
         _d(f"DualRec: set mmr_lambda={v}")
 
-    # ---------- DP / epsilon passthrough to student ----------
-    @property
-    def dp_settings(self):
-        # let orchestrator read/modify DP flags on the trainable model
-        return getattr(self.student, "dp_settings", None)
-
-    @property
-    def eps_cum(self):
-        return float(getattr(self.student, "eps_cum", 0.0))
-    @eps_cum.setter
-    def eps_cum(self, v):
-        if hasattr(self.student, "eps_cum"):
-            self.student.eps_cum = float(v)
-
-    @property
-    def eps_last(self):
-        return float(getattr(self.student, "eps_last", 0.0))
-    @eps_last.setter
-    def eps_last(self, v):
-        if hasattr(self.student, "eps_last"):
-            self.student.eps_last = float(v)
-
     # ---------- inference ----------
     def infer(self, **kwargs):
         """
@@ -264,7 +242,7 @@ class DualRecommender:
     # ---------- training / updates ----------
     def update(self, **kwargs):
         """
-        For compatibility with your older path (privacy-aware update).
+        For compatibility with your older path.
         We forward only to the student. Extra args are filtered.
         """
         if hasattr(self.student, "update") and callable(self.student.update):
@@ -272,7 +250,7 @@ class DualRecommender:
             out = self._call_with_supported_args(self.student.update, **kwargs)
             self._after_student_update()
             return out
-        # If there is no privacy-aware update, fall back to train_step when possible
+        # If there is no update method, fall back to train_step when possible
         if hasattr(self.student, "train_step") and callable(self.student.train_step):
             out = self._call_with_supported_args(self.student.train_step, **kwargs)
             self._after_student_update()

@@ -11,7 +11,6 @@ def test_two_tower_native_scoring_infer_shape():
         user_dim=dim,
         item_dim=dim,
         use_native_scoring=True,
-        dp_cfg={"enabled": False},
         use_bootts=False,
         use_linucb=False,
     ).eval()

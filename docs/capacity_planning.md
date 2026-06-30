@@ -42,7 +42,6 @@ Example: 10M interactions + 50K users with NeuralMF = `200 + (10×100) + (5×50)
 | ALS, ImplicitALS | ✓ | ≥100K interactions | Scales linearly; fine on CPU |
 | BPR, ImplicitBPR | ✓ | ≥100K interactions | Pairwise sampling; CPU-friendly |
 | NeuralMF, TwoTower | Slow | ≥100K interactions | GPU training 5-10x faster |
-| DP-SGD (any) | +2-3x | +1-2x | Per-sample gradient clipping overhead |
 
 **Recommendation**: For production retraining with >100K interactions, allocate 1 GPU. Cold-start bootstrap with <10K samples fine on 4 vCPU.
 
@@ -88,7 +87,7 @@ HPA Max: 10 replicas
 Replicas: 4-8 base
 Requests: 8 vCPU, 16GB RAM (CPU) or 1 GPU + 8 vCPU, 32GB RAM (GPU)
 Limits: 16 vCPU, 32GB RAM
-Strategy: NeuralMF, TwoTower with DP-SGD
+Strategy: NeuralMF, TwoTower
 HPA: Target CPU 60%, p99 latency <100ms, request/rate >80%
 GPU nodes: 1-4 A100s, horizontal pod autoscaling on queue depth
 ```
@@ -113,13 +112,6 @@ Action: Increase replicas by 50%, or enable HPA if not active.
 
 Action: Migrate inference to GPU nodes; keep training on separate GPU.
 
-### Differential Privacy Budget Alert
-
-- **Remaining DP budget (ε)** < 20% of quarterly allocation
-- **Example**: Allocated ε=8.0, remaining <1.6
-
-Action: Pause DP-SGD training or reduce update frequency.
-
 ---
 
 ## Quick Sizing Checklist
@@ -129,7 +121,6 @@ Action: Pause DP-SGD training or reduce update frequency.
 - [ ] Calculate memory footprint using formula above
 - [ ] Profile inference latency on target hardware (use `TwoTowerRecommender.infer_batch(batch_size=32)`)
 - [ ] Reserve 30% headroom on memory and CPU
-- [ ] If DP-SGD enabled, allocate 2x training resources
 - [ ] Test HPA with synthetic load; validate max replica performance
 
 ---
@@ -138,4 +129,3 @@ Action: Pause DP-SGD training or reduce update frequency.
 
 - See `MultiUserOrchestrator` for stateful user tracking and orchestration overhead
 - See `TwoTowerRecommender` for batch inference API
-- See differential privacy modules for privacy budget tracking

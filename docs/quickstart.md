@@ -68,7 +68,6 @@ calibration, chronological splits, and OPE from logged decisions. Start with
 ## 4. Optional Extras
 
 - Prometheus metrics: `orchid_ranker.start_metrics_server()`.
-- Differential privacy: pass `dp_cfg` with engine `"opacus"` or `"per_sample"` (see `docs/privacy.md`).
 - Agentic simulations: install `[agentic]` extra and use them as adaptive-learning test harnesses.
 
 ## Next Steps

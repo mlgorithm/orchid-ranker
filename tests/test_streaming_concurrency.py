@@ -37,7 +37,7 @@ def _make_ranker(**kwargs) -> StreamingAdaptiveRanker:
         num_users=NUM_USERS, num_items=NUM_ITEMS,
         user_dim=FEAT_DIM, item_dim=FEAT_DIM,
         hidden=16, emb_dim=EMB_DIM, state_dim=4,
-        device="cpu", dp_cfg={"enabled": False},
+        device="cpu",
     ).eval()
     return StreamingAdaptiveRanker(tower, uf, ifeat, **kwargs)
 

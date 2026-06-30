@@ -129,7 +129,6 @@ def build_tower(
         emb_dim=16,
         state_dim=4,
         device="cpu",
-        dp_cfg={"enabled": False},
     )
 
 

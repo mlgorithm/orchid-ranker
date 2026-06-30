@@ -610,33 +610,6 @@ class ProgressionReport:
 
 ---
 
-## orchid_ranker.dp
-
-### get_dp_config
-
-```python
-def get_dp_config(preset: str) -> Dict[str, Any]
-```
-
-Returns a differential privacy configuration dictionary.
-Differential privacy is opt-in; the `"off"` preset and `SimpleDPConfig()`
-disable DP unless an enabled preset or explicit `{"enabled": True, ...}` config
-is supplied.
-
-**Presets:**
-
-| Preset | Epsilon | Description |
-|--------|---------|-------------|
-| `"off"` | -- | DP disabled |
-| `"eps_2"` | 2.0 | Light privacy |
-| `"eps_1"` | 1.0 | Standard privacy |
-| `"eps_05"` | 0.5 | Strong privacy |
-| `"eps_02"` | 0.2 | Very strong privacy |
-
-**Returned dict keys:** `enabled`, `noise_multiplier`, `sample_rate`, `delta`, `max_grad_norm`.
-
----
-
 ## orchid_ranker.agents
 
 ### AdaptiveAgent
@@ -671,7 +644,7 @@ compatibility aliases; new code should use `AdaptiveAgent`, `learning_rate`,
 
 ### TwoTowerRecommender
 
-Neural two-tower recommender with FiLM gating and optional DP-SGD.
+Neural two-tower recommender with FiLM gating.
 
 ```python
 class TwoTowerRecommender:
@@ -681,7 +654,6 @@ class TwoTowerRecommender:
         item_dim: int,
         hidden_dim: int = 64,
         device: str = "cpu",
-        dp_cfg: Optional[Dict] = None,
         learning_rate: float = 0.001,
     )
 ```

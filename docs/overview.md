@@ -72,20 +72,8 @@ engineers can locate entry points quickly.
 - `orchid_ranker.agents.AdaptiveAgent`: behavioural user simulator used for
   agentic evaluation loops.
 
-## Privacy and Differential Privacy Helpers
+## Security Helpers
 
-DP-SGD applies only on the experimental two-tower agent path
-(`orchid_ranker.agents.two_tower.TwoTowerRecommender`, which is not part of the
-public `__all__`). The flagship `AdaptiveRanker` and `AdaptiveLearningEngine`
-APIs do **not** currently apply differential privacy. The items below are
-helpers and primitives you opt into and wire in yourself.
-
-- `orchid_ranker.dp.get_dp_config`: fetch ready-made DP presets (consumed by the
-  experimental two-tower path).
-- `orchid_ranker.agents.simple_dp`: minimalist DP-SGD utilities for experimental
-  use; see `docs/privacy.md` for limitations.
-- `orchid_ranker.dp_accountant.build_accountant`: factory for per-sample and
-  Opacus-backed privacy accountants.
 - `orchid_ranker.security`: role-based access control (`AccessControl`, with the
   bundled `DEFAULT_POLICY`) and JSONL audit logging (`AuditLogger`). These are
   library primitives the integrator calls from their own service; they are not

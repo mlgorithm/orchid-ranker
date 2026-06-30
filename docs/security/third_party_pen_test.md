@@ -2,7 +2,7 @@
 
 ## Objectives
 - Validate security posture of Orchid Ranker components before enterprise launch.
-- Assess RBAC, audit logging, differential privacy safeguards, and deployment configurations.
+- Assess RBAC, audit logging, and deployment configurations.
 
 ## Scope
 - Python package and CLI surfaces (agentic experiments, evaluator).

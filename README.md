@@ -102,7 +102,7 @@ Understand what makes Orchid different:
 9. **Sketch mode.** Count-Min, Bloom-filter, reservoir, and exact-vector utilities shrink candidate generation before final reranking.
 10. **Offline policy evaluation.** IPS, SNIPS, direct-method, doubly robust, bootstrap, rollout gates, and tabular FQE test adaptive policies before rollout.
 11. **Safe operation.** Guardrails and reviewed fallback policies keep adaptive rollouts reviewable.
-12. **Privacy and audit primitives.** RBAC (`orchid_ranker.security.AccessControl`), HMAC-chained JSONL audit logging (`AuditLogger`), and hashed event IDs are available as library primitives you wire into your own service. Opt-in DP-SGD is scoped to the experimental two-tower agent path (`orchid_ranker.agents.two_tower.TwoTowerRecommender`); the flagship `AdaptiveRanker`/`AdaptiveLearningEngine` APIs do not currently apply differential privacy.
+12. **Audit and access-control primitives.** RBAC (`orchid_ranker.security.AccessControl`), HMAC-chained JSONL audit logging (`AuditLogger`), and hashed event IDs are available as library primitives you wire into your own service.
 
 ## Adaptive algorithm collection
 

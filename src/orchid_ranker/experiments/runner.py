@@ -26,7 +26,6 @@ from orchid_ranker.baselines import (
     LinUCBBaseline,
 )
 from orchid_ranker.data import DatasetLoader
-from orchid_ranker.dp import get_dp_config
 
 # Import from new modules
 from orchid_ranker.experiments.data_prep import (
@@ -601,13 +600,11 @@ class RankingExperiment:
             shuffle_users_each_round=True,
             privacy_mode="standard",
             share_signals=False,
-            per_round_eps_target=0.0,
             policy_gain=policy_gain,
         )
 
     def _build_adaptive(
         self,
-        dp_cfg: dict,
         adaptive_kwargs: Optional[Dict[str, object]] = None,
         warm_cfg: Optional[Dict[str, object]] = None,
     ):
@@ -617,7 +614,6 @@ class RankingExperiment:
             user_matrix=self.user_matrix,
             item_matrix=self.item_matrix,
             pos2id=self.pos2id,
-            dp_cfg=dp_cfg,
             adaptive_defaults=self.adaptive_defaults,
             warm_start_defaults=self.warm_start_defaults,
             warm_cache=self._build_warm_cache(),
@@ -627,14 +623,13 @@ class RankingExperiment:
             print_fn=self._p,
         )
 
-    def _build_fixed(self, dp_cfg: dict):
+    def _build_fixed(self):
         return build_fixed(
             num_users=len(self.user_ids),
             num_items=len(self.item_ids),
             user_matrix=self.user_matrix,
             item_matrix=self.item_matrix,
             pos2id=self.pos2id,
-            dp_cfg=dp_cfg,
         )
 
     def _build_baseline(self, mode: str) -> object:
@@ -679,43 +674,34 @@ class RankingExperiment:
         mode: str = "adaptive",
         *,
         console: bool = False,
-        dp_enabled: bool = False,
-        dp_params: Optional[dict] = None,
         config_overrides: Optional[dict] = None,
         log_path: Optional[str] = None,
         adaptive_kwargs: Optional[dict] = None,
         warm_start: Optional[dict] = None,
     ) -> Dict[str, object]:
         mode = mode.lower()
-        dp_cfg = get_dp_config(dp_params if dp_params is not None else ("off" if not dp_enabled else "eps_1"))
-        dp_cfg.setdefault("enabled", dp_enabled)
         policy_gain = self.default_policy_gain if mode == "adaptive" else 1.0
         cfg = self._make_config(console=console, policy_gain=policy_gain)
         if config_overrides:
             for key, value in config_overrides.items():
                 if hasattr(cfg, key):
                     setattr(cfg, key, value)
-                elif key in dp_cfg:
-                    dp_cfg[key] = value
 
         self._p(f"RUN mode={mode}")
         self._p(f"cfg: rounds={cfg.rounds}, top_k_base={cfg.top_k_base}, zpd_margin={cfg.zpd_margin}, "
                 f"min_cand={cfg.min_candidates}, privacy_mode={getattr(cfg, 'privacy_mode', 'standard')}, "
                 f"policy_gain={getattr(cfg, 'policy_gain', 1.0)}")
-        self._p(f"dp_cfg: enabled={dp_cfg.get('enabled', False)}, "
-                f"eps={dp_cfg.get('epsilon', dp_cfg.get('target_epsilon'))}, "
-                f"delta={dp_cfg.get('delta')}, noise={dp_cfg.get('noise_scale')}")
         log_file = Path(log_path) if log_path else Path("runs") / f"auto_{mode}.jsonl"
         log_file.parent.mkdir(parents=True, exist_ok=True)
         cfg.log_path = str(log_file)
         self._p(f"log_file={log_file}")
 
         if mode == "adaptive":
-            rec = self._build_adaptive(dp_cfg, adaptive_kwargs=adaptive_kwargs, warm_cfg=warm_start)
+            rec = self._build_adaptive(adaptive_kwargs=adaptive_kwargs, warm_cfg=warm_start)
             logger.debug(f"[PolicyCfg] zpd_margin={adaptive_kwargs.get('zpd_margin')} "
                         f"use_linucb={adaptive_kwargs.get('use_linucb')} use_bootts={adaptive_kwargs.get('use_bootts')}")
         elif mode == "fixed":
-            rec = self._build_fixed(dp_cfg)
+            rec = self._build_fixed()
         else:
             rec = self._build_baseline(mode)
             self._train_baseline(rec, mode)
@@ -773,7 +759,6 @@ class RankingExperiment:
                 novelty_rate=np.nan,
                 serendipity=np.nan,
                 mean_knowledge=np.nan,
-                epsilon_cum=float(result.get("epsilon_cum", np.nan)),
                 mean_engagement=np.nan,
             )
         last = df_round.sort_values("round").iloc[-1]
@@ -784,7 +769,6 @@ class RankingExperiment:
             novelty_rate=_coerce(last.get("novelty_rate", np.nan)),
             serendipity=_coerce(last.get("serendipity", np.nan)),
             mean_knowledge=_coerce(last.get("mean_knowledge", np.nan)),
-            epsilon_cum=float(result.get("epsilon_cum", np.nan)),
             mean_engagement=_coerce(last.get("mean_engagement", np.nan)),
         )
 

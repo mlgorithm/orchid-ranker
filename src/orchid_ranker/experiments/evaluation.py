@@ -97,8 +97,6 @@ class SummaryRow:
         Serendipity metric value.
     mean_knowledge : float
         Average user knowledge across rounds.
-    epsilon_cum : float
-        Cumulative privacy budget consumed.
     mean_engagement : float, optional
         Average user engagement (default: NaN).
     """
@@ -108,7 +106,6 @@ class SummaryRow:
     novelty_rate: float
     serendipity: float
     mean_knowledge: float
-    epsilon_cum: float
     mean_engagement: float = float("nan")
 
 

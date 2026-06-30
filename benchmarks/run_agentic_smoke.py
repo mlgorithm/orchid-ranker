@@ -2,7 +2,7 @@
 
 This script wires together the primary components exposed by Orchid Ranker so
 both engineers and researchers can validate that the orchestration loop runs on
-fresh installs. It keeps dimensions tiny and disables DP to finish quickly.
+fresh installs. It keeps dimensions tiny to finish quickly.
 
 Usage
 -----
@@ -55,7 +55,6 @@ def _build_recommender(num_users: int, num_items: int, dim: int, device: torch.d
         hidden=16,
         emb_dim=8,
         device=str(device),
-        dp_cfg={"enabled": False},
         mmr_lambda=0.1,
         novelty_bonus=0.05,
         use_native_scoring=native,
