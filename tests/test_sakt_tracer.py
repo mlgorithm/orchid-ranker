@@ -35,7 +35,9 @@ def _small_learning_events() -> pd.DataFrame:
     return pd.DataFrame(rows)
 
 
-def test_build_sakt_examples_uses_only_prior_events():
+def test_build_sakt_examples_slices_full_sequence_windows():
+    """Full-sequence form: each example is a chronological window of up to
+    ``max_seq_len`` interactions (items + responses), not a single query."""
     events = pd.DataFrame(
         {
             "user_id": [7, 7, 7, 7],
@@ -47,14 +49,15 @@ def test_build_sakt_examples_uses_only_prior_events():
 
     examples = build_sakt_examples(events, timestamp_col="timestamp", max_seq_len=2)
 
-    assert len(examples) == 3
-    assert examples[0].query_item_id == 20
-    assert examples[0].history_item_ids == (10,)
-    assert examples[1].query_item_id == 30
-    assert examples[1].history_item_ids == (10, 20)
-    assert examples[2].query_item_id == 40
-    assert examples[2].history_item_ids == (20, 30)
-    assert 40 not in examples[2].history_item_ids
+    # Two non-overlapping windows of length 2.
+    assert len(examples) == 2
+    assert examples[0].item_ids == (10, 20)
+    assert examples[0].correct == (1, 0)
+    assert examples[1].item_ids == (30, 40)
+    assert examples[1].correct == (1, 0)
+    # Convenience views expose the most recent (last) position.
+    assert examples[1].query_item_id == 40
+    assert examples[1].label == 0
 
 
 def test_build_sakt_examples_includes_temporal_features_when_timestamped():
@@ -69,9 +72,13 @@ def test_build_sakt_examples_includes_temporal_features_when_timestamped():
 
     examples = build_sakt_examples(events, timestamp_col="timestamp", max_seq_len=3)
 
-    assert examples[1].query_item_id == 30
-    assert examples[1].history_elapsed == (0.0, 5.0)
-    assert examples[1].history_lag == (20.0, 15.0)
+    # A single window covering all three interactions.
+    assert len(examples) == 1
+    window = examples[0]
+    assert window.item_ids == (10, 20, 30)
+    # elapsed[t] = gap from t-1 to t; lag[t] = gap from t to the last position.
+    assert window.elapsed == (0.0, 5.0, 15.0)
+    assert window.lag == (20.0, 15.0, 0.0)
 
 
 def test_sakt_tracer_fit_predict_and_state_vector_shape():

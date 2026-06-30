@@ -40,13 +40,59 @@ __all__ = [
 
 @dataclass(frozen=True)
 class SAKTTrainingExample:
-    """One supervised next-response example for SAKT training."""
+    """One full-sequence training window for knowledge tracing.
+
+    This is the FULL-SEQUENCE training unit (the framework was migrated away from
+    the old single-query "(history, one query) -> one label" form). Each window
+    is a chronological slice of a single learner's interactions of length up to
+    ``max_seq_len``. At every position ``t`` in the window:
+
+    - ``item_ids[t]`` is the queried exercise (the model may see this id),
+    - ``correct[t]`` is the response/target at ``t`` (the model must NOT see its
+      own response when predicting position ``t`` -- enforced by causal masking),
+    - the model predicts ``correct[t]`` using interactions at positions ``< t``
+      plus the exercise id at ``t``.
+
+    The model produces a prediction for EVERY position in one forward pass.
+
+    ``query_item_id`` / ``label`` are retained as convenience views of the LAST
+    (most recent) position in the window so older single-query call sites and
+    introspection keep working.
+    """
 
     user_id: Any
-    query_item_id: Any
-    label: int
+    item_ids: Tuple[Any, ...]
+    correct: Tuple[int, ...]
+    elapsed: Tuple[float, ...] = ()
+    lag: Tuple[float, ...] = ()
+
+    @property
+    def query_item_id(self) -> Any:
+        """The most recent (last) queried item in this window."""
+        return self.item_ids[-1]
+
+    @property
+    def label(self) -> int:
+        """The response/target at the most recent (last) position."""
+        return self.correct[-1]
+
+    def __len__(self) -> int:
+        return len(self.item_ids)
+
+
+@dataclass(frozen=True)
+class _SingleQueryExample:
+    """Legacy single-query training example used only by phase-2 models.
+
+    TODO(phase2): delete once AKT/SAINT/SAINT+/DKVMN move to the full-sequence
+    forward. This reconstructs the previous "(history, one query) -> one label"
+    unit from full-sequence windows so those models train unchanged.
+    """
+
     history_item_ids: Tuple[Any, ...]
     history_correct: Tuple[int, ...]
+    query_item_id: Any
+    label: int
     history_elapsed: Tuple[float, ...] = ()
     history_lag: Tuple[float, ...] = ()
 
@@ -79,11 +125,21 @@ def build_sakt_examples(
     max_seq_len: int = 50,
     correct_threshold: float = 0.5,
 ) -> List[SAKTTrainingExample]:
-    """Build leakage-safe next-response examples from learner interactions.
+    """Build leakage-safe FULL-SEQUENCE training windows from interactions.
 
-    For each user sequence, the example at position ``t`` uses only events
-    before ``t`` as history and the event at ``t`` as the query label. The
-    first event for each user is skipped because it has no prior history.
+    For each user, the chronological interaction sequence is sliced into
+    non-overlapping windows of length up to ``max_seq_len``. Each returned
+    :class:`SAKTTrainingExample` holds the items and responses for one window; a
+    full-sequence model predicts the response at EVERY position ``t`` using only
+    interactions at positions ``< t`` plus the exercise id at ``t`` (the causal,
+    no-leakage contract -- see :class:`SAKTTrainingExample`).
+
+    The per-window ``elapsed``/``lag`` temporal features are aligned to each
+    window position: ``elapsed[t]`` is the gap from ``t-1`` to ``t`` and
+    ``lag[t]`` is the gap from ``t`` to the LAST position of the window (the most
+    recent query). Windows with a single interaction are still emitted -- a
+    full-sequence model trains on position 0 with an empty (all-padded) causal
+    context, which is the cold-start prediction.
     """
     if max_seq_len < 1:
         raise ValueError("max_seq_len must be >= 1")
@@ -105,33 +161,37 @@ def build_sakt_examples(
 
     examples: List[SAKTTrainingExample] = []
     for user_id, group in work.groupby(user_col, sort=False):
-        history_items: List[Any] = []
-        history_correct: List[int] = []
-        history_times: List[float] = []
+        items: List[Any] = []
+        responses: List[int] = []
+        times: List[float] = []
         cols = [item_col, correct_col] if timestamp_col is None else [item_col, correct_col, timestamp_col]
         for row in group[cols].itertuples(index=False, name=None):
-            item_id = row[0]
-            raw_correct = row[1]
-            current_time = _time_value(row[2]) if timestamp_col is not None else None
-            correct = _label(raw_correct, correct_threshold)
-            if history_items:
-                history_elapsed = _elapsed_history(history_times) if current_time is not None else []
-                history_lag = [max(0.0, float(current_time) - t) for t in history_times] if current_time is not None else []
-                examples.append(
-                    SAKTTrainingExample(
-                        user_id=user_id,
-                        query_item_id=item_id,
-                        label=correct,
-                        history_item_ids=tuple(history_items[-max_seq_len:]),
-                        history_correct=tuple(history_correct[-max_seq_len:]),
-                        history_elapsed=tuple(history_elapsed[-max_seq_len:]),
-                        history_lag=tuple(history_lag[-max_seq_len:]),
-                    )
+            items.append(row[0])
+            responses.append(_label(row[1], correct_threshold))
+            if timestamp_col is not None:
+                times.append(_time_value(row[2]))
+
+        # Slice the user's chronological stream into windows of <= max_seq_len.
+        for start in range(0, len(items), max_seq_len):
+            win_items = items[start : start + max_seq_len]
+            win_correct = responses[start : start + max_seq_len]
+            if timestamp_col is not None:
+                win_times = times[start : start + max_seq_len]
+                win_elapsed = tuple(_elapsed_history(win_times))
+                query_time = float(win_times[-1])
+                win_lag = tuple(max(0.0, query_time - t) for t in win_times)
+            else:
+                win_elapsed = ()
+                win_lag = ()
+            examples.append(
+                SAKTTrainingExample(
+                    user_id=user_id,
+                    item_ids=tuple(win_items),
+                    correct=tuple(win_correct),
+                    elapsed=win_elapsed,
+                    lag=win_lag,
                 )
-            history_items.append(item_id)
-            history_correct.append(correct)
-            if current_time is not None:
-                history_times.append(current_time)
+            )
     return examples
 
 
@@ -169,7 +229,26 @@ def _bucket_time_values(values: Sequence[float], max_bucket: int) -> np.ndarray:
 
 
 class _SAKTModel(nn.Module):
-    """Minimal self-attentive knowledge tracing model."""
+    """Full-sequence self-attentive knowledge tracing model (SAKT).
+
+    Faithful to Pandey & Karypis (2019): for a sequence of interactions the
+    model produces a correctness prediction at EVERY position in a single
+    forward pass via causal self-attention.
+
+    Inputs (all right-padded, shape ``(B, L)`` where ``L == max_seq_len``):
+
+    - ``history_items[b, t]`` exercise id at position ``t`` (0 == padding),
+    - ``history_correct[b, t]`` response at position ``t``,
+    - ``query_items[b, t]`` the exercise id being predicted at ``t`` (for full
+      training windows this equals ``history_items`` shifted appropriately; the
+      caller passes the per-position query exercise ids).
+
+    No-leakage contract (causal masking): the query at position ``t`` attends to
+    interaction embeddings (exercise+response) at positions ``< t`` ONLY. It sees
+    the exercise id at ``t`` (through the query embedding) but NEVER the response
+    at ``t``. This is enforced by a strict lower-triangular (diagonal excluded)
+    causal mask, so the prediction at ``t`` is independent of ``correct[t]``.
+    """
 
     def __init__(
         self,
@@ -203,30 +282,55 @@ class _SAKTModel(nn.Module):
         history_correct: torch.Tensor,
         query_items: torch.Tensor,
     ) -> torch.Tensor:
-        pad_mask = history_items.eq(0)
+        # history_items/history_correct/query_items: (B, L), right-padded with 0.
+        pad_mask = history_items.eq(0)  # (B, L) True where padded interaction.
+        seq_len = history_items.shape[1]
+        device = history_items.device
+
         interaction_codes = history_items + history_correct.long() * self.num_items
         interaction_codes = interaction_codes.masked_fill(pad_mask, 0)
 
-        positions = torch.arange(self.max_seq_len, device=history_items.device).unsqueeze(0)
+        positions = torch.arange(seq_len, device=device).unsqueeze(0)
+        # Interaction (key/value) embeddings: exercise+response at each position.
         x = self.interaction_emb(interaction_codes) + self.position_emb(positions)
         x = x.masked_fill(pad_mask.unsqueeze(-1), 0.0)
 
-        key_padding_mask = pad_mask.clone()
-        all_padding = key_padding_mask.all(dim=1)
-        if bool(all_padding.any()):
-            key_padding_mask[all_padding, 0] = False
+        # Per-position query embeddings: exercise id only (NO response).
+        query = self.query_item_emb(query_items) + self.position_emb(positions)
 
-        query = self.query_item_emb(query_items).unsqueeze(1)
+        # Strict causal mask: position t may attend to interactions at j < t only,
+        # so the response at t (and any future response) is never visible.
+        # nn.MultiheadAttention treats True entries in attn_mask as "not allowed".
+        # triu(diagonal=0) is True on AND above the main diagonal, which disallows
+        # attending to self (j == t) and the future (j > t).
+        causal = torch.triu(
+            torch.ones(seq_len, seq_len, device=device, dtype=torch.bool),
+            diagonal=0,
+        )  # (L, L): True on and above the diagonal == disallowed.
+
+        # Key padding: padded interaction positions are never attended to.
+        key_padding_mask = pad_mask  # (B, L)
+
+        # A query at position t whose entire allowed window (j < t) is masked
+        # (e.g. t == 0, or all-padded rows) would yield NaN from a fully-masked
+        # softmax. MultiheadAttention guards padded queries, but the causal mask
+        # alone leaves position 0 with no valid key. Allow each position to attend
+        # to a single safe slot and zero out its contribution afterwards instead.
         attn_out, _ = self.attention(
             query,
             x,
             x,
+            attn_mask=causal,
             key_padding_mask=key_padding_mask,
             need_weights=False,
         )
+        # Rows with no valid key (fully masked) produce NaN; replace with 0 so the
+        # residual leaves a pure query-embedding (cold-start) representation.
+        attn_out = torch.nan_to_num(attn_out, nan=0.0)
+
         hidden = self.norm1(query + attn_out)
         hidden = self.norm2(hidden + self.ffn(hidden))
-        return cast(torch.Tensor, self.out(hidden.squeeze(1)).squeeze(-1))
+        return cast(torch.Tensor, self.out(hidden).squeeze(-1))
 
 
 class _AKTModel(nn.Module):
@@ -435,7 +539,21 @@ class _SAINTPlusModel(_SAINTModel):
 
 
 class _DKTModel(nn.Module):
-    """Compact DKT-style recurrent knowledge tracer."""
+    """Full-sequence recurrent knowledge tracer (DKT).
+
+    Faithful to Piech et al. (2015): a recurrent network over the interaction
+    sequence that emits a prediction at EVERY position in one pass. The original
+    paper uses an LSTM (the framework previously used a GRU); this implementation
+    uses :class:`torch.nn.LSTM` for paper fidelity.
+
+    No-leakage contract: the recurrent state read out at position ``t`` is
+    produced from interactions at positions ``< t`` only. We achieve this by
+    feeding the LSTM the interaction sequence shifted right by one step (position
+    ``t`` consumes interaction ``t-1``; position 0 consumes a zero vector), then
+    reading the per-position hidden state against the query item embedding at
+    ``t``. The response at ``t`` therefore never influences the prediction at
+    ``t``.
+    """
 
     def __init__(
         self,
@@ -448,7 +566,7 @@ class _DKTModel(nn.Module):
         self.num_items = int(num_items)
         self.interaction_emb = nn.Embedding(2 * self.num_items + 1, d_model, padding_idx=0)
         self.query_item_emb = nn.Embedding(self.num_items + 1, d_model, padding_idx=0)
-        self.gru = nn.GRU(d_model, d_model, batch_first=True)
+        self.lstm = nn.LSTM(d_model, d_model, batch_first=True)
         self.out = nn.Sequential(
             nn.Linear(2 * d_model, d_model),
             nn.ReLU(),
@@ -462,17 +580,20 @@ class _DKTModel(nn.Module):
         history_correct: torch.Tensor,
         query_items: torch.Tensor,
     ) -> torch.Tensor:
+        # All tensors (B, L), right-padded with 0.
         pad_mask = history_items.eq(0)
         interaction_codes = history_items + history_correct.long() * self.num_items
         interaction_codes = interaction_codes.masked_fill(pad_mask, 0)
-        x = self.interaction_emb(interaction_codes)
-        outputs, _ = self.gru(x)
-        # Sequences are LEFT-padded (see ``_encode_examples`` / ``_history_tensors``),
-        # so the most recent real interaction is always the final timestep. The GRU
-        # is ``batch_first=True``, so the last hidden state is ``outputs[:, -1, :]``.
-        context = outputs[:, -1, :]
-        query = self.query_item_emb(query_items)
-        return cast(torch.Tensor, self.out(torch.cat([context, query], dim=-1)).squeeze(-1))
+        x = self.interaction_emb(interaction_codes)  # (B, L, D)
+
+        # Shift right by one: input at position t is interaction t-1, so the
+        # hidden state read out at t never depends on the response at t.
+        shifted = torch.zeros_like(x)
+        shifted[:, 1:, :] = x[:, :-1, :]
+
+        outputs, _ = self.lstm(shifted)  # (B, L, D): per-position hidden states.
+        query = self.query_item_emb(query_items)  # (B, L, D)
+        return cast(torch.Tensor, self.out(torch.cat([outputs, query], dim=-1)).squeeze(-1))
 
 
 class _DKVMNModel(nn.Module):
@@ -578,6 +699,13 @@ class SAKTTracer:
         self.device = torch.device(device or ("cuda" if torch.cuda.is_available() else "cpu"))
         self.random_state = random_state
 
+        # Full-sequence models (SAKT, DKT) produce a prediction at every position
+        # in one forward pass via causal masking. Phase-2 models (AKT, SAINT,
+        # SAINT+, DKVMN) still use the legacy single-query forward; they set this
+        # flag False in their constructors. TODO(phase2): migrate those models to
+        # the full-sequence forward and remove the single-query code path.
+        self._full_sequence: bool = True
+
         self.model: Optional[nn.Module] = None
         self.training_examples_: List[SAKTTrainingExample] = []
         self.result_: Dict[str, float] = {}
@@ -623,7 +751,7 @@ class SAKTTracer:
             max_seq_len=self.max_seq_len,
             correct_threshold=self.correct_threshold,
         )
-        if not examples:
+        if not examples or all(len(ex) < 2 for ex in examples):
             raise ValueError("SAKTTracer requires at least one user with two or more interactions")
 
         item_ids = sorted(interactions[item_col].drop_duplicates().tolist(), key=lambda value: str(value))
@@ -645,18 +773,29 @@ class SAKTTracer:
 
         self.model = self._make_model().to(self.device)
         optimizer = torch.optim.Adam(self.model.parameters(), lr=self.learning_rate)
-        loss_fn = nn.BCEWithLogitsLoss()
+        # Full-sequence loss is averaged over NON-PADDED positions only (masked
+        # BCE). Single-query loss is a plain per-example BCE.
+        loss_fn = nn.BCEWithLogitsLoss(reduction="none" if self._full_sequence else "mean")
 
         self.model.train()
         last_loss = 0.0
         for _ in range(self.epochs):
             for raw_batch in loader:
                 batch = tuple(tensor.to(self.device) for tensor in raw_batch)
-                batch_labels = batch[-1]
 
                 optimizer.zero_grad()
-                logits = self._logits_from_batch(batch[:-1])
-                loss = loss_fn(logits, batch_labels)
+                if self._full_sequence:
+                    # Encoded layout: (*model_inputs, labels, mask).
+                    mask = batch[-1].float()
+                    batch_labels = batch[-2]
+                    logits = self._logits_from_batch(batch[:-2])
+                    per_pos = loss_fn(logits, batch_labels)
+                    denom = mask.sum().clamp_min(1.0)
+                    loss = (per_pos * mask).sum() / denom
+                else:
+                    batch_labels = batch[-1]
+                    logits = self._logits_from_batch(batch[:-1])
+                    loss = loss_fn(logits, batch_labels)
                 loss.backward()
                 optimizer.step()
                 last_loss = float(loss.detach().cpu().item())
@@ -799,6 +938,78 @@ class SAKTTracer:
         self,
         examples: Sequence[SAKTTrainingExample],
     ) -> Tuple[torch.Tensor, ...]:
+        if self._full_sequence:
+            return self._encode_full_sequence(examples)
+        return self._encode_single_query(self._to_single_query(examples))
+
+    def _encode_full_sequence(
+        self,
+        examples: Sequence[SAKTTrainingExample],
+    ) -> Tuple[torch.Tensor, ...]:
+        """Encode full-sequence windows into right-padded per-position tensors.
+
+        Returns ``(history_items, history_correct, query_items, labels, mask)``,
+        all of shape ``(N, max_seq_len)``. ``query_items`` equals
+        ``history_items`` (each position queries its own exercise id); ``labels``
+        are the per-position responses; ``mask`` is 1 on real positions, 0 on
+        right-padding. RIGHT-padding is used consistently with serving.
+        """
+        history_items = np.zeros((len(examples), self.max_seq_len), dtype=np.int64)
+        history_correct = np.zeros((len(examples), self.max_seq_len), dtype=np.int64)
+        labels = np.zeros((len(examples), self.max_seq_len), dtype=np.float32)
+        mask = np.zeros((len(examples), self.max_seq_len), dtype=np.float32)
+
+        for row_idx, example in enumerate(examples):
+            encoded_items = [self._internal_item_id(item_id) for item_id in example.item_ids]
+            length = len(encoded_items)
+            history_items[row_idx, :length] = encoded_items
+            history_correct[row_idx, :length] = list(example.correct)
+            labels[row_idx, :length] = [float(c) for c in example.correct]
+            mask[row_idx, :length] = 1.0
+
+        return (
+            torch.as_tensor(history_items, dtype=torch.long),
+            torch.as_tensor(history_correct, dtype=torch.long),
+            torch.as_tensor(history_items, dtype=torch.long),  # query == own item id
+            torch.as_tensor(labels, dtype=torch.float32),
+            torch.as_tensor(mask, dtype=torch.float32),
+        )
+
+    def _to_single_query(
+        self,
+        examples: Sequence[SAKTTrainingExample],
+    ) -> List["_SingleQueryExample"]:
+        """Expand full-sequence windows into legacy single-query examples.
+
+        TODO(phase2): remove once AKT/SAINT/SAINT+/DKVMN are migrated to the
+        full-sequence forward. Each window position ``t >= 1`` becomes one
+        ``(history[:t], query=item[t], label=correct[t])`` example, reproducing
+        the previous single-query training distribution (left-padded by the
+        single-query encoders).
+        """
+        single: List[_SingleQueryExample] = []
+        for example in examples:
+            for t in range(1, len(example.item_ids)):
+                single.append(
+                    _SingleQueryExample(
+                        history_item_ids=example.item_ids[:t],
+                        history_correct=example.correct[:t],
+                        query_item_id=example.item_ids[t],
+                        label=example.correct[t],
+                        history_elapsed=example.elapsed[:t] if example.elapsed else (),
+                        history_lag=(
+                            tuple(max(0.0, example.lag[i] - example.lag[t]) for i in range(t))
+                            if example.lag
+                            else ()
+                        ),
+                    )
+                )
+        return single
+
+    def _encode_single_query(
+        self,
+        examples: Sequence["_SingleQueryExample"],
+    ) -> Tuple[torch.Tensor, ...]:
         history_items = np.zeros((len(examples), self.max_seq_len), dtype=np.int64)
         history_correct = np.zeros((len(examples), self.max_seq_len), dtype=np.int64)
         query_items = np.zeros((len(examples),), dtype=np.int64)
@@ -806,7 +1017,8 @@ class SAKTTracer:
 
         for row_idx, example in enumerate(examples):
             encoded_items = [self._internal_item_id(item_id) for item_id in example.history_item_ids]
-            encoded_correct = list(example.history_correct)
+            encoded_items = encoded_items[-self.max_seq_len:]
+            encoded_correct = list(example.history_correct)[-self.max_seq_len:]
             offset = self.max_seq_len - len(encoded_items)
             history_items[row_idx, offset:] = encoded_items
             history_correct[row_idx, offset:] = encoded_correct
@@ -821,6 +1033,7 @@ class SAKTTracer:
         )
 
     def _history_tensors(self, user_id: Any, count: int) -> Tuple[torch.Tensor, torch.Tensor]:
+        """LEFT-padded history tensors for the legacy single-query forward."""
         history = self._histories.get(user_id, [])[-self.max_seq_len:]
         items = np.zeros((1, self.max_seq_len), dtype=np.int64)
         correct = np.zeros((1, self.max_seq_len), dtype=np.int64)
@@ -837,11 +1050,48 @@ class SAKTTracer:
         assert self.model is not None
         self.model.eval()
         with torch.no_grad():
-            history_items, history_correct = self._history_tensors(user_id, len(internal_items))
-            query = torch.as_tensor(internal_items, dtype=torch.long, device=self.device)
-            logits = self._predict_logits(user_id, history_items, history_correct, query)
-            probs = torch.sigmoid(logits).detach().cpu().numpy()
+            if self._full_sequence:
+                probs = self._predict_full_sequence(user_id, internal_items)
+            else:
+                history_items, history_correct = self._history_tensors(user_id, len(internal_items))
+                query = torch.as_tensor(internal_items, dtype=torch.long, device=self.device)
+                logits = self._predict_logits(user_id, history_items, history_correct, query)
+                probs = torch.sigmoid(logits).detach().cpu().numpy()
         return probs.astype(np.float32)
+
+    def _predict_full_sequence(self, user_id: Any, internal_items: Sequence[int]) -> np.ndarray:
+        """Serve next-item predictions from the full-sequence (causal) model.
+
+        The learner's observed interactions occupy positions ``0..N-1`` (right-
+        padded). Each candidate is placed at the query position ``N`` with NO
+        response, and we read the per-position logit at that query slot. Causal
+        masking guarantees position ``N`` attends only to the real history
+        (positions ``< N``), matching the old serving contract: "given observed
+        history, predict the next item".
+        """
+        assert self.model is not None
+        # Reserve the last slot for the query, so keep at most max_seq_len-1 of
+        # the observed history (mirrors training windows ending at the query).
+        budget = max(0, self.max_seq_len - 1)
+        history = self._histories.get(user_id, [])[-budget:] if budget else []
+        n = len(history)
+
+        count = len(internal_items)
+        items = np.zeros((count, self.max_seq_len), dtype=np.int64)
+        correct = np.zeros((count, self.max_seq_len), dtype=np.int64)
+        if history:
+            items[:, :n] = [item for item, _ in history]
+            correct[:, :n] = [label for _, label in history]
+        # Place each candidate at the query position N (response stays 0/unseen).
+        items[:, n] = list(internal_items)
+
+        history_items = torch.as_tensor(items, dtype=torch.long, device=self.device)
+        history_correct = torch.as_tensor(correct, dtype=torch.long, device=self.device)
+        query_items = history_items  # full-sequence: query id == item id at each position
+        logits = self._predict_logits(user_id, history_items, history_correct, query_items)
+        # logits: (count, max_seq_len) -> take the query position N.
+        query_logits = logits[:, n]
+        return torch.sigmoid(query_logits).detach().cpu().numpy().astype(np.float32)
 
     def _predict_logits(
         self,
@@ -894,6 +1144,8 @@ class SAINTTracer(SAKTTracer):
             random_state=random_state,
         )
         self.num_layers = int(num_layers)
+        # TODO(phase2): SAINT/SAINT+ still use the single-query forward.
+        self._full_sequence = False
 
     def _make_model(self) -> nn.Module:
         return _SAINTModel(
@@ -1006,14 +1258,16 @@ class SAINTPlusTracer(SAINTTracer):
         self,
         examples: Sequence[SAKTTrainingExample],
     ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
+        # TODO(phase2): SAINT+ remains single-query; expand windows then encode.
+        single = self._to_single_query(examples)
         history_items, history_correct, query_items, labels = cast(
             Tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor],
-            super()._encode_examples(examples),
+            self._encode_single_query(single),
         )
-        elapsed = np.zeros((len(examples), self.max_seq_len), dtype=np.int64)
-        lag = np.zeros((len(examples), self.max_seq_len), dtype=np.int64)
+        elapsed = np.zeros((len(single), self.max_seq_len), dtype=np.int64)
+        lag = np.zeros((len(single), self.max_seq_len), dtype=np.int64)
 
-        for row_idx, example in enumerate(examples):
+        for row_idx, example in enumerate(single):
             elapsed_values = _bucket_time_values(example.history_elapsed[-self.max_seq_len :], self.num_time_buckets)
             lag_values = _bucket_time_values(example.history_lag[-self.max_seq_len :], self.num_time_buckets)
             if elapsed_values.size:
@@ -1113,6 +1367,8 @@ class DKVMNTracer(SAKTTracer):
             device=device,
             random_state=random_state,
         )
+        # TODO(phase2): DKVMN still uses the single-query forward.
+        self._full_sequence = False
 
     def _make_model(self) -> nn.Module:
         return _DKVMNModel(
@@ -1165,6 +1421,8 @@ class AKTTracer(SAKTTracer):
         )
         if monotonic_decay < 0:
             raise ValueError("monotonic_decay must be non-negative")
+        # TODO(phase2): AKT still uses the single-query forward.
+        self._full_sequence = False
         self.monotonic_decay = float(monotonic_decay)
         self.item_difficulty_: Dict[Any, float] = {}
         self._item_difficulty_tensor: Optional[torch.Tensor] = None
