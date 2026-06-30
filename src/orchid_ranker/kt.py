@@ -81,23 +81,6 @@ class SAKTTrainingExample:
 
 
 @dataclass(frozen=True)
-class _SingleQueryExample:
-    """Legacy single-query training example used only by phase-2 models.
-
-    TODO(phase2): delete once AKT/SAINT/SAINT+/DKVMN move to the full-sequence
-    forward. This reconstructs the previous "(history, one query) -> one label"
-    unit from full-sequence windows so those models train unchanged.
-    """
-
-    history_item_ids: Tuple[Any, ...]
-    history_correct: Tuple[int, ...]
-    query_item_id: Any
-    label: int
-    history_elapsed: Tuple[float, ...] = ()
-    history_lag: Tuple[float, ...] = ()
-
-
-@dataclass(frozen=True)
 class KTRecommendation:
     """Practice recommendation scored by predicted correctness and stretch fit."""
 
@@ -334,7 +317,30 @@ class _SAKTModel(nn.Module):
 
 
 class _AKTModel(nn.Module):
-    """Compact AKT-inspired model with difficulty and monotonic attention."""
+    """Full-sequence AKT tracer (Ghosh et al. 2020).
+
+    Two defining AKT mechanisms are implemented faithfully:
+
+    **(a) Rasch embeddings.** Each item has a LEARNED scalar difficulty
+    ``mu_q`` (``difficulty`` embedding of shape ``(num_items, 1)``). The
+    question embedding is ``c_c + mu_q * d_c`` where ``c_c`` is the concept
+    embedding and ``d_c`` the question-variation embedding. The interaction
+    embedding is the base response embedding plus ``mu_q * f_(c,r)`` where
+    ``f_(c,r)`` is a learned variation over the (concept, response) interaction.
+    When an external difficulty prior is provided it WARM-STARTS
+    ``difficulty.weight`` and then trains freely.
+
+    **(b) Monotonic context-aware attention.** A content-dependent, distance
+    decayed multi-head attention. The decay is NOT a fixed positional ramp: it
+    uses the (detached) softmaxed attention to accumulate an effective distance
+    between query ``t`` and key ``tau`` and applies a learned per-head decay
+    ``gammas`` (negative via ``-softplus``). See :meth:`_monotonic_attention`.
+
+    No-leakage contract: a strict lower-triangular causal mask (diagonal
+    excluded) lets position ``t`` attend to interaction embeddings at
+    ``tau < t`` only. The query stream carries the exercise id (and its Rasch
+    difficulty) at ``t`` but never the response at ``t``.
+    """
 
     def __init__(
         self,
@@ -342,20 +348,32 @@ class _AKTModel(nn.Module):
         num_items: int,
         max_seq_len: int,
         d_model: int,
+        n_heads: int,
         dropout: float,
-        item_difficulty: torch.Tensor,
-        monotonic_decay: float,
+        item_difficulty: Optional[torch.Tensor] = None,
     ) -> None:
         super().__init__()
+        if d_model % n_heads != 0:
+            raise ValueError("d_model must be divisible by n_heads")
         self.num_items = int(num_items)
         self.max_seq_len = int(max_seq_len)
-        self.interaction_emb = nn.Embedding(2 * self.num_items + 1, d_model, padding_idx=0)
-        self.query_item_emb = nn.Embedding(self.num_items + 1, d_model, padding_idx=0)
+        self.n_heads = int(n_heads)
+        self.d_model = int(d_model)
+        self.d_head = self.d_model // self.n_heads
+
+        # Rasch embeddings.
+        self.concept_emb = nn.Embedding(self.num_items + 1, d_model, padding_idx=0)  # c_c
+        self.variation_emb = nn.Embedding(self.num_items + 1, d_model, padding_idx=0)  # d_c
+        self.difficulty = nn.Embedding(self.num_items + 1, 1, padding_idx=0)  # mu_q (learned scalar)
+        # Interaction (response) embeddings: base response embedding + variation.
+        self.response_emb = nn.Embedding(2 * self.num_items + 1, d_model, padding_idx=0)
+        self.response_variation_emb = nn.Embedding(2 * self.num_items + 1, d_model, padding_idx=0)
+
         self.position_emb = nn.Embedding(self.max_seq_len, d_model)
-        self.difficulty_proj = nn.Linear(1, d_model)
         self.query_proj = nn.Linear(d_model, d_model)
         self.key_proj = nn.Linear(d_model, d_model)
         self.value_proj = nn.Linear(d_model, d_model)
+        self.attn_dropout = nn.Dropout(dropout)
         self.dropout = nn.Dropout(dropout)
         self.norm1 = nn.LayerNorm(d_model)
         self.ffn = nn.Sequential(
@@ -366,9 +384,87 @@ class _AKTModel(nn.Module):
         )
         self.norm2 = nn.LayerNorm(d_model)
         self.out = nn.Linear(d_model, 1)
-        self.register_buffer("item_difficulty", item_difficulty.float())
-        self.monotonic_decay = nn.Parameter(torch.tensor(float(monotonic_decay)))
-        self.scale = float(d_model) ** -0.5
+
+        # Learned per-head monotonic decay (one gamma per head). Negated through
+        # softplus at use-time so the effective decay is always <= 0.
+        self.gammas = nn.Parameter(torch.zeros(self.n_heads, 1, 1))
+        self.scale = float(self.d_head) ** -0.5
+
+        # Optional warm-start of the learned difficulty scalar.
+        if item_difficulty is not None:
+            with torch.no_grad():
+                init = item_difficulty.float().reshape(-1, 1)
+                if init.shape[0] == self.difficulty.weight.shape[0]:
+                    self.difficulty.weight.copy_(init)
+
+    def _question_embedding(self, item: torch.Tensor) -> torch.Tensor:
+        """Rasch question embedding: c_c + mu_q * d_c."""
+        mu = self.difficulty(item)  # (B, L, 1)
+        return self.concept_emb(item) + mu * self.variation_emb(item)
+
+    def _interaction_embedding(
+        self, item: torch.Tensor, interaction_codes: torch.Tensor
+    ) -> torch.Tensor:
+        """Rasch interaction embedding: e_(c,r) + mu_q * f_(c,r)."""
+        mu = self.difficulty(item)  # (B, L, 1)
+        return self.response_emb(interaction_codes) + mu * self.response_variation_emb(interaction_codes)
+
+    def _monotonic_attention(
+        self,
+        q: torch.Tensor,
+        k: torch.Tensor,
+        v: torch.Tensor,
+        causal: torch.Tensor,
+    ) -> torch.Tensor:
+        """AKT distance-decayed, content-dependent multi-head attention.
+
+        ``q``/``k``/``v``: (B, H, L, d_head). ``causal``: (L, L) bool, True where
+        attention is DISALLOWED (on and above the diagonal -> future + self).
+        """
+        bsz, n_heads, seq_len, _ = q.shape
+        device = q.device
+        scores = torch.matmul(q, k.transpose(-2, -1)) * self.scale  # (B, H, L, L)
+        disallowed = causal.view(1, 1, seq_len, seq_len)
+
+        with torch.no_grad():
+            # Softmaxed attention restricted to the causal (strictly-past) window.
+            scores_ = torch.softmax(scores.masked_fill(disallowed, -1e32), dim=-1)
+            scores_ = scores_.masked_fill(disallowed, 0.0)  # (B, H, L, L)
+
+            x1 = torch.arange(seq_len, device=device).view(1, 1, seq_len, 1).float()
+            x2 = torch.arange(seq_len, device=device).view(1, 1, 1, seq_len).float()
+            position_effect = torch.abs(x1 - x2)  # |t - tau|, (1,1,L,L)
+
+            # AKT cumulative attention distance. For query row t, sum the
+            # attention mass lying to the RIGHT of key tau (closer to t), so keys
+            # far from t but with little intervening mass decay slowly.
+            # disttotal_scores: total attention to the right of (and including)
+            # each tau; distcum_scores: cumulative attention strictly to the left.
+            distcum_scores = torch.cumsum(scores_, dim=-1)  # cumulative over tau
+            disttotal_scores = torch.sum(scores_, dim=-1, keepdim=True)  # (B,H,L,1)
+            dist_scores = torch.clamp(
+                (disttotal_scores - distcum_scores) * position_effect, min=0.0
+            )
+            dist_scores = torch.sqrt(dist_scores.detach())
+
+        # Learned per-head decay, strictly non-positive.
+        theta = -torch.nn.functional.softplus(self.gammas)  # (H, 1, 1)
+        total_effect = torch.clamp(
+            torch.exp(theta.unsqueeze(0) * dist_scores), min=1e-5, max=1e5
+        )  # (B, H, L, L)
+
+        scores = scores * total_effect
+        scores = scores.masked_fill(disallowed, -1e32)
+        attn = torch.softmax(scores, dim=-1)
+        # A fully-disallowed row (e.g. query t == 0, which may attend to nothing)
+        # yields a UNIFORM softmax over all keys -- which would leak future
+        # interactions. Force such rows to contribute zero context (cold start).
+        fully_masked = disallowed.all(dim=-1, keepdim=True)  # (1,1,L,1)
+        attn = attn.masked_fill(fully_masked, 0.0)
+        attn = torch.nan_to_num(attn, nan=0.0)
+        attn = self.attn_dropout(attn)
+        context = torch.matmul(attn, v)  # (B, H, L, d_head)
+        return context
 
     def forward(
         self,
@@ -376,46 +472,34 @@ class _AKTModel(nn.Module):
         history_correct: torch.Tensor,
         query_items: torch.Tensor,
     ) -> torch.Tensor:
+        bsz, seq_len = history_items.shape
+        device = history_items.device
         pad_mask = history_items.eq(0)
         interaction_codes = history_items + history_correct.long() * self.num_items
         interaction_codes = interaction_codes.masked_fill(pad_mask, 0)
 
-        positions = torch.arange(self.max_seq_len, device=history_items.device).unsqueeze(0)
-        item_difficulty = cast(torch.Tensor, getattr(self, "item_difficulty"))
-        hist_difficulty = item_difficulty.index_select(0, history_items.reshape(-1)).view(
-            history_items.shape[0], self.max_seq_len, 1
-        )
-        x = (
-            self.interaction_emb(interaction_codes)
-            + self.position_emb(positions)
-            + self.difficulty_proj(hist_difficulty)
-        )
+        positions = torch.arange(seq_len, device=device).unsqueeze(0)
+
+        # Key/value stream: Rasch interaction embeddings at each past position.
+        x = self._interaction_embedding(history_items, interaction_codes) + self.position_emb(positions)
         x = x.masked_fill(pad_mask.unsqueeze(-1), 0.0)
 
-        query_difficulty = item_difficulty.index_select(0, query_items).unsqueeze(-1)
-        query = self.query_item_emb(query_items) + self.difficulty_proj(query_difficulty)
-        q = self.query_proj(query)
-        k = self.key_proj(x)
-        v = self.value_proj(x)
+        # Query stream: Rasch question embedding (exercise id only, NO response).
+        query = self._question_embedding(query_items) + self.position_emb(positions)
 
-        scores = torch.sum(k * q.unsqueeze(1), dim=-1) * self.scale
-        distances = torch.arange(
-            self.max_seq_len - 1,
-            -1,
-            -1,
-            device=history_items.device,
-            dtype=scores.dtype,
+        def _heads(t: torch.Tensor) -> torch.Tensor:
+            return t.view(bsz, seq_len, self.n_heads, self.d_head).transpose(1, 2)
+
+        q = _heads(self.query_proj(query))
+        k = _heads(self.key_proj(x))
+        v = _heads(self.value_proj(x))
+
+        # Strict causal mask: position t attends to tau < t only (excludes self).
+        causal = torch.triu(
+            torch.ones(seq_len, seq_len, device=device, dtype=torch.bool), diagonal=0
         )
-        distances = distances / max(1, self.max_seq_len - 1)
-        scores = scores - torch.nn.functional.softplus(self.monotonic_decay) * distances
-
-        key_padding_mask = pad_mask.clone()
-        all_padding = key_padding_mask.all(dim=1)
-        if bool(all_padding.any()):
-            key_padding_mask[all_padding, -1] = False
-        scores = scores.masked_fill(key_padding_mask, -1e9)
-        weights = torch.softmax(scores, dim=-1)
-        context = torch.bmm(weights.unsqueeze(1), v).squeeze(1)
+        context = self._monotonic_attention(q, k, v, causal)  # (B, H, L, d_head)
+        context = context.transpose(1, 2).reshape(bsz, seq_len, self.d_model)
 
         hidden = self.norm1(query + self.dropout(context))
         hidden = self.norm2(hidden + self.ffn(hidden))
@@ -423,7 +507,23 @@ class _AKTModel(nn.Module):
 
 
 class _SAINTModel(nn.Module):
-    """Compact SAINT-style encoder-decoder knowledge tracer."""
+    """Full-sequence SAINT encoder-decoder tracer (Choi et al. 2020).
+
+    Correct encoder/decoder routing:
+
+    - The ENCODER ingests the EXERCISE sequence (exercise embeddings +
+      positional) with causal self-attention, producing exercise memory.
+    - The DECODER ingests the RESPONSE sequence SHIFTED RIGHT by one (a start
+      token at position 0, then ``r_0 .. r_{t-1}``) + positional, with causal
+      self-attention and cross-attention to the encoder memory. Position ``t``
+      predicts response ``r_t``.
+
+    No-leakage contract: the exercise at position ``t`` IS available (the
+    encoder may attend to exercise ``t`` causally, and the decoder cross-attends
+    to it). Only response ``t`` is hidden -- the right-shift means the decoder at
+    position ``t`` has seen responses ``< t`` only, and the causal decoder
+    self-attention enforces the same. The model emits a logit at EVERY position.
+    """
 
     def __init__(
         self,
@@ -438,9 +538,14 @@ class _SAINTModel(nn.Module):
         super().__init__()
         self.num_items = int(num_items)
         self.max_seq_len = int(max_seq_len)
-        self.interaction_emb = nn.Embedding(2 * self.num_items + 1, d_model, padding_idx=0)
-        self.query_item_emb = nn.Embedding(self.num_items + 1, d_model, padding_idx=0)
-        self.position_emb = nn.Embedding(self.max_seq_len, d_model)
+        self.d_model = int(d_model)
+        # Encoder stream: exercise (question) embeddings.
+        self.exercise_emb = nn.Embedding(self.num_items + 1, d_model, padding_idx=0)
+        # Decoder stream: response embeddings. Index 0 is the start/pad token,
+        # 1 == incorrect, 2 == correct (response value + 1).
+        self.response_emb = nn.Embedding(3, d_model, padding_idx=0)
+        self.enc_position_emb = nn.Embedding(self.max_seq_len, d_model)
+        self.dec_position_emb = nn.Embedding(self.max_seq_len, d_model)
         encoder_layer = nn.TransformerEncoderLayer(
             d_model=d_model,
             nhead=n_heads,
@@ -461,20 +566,21 @@ class _SAINTModel(nn.Module):
         self.decoder = nn.TransformerDecoder(decoder_layer, num_layers=max(1, int(num_layers)))
         self.out = nn.Linear(d_model, 1)
 
-    def _history_embeddings(
+    def _decoder_input(
         self,
-        history_items: torch.Tensor,
         history_correct: torch.Tensor,
+        pad_mask: torch.Tensor,
+        positions: torch.Tensor,
         history_elapsed: Optional[torch.Tensor] = None,
         history_lag: Optional[torch.Tensor] = None,
     ) -> torch.Tensor:
+        """Right-shifted response stream (base SAINT: no time features)."""
         del history_elapsed, history_lag
-        pad_mask = history_items.eq(0)
-        interaction_codes = history_items + history_correct.long() * self.num_items
-        interaction_codes = interaction_codes.masked_fill(pad_mask, 0)
-        positions = torch.arange(self.max_seq_len, device=history_items.device).unsqueeze(0)
-        x = self.interaction_emb(interaction_codes) + self.position_emb(positions)
-        return cast(torch.Tensor, x.masked_fill(pad_mask.unsqueeze(-1), 0.0))
+        # Response tokens: 1 + r (0 reserved for start/pad). Shift right by one.
+        resp_tokens = (history_correct.long() + 1).masked_fill(pad_mask, 0)
+        shifted = torch.zeros_like(resp_tokens)
+        shifted[:, 1:] = resp_tokens[:, :-1]  # position t sees response t-1
+        return cast(torch.Tensor, self.response_emb(shifted) + self.dec_position_emb(positions))
 
     def forward(
         self,
@@ -484,21 +590,54 @@ class _SAINTModel(nn.Module):
         history_elapsed: Optional[torch.Tensor] = None,
         history_lag: Optional[torch.Tensor] = None,
     ) -> torch.Tensor:
+        bsz, seq_len = history_items.shape
+        device = history_items.device
         pad_mask = history_items.eq(0)
+        positions = torch.arange(seq_len, device=device).unsqueeze(0)
+
+        # nn.Transformer needs a non-fully-masked key row to avoid NaNs; allow
+        # all-padding rows to attend to one safe slot (zeroed out by output use).
         key_padding_mask = pad_mask.clone()
         all_padding = key_padding_mask.all(dim=1)
         if bool(all_padding.any()):
             key_padding_mask[all_padding, -1] = False
 
-        x = self._history_embeddings(history_items, history_correct, history_elapsed, history_lag)
-        memory = self.encoder(x, src_key_padding_mask=key_padding_mask)
-        query = self.query_item_emb(query_items).unsqueeze(1)
-        hidden = self.decoder(query, memory, memory_key_padding_mask=key_padding_mask)
-        return cast(torch.Tensor, self.out(hidden.squeeze(1)).squeeze(-1))
+        # Causal mask (True == disallowed) on/above the diagonal: position t may
+        # attend to <= t in the encoder (exercise t is allowed) and decoder.
+        causal = torch.triu(
+            torch.ones(seq_len, seq_len, device=device, dtype=torch.bool), diagonal=1
+        )
+
+        # ENCODER over the exercise sequence (query_items == per-position id).
+        enc_in = self.exercise_emb(query_items) + self.enc_position_emb(positions)
+        enc_in = enc_in.masked_fill(pad_mask.unsqueeze(-1), 0.0)
+        memory = self.encoder(
+            enc_in, mask=causal, src_key_padding_mask=key_padding_mask
+        )
+
+        # DECODER over the right-shifted response stream, cross-attending memory.
+        dec_in = self._decoder_input(
+            history_correct, pad_mask, positions, history_elapsed, history_lag
+        )
+        hidden = self.decoder(
+            dec_in,
+            memory,
+            tgt_mask=causal,
+            memory_mask=causal,
+            tgt_key_padding_mask=key_padding_mask,
+            memory_key_padding_mask=key_padding_mask,
+        )
+        hidden = torch.nan_to_num(hidden, nan=0.0)
+        return cast(torch.Tensor, self.out(hidden).squeeze(-1))
 
 
 class _SAINTPlusModel(_SAINTModel):
-    """SAINT-style tracer with elapsed-time and lag-time embeddings."""
+    """Full-sequence SAINT+ tracer (Shin et al. 2021).
+
+    SAINT plus elapsed-time and lag-time embeddings ADDED TO THE DECODER input
+    (the response stream), per the paper. The encoder (exercise stream) is
+    unchanged from SAINT.
+    """
 
     def __init__(
         self,
@@ -523,19 +662,27 @@ class _SAINTPlusModel(_SAINTModel):
         self.elapsed_emb = nn.Embedding(self.num_time_buckets + 1, d_model, padding_idx=0)
         self.lag_emb = nn.Embedding(self.num_time_buckets + 1, d_model, padding_idx=0)
 
-    def _history_embeddings(
+    def _decoder_input(
         self,
-        history_items: torch.Tensor,
         history_correct: torch.Tensor,
+        pad_mask: torch.Tensor,
+        positions: torch.Tensor,
         history_elapsed: Optional[torch.Tensor] = None,
         history_lag: Optional[torch.Tensor] = None,
     ) -> torch.Tensor:
-        x = super()._history_embeddings(history_items, history_correct, history_elapsed, history_lag)
+        dec_in = super()._decoder_input(history_correct, pad_mask, positions)
+        # Time features are aligned to the response at position t (elapsed[t] is
+        # the time taken to answer item t; lag[t] the gap before item t). These
+        # describe the CURRENT step's timing, which the paper feeds to the
+        # decoder; they do not reveal the response value at t.
         if history_elapsed is None:
-            history_elapsed = torch.zeros_like(history_items)
+            history_elapsed = torch.zeros_like(history_correct)
         if history_lag is None:
-            history_lag = torch.zeros_like(history_items)
-        return cast(torch.Tensor, x + self.elapsed_emb(history_elapsed.long()) + self.lag_emb(history_lag.long()))
+            history_lag = torch.zeros_like(history_correct)
+        return cast(
+            torch.Tensor,
+            dec_in + self.elapsed_emb(history_elapsed.long()) + self.lag_emb(history_lag.long()),
+        )
 
 
 class _DKTModel(nn.Module):
@@ -597,11 +744,26 @@ class _DKTModel(nn.Module):
 
 
 class _DKVMNModel(nn.Module):
-    """Compact DKVMN-style key-value memory tracer.
+    """Full-sequence DKVMN key-value memory tracer (Zhang et al. 2017).
 
-    This implementation uses item-key attention over historical interaction
-    values. It intentionally keeps the same Orchid tracer contract as SAKT so
-    it can serve as a small, benchmarkable in-repo memory-network baseline.
+    Real key-value memory:
+
+    - ``M_k``: a STATIC learned key matrix of shape ``(N_slots, d_k)``.
+    - ``M_v0``: a learned INITIAL value matrix of shape ``(N_slots, d_v)``,
+      broadcast per learner and mutated over time.
+
+    Sequential over ``t`` (carrying the working value memory ``M_v``):
+
+    1. correlation weight ``w_t = softmax(exercise_key(item_t) @ M_k^T)``,
+    2. READ ``r_t = w_t @ M_v`` from the CURRENT value memory,
+    3. predict ``logit_t`` from ``[r_t, exercise_key(item_t)]``,
+    4. WRITE interaction ``t``: ``e_t = sigmoid(W_e v_t)``,
+       ``a_t = tanh(W_a v_t)``, then
+       ``M_v <- M_v * (1 - w_t^T e_t) + w_t^T a_t``.
+
+    No-leakage contract: the prediction at ``t`` uses the read taken BEFORE the
+    interaction-``t`` write, so it depends on interactions ``< t`` and the
+    exercise id at ``t`` only -- never response ``t``.
     """
 
     def __init__(
@@ -610,18 +772,30 @@ class _DKVMNModel(nn.Module):
         num_items: int,
         d_model: int,
         dropout: float,
+        memory_size: int = 20,
     ) -> None:
         super().__init__()
         self.num_items = int(num_items)
-        self.item_key_emb = nn.Embedding(self.num_items + 1, d_model, padding_idx=0)
-        self.interaction_value_emb = nn.Embedding(2 * self.num_items + 1, d_model, padding_idx=0)
+        self.memory_size = int(memory_size)
+        self.d_k = int(d_model)
+        self.d_v = int(d_model)
+
+        # Embeddings feeding the key (addressing) and value (write) computations.
+        self.exercise_key_emb = nn.Embedding(self.num_items + 1, self.d_k, padding_idx=0)
+        self.interaction_value_emb = nn.Embedding(2 * self.num_items + 1, self.d_v, padding_idx=0)
+
+        # Static key matrix and learned initial value matrix.
+        self.key_matrix = nn.Parameter(torch.randn(self.memory_size, self.d_k) * 0.1)  # M_k
+        self.value_matrix_init = nn.Parameter(torch.randn(self.memory_size, self.d_v) * 0.1)  # M_v0
+
+        self.erase = nn.Linear(self.d_v, self.d_v)
+        self.add = nn.Linear(self.d_v, self.d_v)
+        self.summary = nn.Linear(self.d_v + self.d_k, d_model)
         self.out = nn.Sequential(
-            nn.Linear(2 * d_model, d_model),
-            nn.ReLU(),
+            nn.Tanh(),
             nn.Dropout(dropout),
             nn.Linear(d_model, 1),
         )
-        self.scale = float(d_model) ** -0.5
 
     def forward(
         self,
@@ -629,22 +803,43 @@ class _DKVMNModel(nn.Module):
         history_correct: torch.Tensor,
         query_items: torch.Tensor,
     ) -> torch.Tensor:
+        bsz, seq_len = history_items.shape
+        device = history_items.device
         pad_mask = history_items.eq(0)
         interaction_codes = history_items + history_correct.long() * self.num_items
         interaction_codes = interaction_codes.masked_fill(pad_mask, 0)
 
-        keys = self.item_key_emb(history_items)
-        values = self.interaction_value_emb(interaction_codes)
-        query = self.item_key_emb(query_items)
-        scores = torch.sum(keys * query.unsqueeze(1), dim=-1) * self.scale
-        key_padding_mask = pad_mask.clone()
-        all_padding = key_padding_mask.all(dim=1)
-        if bool(all_padding.any()):
-            key_padding_mask[all_padding, -1] = False
-        scores = scores.masked_fill(key_padding_mask, -1e9)
-        weights = torch.softmax(scores, dim=-1)
-        context = torch.bmm(weights.unsqueeze(1), values).squeeze(1)
-        return cast(torch.Tensor, self.out(torch.cat([context, query], dim=-1)).squeeze(-1))
+        # Per-position embeddings.
+        q_keys = self.exercise_key_emb(query_items)  # (B, L, d_k): addressing/query key
+        write_values = self.interaction_value_emb(interaction_codes)  # (B, L, d_v)
+
+        # Working value memory M_v, broadcast per learner from the learned init.
+        value_matrix = self.value_matrix_init.unsqueeze(0).expand(bsz, -1, -1).contiguous()  # (B, N, d_v)
+
+        logits = []
+        for t in range(seq_len):
+            k_t = q_keys[:, t, :]  # (B, d_k)
+            # Correlation weight over memory slots.
+            w_t = torch.softmax(k_t @ self.key_matrix.t(), dim=-1)  # (B, N)
+
+            # READ before writing interaction t -> causal, no leakage.
+            r_t = torch.bmm(w_t.unsqueeze(1), value_matrix).squeeze(1)  # (B, d_v)
+            summary = torch.tanh(self.summary(torch.cat([r_t, k_t], dim=-1)))
+            logits.append(self.out(summary).squeeze(-1))  # (B,)
+
+            # WRITE interaction t into the value memory.
+            v_t = write_values[:, t, :]  # (B, d_v)
+            e_t = torch.sigmoid(self.erase(v_t))  # (B, d_v)
+            a_t = torch.tanh(self.add(v_t))  # (B, d_v)
+            w_col = w_t.unsqueeze(-1)  # (B, N, 1)
+            erase_term = w_col * e_t.unsqueeze(1)  # (B, N, d_v)
+            add_term = w_col * a_t.unsqueeze(1)  # (B, N, d_v)
+            new_value = value_matrix * (1.0 - erase_term) + add_term
+            # Padded steps must not mutate the memory (keeps cold-start clean).
+            step_pad = pad_mask[:, t].view(bsz, 1, 1)
+            value_matrix = torch.where(step_pad, value_matrix, new_value)
+
+        return torch.stack(logits, dim=1)  # (B, L)
 
 
 class SAKTTracer:
@@ -699,11 +894,10 @@ class SAKTTracer:
         self.device = torch.device(device or ("cuda" if torch.cuda.is_available() else "cpu"))
         self.random_state = random_state
 
-        # Full-sequence models (SAKT, DKT) produce a prediction at every position
-        # in one forward pass via causal masking. Phase-2 models (AKT, SAINT,
-        # SAINT+, DKVMN) still use the legacy single-query forward; they set this
-        # flag False in their constructors. TODO(phase2): migrate those models to
-        # the full-sequence forward and remove the single-query code path.
+        # All tracers (SAKT, DKT, AKT, SAINT, SAINT+, DKVMN) are full-sequence:
+        # one forward pass emits a causal, no-leakage prediction at every
+        # position. The flag is retained so the masked-BCE training path in
+        # ``fit`` stays explicit.
         self._full_sequence: bool = True
 
         self.model: Optional[nn.Module] = None
@@ -938,9 +1132,7 @@ class SAKTTracer:
         self,
         examples: Sequence[SAKTTrainingExample],
     ) -> Tuple[torch.Tensor, ...]:
-        if self._full_sequence:
-            return self._encode_full_sequence(examples)
-        return self._encode_single_query(self._to_single_query(examples))
+        return self._encode_full_sequence(examples)
 
     def _encode_full_sequence(
         self,
@@ -975,88 +1167,12 @@ class SAKTTracer:
             torch.as_tensor(mask, dtype=torch.float32),
         )
 
-    def _to_single_query(
-        self,
-        examples: Sequence[SAKTTrainingExample],
-    ) -> List["_SingleQueryExample"]:
-        """Expand full-sequence windows into legacy single-query examples.
-
-        TODO(phase2): remove once AKT/SAINT/SAINT+/DKVMN are migrated to the
-        full-sequence forward. Each window position ``t >= 1`` becomes one
-        ``(history[:t], query=item[t], label=correct[t])`` example, reproducing
-        the previous single-query training distribution (left-padded by the
-        single-query encoders).
-        """
-        single: List[_SingleQueryExample] = []
-        for example in examples:
-            for t in range(1, len(example.item_ids)):
-                single.append(
-                    _SingleQueryExample(
-                        history_item_ids=example.item_ids[:t],
-                        history_correct=example.correct[:t],
-                        query_item_id=example.item_ids[t],
-                        label=example.correct[t],
-                        history_elapsed=example.elapsed[:t] if example.elapsed else (),
-                        history_lag=(
-                            tuple(max(0.0, example.lag[i] - example.lag[t]) for i in range(t))
-                            if example.lag
-                            else ()
-                        ),
-                    )
-                )
-        return single
-
-    def _encode_single_query(
-        self,
-        examples: Sequence["_SingleQueryExample"],
-    ) -> Tuple[torch.Tensor, ...]:
-        history_items = np.zeros((len(examples), self.max_seq_len), dtype=np.int64)
-        history_correct = np.zeros((len(examples), self.max_seq_len), dtype=np.int64)
-        query_items = np.zeros((len(examples),), dtype=np.int64)
-        labels = np.zeros((len(examples),), dtype=np.float32)
-
-        for row_idx, example in enumerate(examples):
-            encoded_items = [self._internal_item_id(item_id) for item_id in example.history_item_ids]
-            encoded_items = encoded_items[-self.max_seq_len:]
-            encoded_correct = list(example.history_correct)[-self.max_seq_len:]
-            offset = self.max_seq_len - len(encoded_items)
-            history_items[row_idx, offset:] = encoded_items
-            history_correct[row_idx, offset:] = encoded_correct
-            query_items[row_idx] = self._internal_item_id(example.query_item_id)
-            labels[row_idx] = float(example.label)
-
-        return (
-            torch.as_tensor(history_items, dtype=torch.long),
-            torch.as_tensor(history_correct, dtype=torch.long),
-            torch.as_tensor(query_items, dtype=torch.long),
-            torch.as_tensor(labels, dtype=torch.float32),
-        )
-
-    def _history_tensors(self, user_id: Any, count: int) -> Tuple[torch.Tensor, torch.Tensor]:
-        """LEFT-padded history tensors for the legacy single-query forward."""
-        history = self._histories.get(user_id, [])[-self.max_seq_len:]
-        items = np.zeros((1, self.max_seq_len), dtype=np.int64)
-        correct = np.zeros((1, self.max_seq_len), dtype=np.int64)
-        if history:
-            offset = self.max_seq_len - len(history)
-            items[0, offset:] = [item for item, _ in history]
-            correct[0, offset:] = [label for _, label in history]
-        item_tensor = torch.as_tensor(items, dtype=torch.long, device=self.device).repeat(count, 1)
-        correct_tensor = torch.as_tensor(correct, dtype=torch.long, device=self.device).repeat(count, 1)
-        return item_tensor, correct_tensor
-
     def _predict_internal(self, user_id: Any, internal_items: Sequence[int]) -> np.ndarray:
         self._require_fitted()
         assert self.model is not None
         self.model.eval()
         with torch.no_grad():
-            if self._full_sequence:
-                probs = self._predict_full_sequence(user_id, internal_items)
-            else:
-                history_items, history_correct = self._history_tensors(user_id, len(internal_items))
-                query = torch.as_tensor(internal_items, dtype=torch.long, device=self.device)
-                logits = self._predict_logits(user_id, history_items, history_correct, query)
-                probs = torch.sigmoid(logits).detach().cpu().numpy()
+            probs = self._predict_full_sequence(user_id, internal_items)
         return probs.astype(np.float32)
 
     def _predict_full_sequence(self, user_id: Any, internal_items: Sequence[int]) -> np.ndarray:
@@ -1144,8 +1260,7 @@ class SAINTTracer(SAKTTracer):
             random_state=random_state,
         )
         self.num_layers = int(num_layers)
-        # TODO(phase2): SAINT/SAINT+ still use the single-query forward.
-        self._full_sequence = False
+        self._full_sequence = True
 
     def _make_model(self) -> nn.Module:
         return _SAINTModel(
@@ -1257,23 +1372,28 @@ class SAINTPlusTracer(SAINTTracer):
     def _encode_examples(
         self,
         examples: Sequence[SAKTTrainingExample],
-    ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
-        # TODO(phase2): SAINT+ remains single-query; expand windows then encode.
-        single = self._to_single_query(examples)
-        history_items, history_correct, query_items, labels = cast(
-            Tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor],
-            self._encode_single_query(single),
-        )
-        elapsed = np.zeros((len(single), self.max_seq_len), dtype=np.int64)
-        lag = np.zeros((len(single), self.max_seq_len), dtype=np.int64)
+    ) -> Tuple[torch.Tensor, ...]:
+        """Full-sequence encoding plus per-position elapsed/lag time buckets.
 
-        for row_idx, example in enumerate(single):
-            elapsed_values = _bucket_time_values(example.history_elapsed[-self.max_seq_len :], self.num_time_buckets)
-            lag_values = _bucket_time_values(example.history_lag[-self.max_seq_len :], self.num_time_buckets)
-            if elapsed_values.size:
-                elapsed[row_idx, self.max_seq_len - elapsed_values.size :] = elapsed_values
-            if lag_values.size:
-                lag[row_idx, self.max_seq_len - lag_values.size :] = lag_values
+        Returns ``(history_items, history_correct, query_items, elapsed, lag,
+        labels, mask)``. The base full-sequence encoder supplies the first three
+        plus labels/mask; we splice the two time-feature tensors in BEFORE the
+        ``labels, mask`` tail so the training loop's ``batch[:-2]`` model inputs
+        carry the time features.
+        """
+        history_items, history_correct, query_items, labels, mask = self._encode_full_sequence(examples)
+        elapsed = np.zeros((len(examples), self.max_seq_len), dtype=np.int64)
+        lag = np.zeros((len(examples), self.max_seq_len), dtype=np.int64)
+
+        for row_idx, example in enumerate(examples):
+            length = len(example.item_ids)
+            if example.elapsed:
+                elapsed_values = _bucket_time_values(example.elapsed[: self.max_seq_len], self.num_time_buckets)
+                elapsed[row_idx, : elapsed_values.size] = elapsed_values
+            if example.lag:
+                lag_values = _bucket_time_values(example.lag[: self.max_seq_len], self.num_time_buckets)
+                lag[row_idx, : lag_values.size] = lag_values
+            del length
 
         return (
             history_items,
@@ -1282,6 +1402,7 @@ class SAINTPlusTracer(SAINTTracer):
             torch.as_tensor(elapsed, dtype=torch.long),
             torch.as_tensor(lag, dtype=torch.long),
             labels,
+            mask,
         )
 
     def _logits_from_batch(self, batch: Sequence[torch.Tensor]) -> torch.Tensor:
@@ -1289,31 +1410,47 @@ class SAINTPlusTracer(SAINTTracer):
         history_items, history_correct, query_items, history_elapsed, history_lag = batch
         return cast(torch.Tensor, self.model(history_items, history_correct, query_items, history_elapsed, history_lag))
 
-    def _predict_logits(
-        self,
-        user_id: Any,
-        history_items: torch.Tensor,
-        history_correct: torch.Tensor,
-        query_items: torch.Tensor,
-    ) -> torch.Tensor:
-        assert self.model is not None
-        history_elapsed, history_lag = self._history_time_tensors(user_id, query_items.shape[0])
-        return cast(torch.Tensor, self.model(history_items, history_correct, query_items, history_elapsed, history_lag))
+    def _predict_full_sequence(self, user_id: Any, internal_items: Sequence[int]) -> np.ndarray:
+        """Serve next-item predictions with the query placed at slot ``N``.
 
-    def _history_time_tensors(self, user_id: Any, count: int) -> Tuple[torch.Tensor, torch.Tensor]:
-        times = self._history_times.get(user_id, [])[-self.max_seq_len :]
-        elapsed = np.zeros((1, self.max_seq_len), dtype=np.int64)
-        lag = np.zeros((1, self.max_seq_len), dtype=np.int64)
-        if times:
+        Mirrors the base full-sequence serving but threads the learner's elapsed
+        and lag time features (aligned to the same right-padded layout, with the
+        query slot's elapsed = 0 and lag = 0 since the next attempt has no
+        recorded timing yet).
+        """
+        assert self.model is not None
+        budget = max(0, self.max_seq_len - 1)
+        history = self._histories.get(user_id, [])[-budget:] if budget else []
+        times = self._history_times.get(user_id, [])[-budget:] if budget else []
+        n = len(history)
+
+        count = len(internal_items)
+        items = np.zeros((count, self.max_seq_len), dtype=np.int64)
+        correct = np.zeros((count, self.max_seq_len), dtype=np.int64)
+        elapsed = np.zeros((count, self.max_seq_len), dtype=np.int64)
+        lag = np.zeros((count, self.max_seq_len), dtype=np.int64)
+        if history:
+            items[:, :n] = [item for item, _ in history]
+            correct[:, :n] = [label for _, label in history]
+        items[:, n] = list(internal_items)
+        if times and len(times) == n and n > 0:
             elapsed_values = _bucket_time_values(_elapsed_history(times), self.num_time_buckets)
             query_time = float(times[-1])
             lag_values = _bucket_time_values([max(0.0, query_time - t) for t in times], self.num_time_buckets)
-            offset = self.max_seq_len - len(times)
-            elapsed[0, offset:] = elapsed_values[-self.max_seq_len :]
-            lag[0, offset:] = lag_values[-self.max_seq_len :]
-        elapsed_tensor = torch.as_tensor(elapsed, dtype=torch.long, device=self.device).repeat(count, 1)
-        lag_tensor = torch.as_tensor(lag, dtype=torch.long, device=self.device).repeat(count, 1)
-        return elapsed_tensor, lag_tensor
+            elapsed[:, :n] = elapsed_values[:n]
+            lag[:, :n] = lag_values[:n]
+
+        history_items = torch.as_tensor(items, dtype=torch.long, device=self.device)
+        history_correct = torch.as_tensor(correct, dtype=torch.long, device=self.device)
+        history_elapsed = torch.as_tensor(elapsed, dtype=torch.long, device=self.device)
+        history_lag = torch.as_tensor(lag, dtype=torch.long, device=self.device)
+        query_items = history_items
+        logits = cast(
+            torch.Tensor,
+            self.model(history_items, history_correct, query_items, history_elapsed, history_lag),
+        )
+        query_logits = logits[:, n]
+        return torch.sigmoid(query_logits).detach().cpu().numpy().astype(np.float32)
 
 
 class DKTTracer(SAKTTracer):
@@ -1367,8 +1504,7 @@ class DKVMNTracer(SAKTTracer):
             device=device,
             random_state=random_state,
         )
-        # TODO(phase2): DKVMN still uses the single-query forward.
-        self._full_sequence = False
+        self._full_sequence = True
 
     def _make_model(self) -> nn.Module:
         return _DKVMNModel(
@@ -1406,11 +1542,10 @@ class AKTTracer(SAKTTracer):
         device: Optional[str] = None,
         random_state: Optional[int] = None,
     ) -> None:
-        del n_heads  # Custom single-query attention does not use multi-head splitting.
         super().__init__(
             max_seq_len=max_seq_len,
             d_model=d_model,
-            n_heads=1,
+            n_heads=n_heads,
             dropout=dropout,
             learning_rate=learning_rate,
             epochs=epochs,
@@ -1421,8 +1556,10 @@ class AKTTracer(SAKTTracer):
         )
         if monotonic_decay < 0:
             raise ValueError("monotonic_decay must be non-negative")
-        # TODO(phase2): AKT still uses the single-query forward.
-        self._full_sequence = False
+        self._full_sequence = True
+        # ``monotonic_decay`` is retained for API compatibility; the faithful AKT
+        # decay is a LEARNED per-head ``gammas`` parameter, so this value is no
+        # longer used to set a fixed positional ramp.
         self.monotonic_decay = float(monotonic_decay)
         self.item_difficulty_: Dict[Any, float] = {}
         self._item_difficulty_tensor: Optional[torch.Tensor] = None
@@ -1473,11 +1610,13 @@ class AKTTracer(SAKTTracer):
     def _make_model(self) -> nn.Module:
         if self._item_difficulty_tensor is None:
             raise RuntimeError("AKTTracer item difficulty tensor was not initialized")
+        # The difficulty tensor (per-item prior in [0, 1]) WARM-STARTS the learned
+        # Rasch difficulty embedding ``mu_q``; it then trains freely.
         return _AKTModel(
             num_items=len(self._item2idx),
             max_seq_len=self.max_seq_len,
             d_model=self.d_model,
+            n_heads=self.n_heads,
             dropout=self.dropout,
             item_difficulty=self._item_difficulty_tensor,
-            monotonic_decay=self.monotonic_decay,
         )

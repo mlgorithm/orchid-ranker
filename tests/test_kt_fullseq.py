@@ -11,7 +11,14 @@ import pandas as pd
 import pytest
 import torch
 
-from orchid_ranker.kt import DKTTracer, SAKTTracer
+from orchid_ranker.kt import (
+    AKTTracer,
+    DKTTracer,
+    DKVMNTracer,
+    SAINTPlusTracer,
+    SAINTTracer,
+    SAKTTracer,
+)
 
 
 def _events() -> pd.DataFrame:
@@ -25,10 +32,139 @@ def _events() -> pd.DataFrame:
                     "user_id": user_id,
                     "item_id": item_id,
                     "correct": int(ability + 0.15 >= difficulty),
+                    "difficulty": difficulty,
                     "timestamp": step,
                 }
             )
     return pd.DataFrame(rows)
+
+
+def _fit_tracer(tracer_cls, **kwargs):
+    """Fit any KT tracer on ``_events`` with the inputs each model needs.
+
+    AKT additionally consumes an item-difficulty column (warm-starting the Rasch
+    scalar); SAINT+ consumes timestamps for its decoder time features. All other
+    tracers ignore the extras.
+    """
+    tracer = tracer_cls(epochs=2, batch_size=4, random_state=7, device="cpu", **kwargs)
+    if tracer_cls is AKTTracer:
+        return tracer.fit(_events(), timestamp_col="timestamp", item_difficulty_col="difficulty")
+    return tracer.fit(_events(), timestamp_col="timestamp")
+
+
+_ALL_TRACERS = [
+    SAKTTracer,
+    DKTTracer,
+    AKTTracer,
+    SAINTTracer,
+    SAINTPlusTracer,
+    DKVMNTracer,
+]
+
+
+@pytest.mark.parametrize("tracer_cls", _ALL_TRACERS)
+def test_no_leakage_all_models(tracer_cls):
+    """No-leakage gate for every full-sequence model: flipping ``correct[t]``
+    must not change the logit at position ``t`` (AKT, SAINT, SAINT+, DKVMN
+    included alongside the phase-1 SAKT/DKT)."""
+    tracer = _fit_tracer(tracer_cls, max_seq_len=6, d_model=16)
+    model = tracer.model
+    assert model is not None
+    model.eval()
+
+    items = torch.tensor([[1, 2, 3, 4, 0, 0]], dtype=torch.long)
+    correct = torch.tensor([[1, 0, 1, 0, 0, 0]], dtype=torch.long)
+
+    def run(corr):
+        # SAINT+ forward takes optional elapsed/lag; default zeros are fine here.
+        with torch.no_grad():
+            return model(items, corr, items)
+
+    baseline = run(correct)
+    assert baseline.shape == (1, 6)
+    for t in range(4):
+        flipped = correct.clone()
+        flipped[0, t] = 1 - flipped[0, t]
+        out = run(flipped)
+        assert out[0, t] == pytest.approx(float(baseline[0, t]), abs=1e-5), (
+            f"{tracer_cls.__name__} prediction at position {t} depends on its own "
+            f"response -> leakage"
+        )
+
+
+def test_akt_has_rasch_difficulty_and_learned_decay():
+    """AKT mechanism: learned Rasch difficulty (num_items, 1), learned per-head
+    decay (gammas), and a CONTENT-dependent (not position-only) attention."""
+    tracer = _fit_tracer(AKTTracer, max_seq_len=6, d_model=16, n_heads=2)
+    model = tracer.model
+    assert model is not None
+
+    # Learned difficulty scalar per item, shape (num_items + 1, 1).
+    num_items = len(tracer.item_ids_)
+    assert model.difficulty.weight.shape == (num_items + 1, 1)
+    assert model.difficulty.weight.requires_grad
+    # Learned per-head decay parameter.
+    assert isinstance(model.gammas, torch.nn.Parameter)
+    assert model.gammas.shape[0] == model.n_heads
+    assert model.gammas.requires_grad
+
+    # Content-dependence: two inputs with IDENTICAL exercise positions but
+    # DIFFERENT interaction content must give different attention/output at a
+    # fixed late query position (a pure positional ramp could not).
+    model.eval()
+    items = torch.tensor([[1, 2, 3, 4, 5, 0]], dtype=torch.long)
+    correct_a = torch.tensor([[1, 1, 1, 1, 0, 0]], dtype=torch.long)
+    correct_b = torch.tensor([[0, 0, 0, 0, 0, 0]], dtype=torch.long)
+    with torch.no_grad():
+        out_a = model(items, correct_a, items)
+        out_b = model(items, correct_b, items)
+    # Query at position 4 attends to interactions 0..3, whose content differs.
+    assert abs(float(out_a[0, 4]) - float(out_b[0, 4])) > 1e-5
+
+
+def test_dkvmn_has_key_value_memory_that_evolves():
+    """DKVMN mechanism: key matrix (N, d_k), value-memory matrix (N, d_v), and
+    a working value memory that mutates as timesteps are processed."""
+    tracer = _fit_tracer(DKVMNTracer, max_seq_len=6, d_model=16)
+    model = tracer.model
+    assert model is not None
+
+    assert isinstance(model.key_matrix, torch.nn.Parameter)
+    assert model.key_matrix.shape == (model.memory_size, model.d_k)
+    assert isinstance(model.value_matrix_init, torch.nn.Parameter)
+    assert model.value_matrix_init.shape == (model.memory_size, model.d_v)
+
+    # Replicate the forward write loop and confirm the working memory evolves.
+    model.eval()
+    items = torch.tensor([[1, 2, 3, 4]], dtype=torch.long)
+    correct = torch.tensor([[1, 0, 1, 0]], dtype=torch.long)
+    interaction_codes = items + correct * model.num_items
+    write_values = model.interaction_value_emb(interaction_codes)
+    q_keys = model.exercise_key_emb(items)
+    mv = model.value_matrix_init.unsqueeze(0).clone()
+    snapshots = [mv.clone()]
+    with torch.no_grad():
+        for t in range(items.shape[1]):
+            w = torch.softmax(q_keys[:, t, :] @ model.key_matrix.t(), dim=-1)
+            v = write_values[:, t, :]
+            e = torch.sigmoid(model.erase(v))
+            a = torch.tanh(model.add(v))
+            wc = w.unsqueeze(-1)
+            mv = mv * (1.0 - wc * e.unsqueeze(1)) + wc * a.unsqueeze(1)
+            snapshots.append(mv.clone())
+    # State after processing all interactions differs from the initial memory.
+    assert not torch.allclose(snapshots[0], snapshots[-1])
+
+
+def test_saint_has_distinct_encoder_and_decoder():
+    """SAINT routing: distinct encoder (exercise stream) and decoder (response
+    stream) submodules, both present and used."""
+    tracer = _fit_tracer(SAINTTracer, max_seq_len=6, d_model=16, n_heads=2)
+    model = tracer.model
+    assert model is not None
+    assert isinstance(model.encoder, torch.nn.TransformerEncoder)
+    assert isinstance(model.decoder, torch.nn.TransformerDecoder)
+    assert model.encoder is not model.decoder
 
 
 @pytest.mark.parametrize("tracer_cls", [SAKTTracer, DKTTracer])
