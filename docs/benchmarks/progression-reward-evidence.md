@@ -103,31 +103,53 @@ JSON with a per-seed `runs` block and an aggregated `summary`:
 ## Measured results (ASSISTments 2009, faithful AKT, 3 seeds)
 
 Run with `--model akt` on the full ASSISTments 2009 skill-builder data (~398k
-interactions; ~5,171 scored decisions per seed). These are the honest current
-numbers — they do **not** support the progression-reward claim:
+interactions; ~5,171 scored decisions per seed).
 
-| competence_blend | overall ρ | partial ρ (CI) | corr-only ρ | evidenced |
-|---|---|---|---|---|
-| 0.0 (default) | −0.019 | **−0.077** ([−0.10, −0.05]) | 0.003 | 0 / 3 |
-| 0.5 | −0.060 | −0.104 | 0.003 | 0 / 3 |
+**The result is dominated by tracer quality** — this is the headline lesson.
+The same benchmark gives opposite signs depending on how well the tracer is
+trained:
 
-The partial Spearman is small but **robustly negative** (CI excludes 0 across
-all seeds): after controlling for predicted correctness and competence, the
-reward's extra structure mildly *anti*-predicts realized same-concept gain.
-Blending tracer competence in (`competence_blend=0.5`) makes it worse, so the
-shipped default stays 0.0.
+| tracer | KT AUC | competence_blend | overall ρ | partial ρ (CI) | corr-only ρ |
+|---|---|---|---|---|---|
+| AKT undertrained (3 ep, d64) | 0.66 | 0.0 | −0.019 | −0.077 ([−0.10,−0.05]) | 0.003 |
+| **AKT tuned (12 ep, d128)** | **0.73** | 0.0 | 0.038 | **+0.041** ([+0.008,+0.071]) | 0.061 |
+| AKT tuned (12 ep, d128) | 0.73 | 0.5 | 0.010 | +0.032 | 0.061 |
 
-Caveats: realized gain is a noisy observational proxy and |ρ| ≈ 0.08 is small.
-But the result is stable and signed, and it **reversed** an earlier weakly
-positive number measured against a less-faithful, below-baseline KT model — so
-the safe reading is "no credible evidence the current reward predicts learning
-gain." The reward weights need a redesign grounded in a stronger outcome signal
-(ideally an online/counterfactual experiment), not just retuning.
+`competence_blend=0.5` lowers the partial signal (+0.032 vs +0.041) under the
+tuned tracer too — consistent with the undertrained run — so wiring tracer
+competence into the reward does not help here and the shipped default stays 0.0.
 
-Related: on this data the lightweight in-repo neural tracers underperform the
-item-mean baseline (AUC: item-mean 0.69, AKT 0.66, SAKT 0.60) at 3 epochs /
-d_model 64 — they learn and rank AKT > SAKT as expected, but are undertrained
-relative to published KT results and a trivial baseline.
+With a **properly trained, above-baseline** tracer, the progression reward's
+extra structure adds a small but **robustly positive** residual signal
+(partial Spearman +0.041, CI excludes 0 across all seeds) — i.e. beyond raw
+predicted correctness and competence, the ZPD terms carry a little genuine
+signal about realized same-concept gain. The committed artifact reflects this
+tuned run.
+
+**But it still does not clear the bar:** the aggregate reward correlation
+(0.038) is below correctness-only (0.061), so `evidenced` is 0/3. The reward
+adds signal but does not (yet) beat ranking by predicted correctness alone.
+
+Caveats: realized gain is a noisy observational proxy and |ρ| ≈ 0.04–0.08 is
+small. The decisive takeaway is methodological — **evaluate the reward only
+against a tracer that beats baseline**, and the honest current verdict is:
+"the reward adds a small positive signal but is not yet evidenced to beat
+correctness." Closing the gap needs a reward redesign and, ideally, an
+online/counterfactual outcome signal rather than this observational proxy.
+
+Related — KT prediction AUC on this data:
+
+| config | item-mean | AKT | SAKT |
+|---|---|---|---|
+| 3 epochs, d_model 64 | 0.694 | 0.657 | 0.597 |
+| 12 epochs, d_model 128, seq 100 | 0.694 | **0.730** | 0.658 |
+
+At a small budget the neural tracers underperform the trivial item-mean
+baseline; with adequate capacity/training the faithful **AKT beats it (0.730)**
+and lands in the published ASSISTments-2009 range, with AKT > SAKT as expected.
+So the faithful implementations are sound — the earlier below-baseline numbers
+were undertraining, not a flaw. (Longer training degrades calibration: ECE rises
+to ~0.11; apply `calibration.TemperatureScaler` post-hoc to restore it.)
 
 ## Interpreting results
 
