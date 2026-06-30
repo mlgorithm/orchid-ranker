@@ -146,6 +146,18 @@ class BootTS:
         return int(self.rng.randint(self.H))
 
     def score_vec(self, x: np.ndarray, *, head: Optional[int] = None, add_noise: bool = True) -> float:
+        """Score one item under a bootstrap head.
+
+        IMPORTANT: when ``head is None`` a fresh head is sampled *per call*, so
+        scoring a slate item-by-item with ``head=None`` draws a different
+        posterior sample per item — an incoherent decision. For a coherent
+        slate, call :meth:`sample_head` once and pass that ``head`` to every
+        item (or use :meth:`score_many`, which fixes one head for the batch).
+        ``add_noise`` adds a small fixed-scale N(0, 0.01) tie-breaker on top of
+        the bootstrap; it is a heuristic, not part of canonical bootstrap TS,
+        and is not calibrated to reward scale — set ``add_noise=False`` to rely
+        purely on head diversity for exploration.
+        """
         h = self.sample_head() if head is None else int(head)
         if h < 0 or h >= self.H:
             raise ValueError(f"head must be in [0, {self.H}), got {head}")

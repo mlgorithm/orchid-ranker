@@ -683,6 +683,7 @@ class ForgettingCurve:
                 f"time_unit_seconds must be positive, got {time_unit_seconds}"
             )
 
+        self.initial_strength = float(initial_strength)
         self.strength = initial_strength
         self.strength_gain_on_review = strength_gain_on_review
         self.time_unit_seconds = float(time_unit_seconds)
@@ -723,23 +724,38 @@ class ForgettingCurve:
 
         return math.exp(-time_since_last_review / self.strength)
 
-    def review(self) -> None:
-        """Record a review, strengthening memory.
+    def review(self, success: bool = True) -> None:
+        """Record a review, updating memory strength.
 
-        Increases memory strength by strength_gain_on_review and updates
-        the last_review_time to the current time. Call this each time
-        the user reviews an item.
+        A successful recall strengthens memory by ``strength_gain_on_review``.
+        A failed recall (lapse) does NOT strengthen memory — instead it resets
+        strength back toward ``initial_strength`` (halfway between the current
+        strength and the initial strength, floored at ``initial_strength``),
+        modelling the well-established result that forgetting a item collapses
+        its retention interval rather than extending it. Either way the review
+        timestamp is updated. ``success`` defaults to ``True`` for backward
+        compatibility.
+
+        Parameters
+        ----------
+        success : bool, default=True
+            Whether the learner successfully recalled the item.
 
         Examples
         --------
         >>> curve = ForgettingCurve()
-        >>> curve.retention_at(1.0)
-        0.367...
         >>> curve.review()
         >>> curve.strength > 1.0  # Increased by strength_gain_on_review
         True
+        >>> strong = curve.strength
+        >>> curve.review(success=False)
+        >>> curve.strength < strong  # Lapse reduces strength
+        True
         """
-        self.strength += self.strength_gain_on_review
+        if success:
+            self.strength += self.strength_gain_on_review
+        else:
+            self.strength = max(self.initial_strength, 0.5 * (self.strength + self.initial_strength))
         self.last_review_time = datetime.now()
 
     def should_review(self, threshold: float = 0.5) -> bool:

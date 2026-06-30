@@ -98,6 +98,17 @@ class PersonalizedLinUCB:
         self.b_ += reward_value * phi
 
     def phi(self, user_features: np.ndarray, item_features: np.ndarray) -> np.ndarray:
+        """Feature map for LinUCB: ``[user, item, user*item]``.
+
+        The element-wise interaction block ``user*item`` is appended ONLY when
+        the user and item feature vectors share a shape, so the feature
+        dimension is ``2d`` for mismatched dims and ``3d`` for matched dims.
+        This is a deliberate (non-canonical) convenience: the same ``phi`` is
+        used at both score and update time, so the model stays self-consistent
+        within a fixed deployment, and ``_ensure_dim`` raises rather than
+        silently corrupting ``A``/``b`` if dimensions ever change mid-run. Pass
+        equal-length user/item vectors if you want the interaction term.
+        """
         if user_features.ndim != 1 or item_features.ndim != 1:
             raise ValueError("user_features and item_features must be one-dimensional")
         parts = [user_features, item_features]
