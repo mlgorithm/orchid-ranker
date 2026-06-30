@@ -142,16 +142,28 @@ class ProgressionValuePolicy:
         concept_by_item: Optional[Mapping[Any, Any]] = None,
         config: Optional[ProgressionRewardConfig] = None,
         correct_threshold: float = 0.5,
+        competence_blend: float = 0.0,
     ) -> None:
         if not 0.0 <= float(correct_threshold) <= 1.0:
             raise ValueError("correct_threshold must be in [0, 1]")
+        if not 0.0 <= float(competence_blend) <= 1.0:
+            raise ValueError("competence_blend must be in [0, 1]")
         self.tracer = tracer
         self.difficulty_by_item = dict(difficulty_by_item or {})
         self.concept_by_item = dict(concept_by_item or {})
         self.config = config or ProgressionRewardConfig()
         self.correct_threshold = float(correct_threshold)
+        # Weight on the tracer-derived concept ability when estimating
+        # competence for the progression reward. 0.0 = pure empirical rolling
+        # mean (historical default); 1.0 = pure tracer. The empirical mean
+        # reflects recent same-concept outcomes; the tracer reflects the learned
+        # latent state. Blending couples the ZPD reward terms (mastery_gain,
+        # stretch_fit) to the KT model instead of a coarse last-10 average.
+        self.competence_blend = float(competence_blend)
         self._correct_by_user_concept: Dict[Any, Dict[Any, list[int]]] = {}
         self._recent_concepts_by_user: Dict[Any, list[Any]] = {}
+        self._concept_items: Optional[Dict[Any, list[Any]]] = None
+        self._competence_cache: Dict[tuple, float] = {}
 
     def seed_history(
         self,
@@ -281,6 +293,9 @@ class ProgressionValuePolicy:
         recent.append(concept)
         if len(recent) > max(1, self.config.repetition_window):
             del recent[: len(recent) - max(1, self.config.repetition_window)]
+        # Tracer/empirical state changed; drop the per-(user, concept) competence
+        # cache so the next rank recomputes against current state.
+        self._competence_cache.clear()
 
     def _difficulty_for(self, item_id: Any) -> float:
         return float(self.difficulty_by_item.get(item_id, 0.5))
@@ -289,10 +304,52 @@ class ProgressionValuePolicy:
         return self.concept_by_item.get(item_id, "__global__")
 
     def _competence_for(self, user_id: Any, concept: Any) -> float:
+        cached = self._competence_cache.get((user_id, concept))
+        if cached is not None:
+            return cached
         history = self._correct_by_user_concept.get(user_id, {}).get(concept, [])
-        if not history:
-            return float(self.config.default_competence)
-        return float(sum(history[-10:]) / len(history[-10:]))
+        empirical = float(sum(history[-10:]) / len(history[-10:])) if history else None
+        tracer_est = self._tracer_competence(user_id, concept)
+        if tracer_est is not None and empirical is not None:
+            comp = self.competence_blend * tracer_est + (1.0 - self.competence_blend) * empirical
+        elif tracer_est is not None:
+            comp = tracer_est
+        elif empirical is not None:
+            comp = empirical
+        else:
+            comp = float(self.config.default_competence)
+        comp = float(comp)
+        self._competence_cache[(user_id, concept)] = comp
+        return comp
+
+    def _concept_item_map(self) -> Dict[Any, list[Any]]:
+        if self._concept_items is None:
+            inverse: Dict[Any, list[Any]] = {}
+            for item_id, concept in self.concept_by_item.items():
+                inverse.setdefault(concept, []).append(item_id)
+            self._concept_items = inverse
+        return self._concept_items
+
+    def _tracer_competence(self, user_id: Any, concept: Any) -> Optional[float]:
+        """Concept ability from the tracer: mean predicted correctness over a
+        bounded sample of the concept's items (difficulty-marginalized). Returns
+        ``None`` when blending is off, the concept has no known items, or the
+        tracer cannot score them.
+        """
+        if self.competence_blend <= 0.0:
+            return None
+        items = self._concept_item_map().get(concept)
+        if not items:
+            return None
+        sample = items[:12]
+        try:
+            predictions = self.tracer.predict_many(user_id, sample)
+        except Exception:
+            return None
+        values = [float(v) for v in predictions.values() if v is not None]
+        if not values:
+            return None
+        return float(sum(values) / len(values))
 
     def _recent_repetition(self, user_id: Any, concept: Any) -> int:
         recent = self._recent_concepts_by_user.get(user_id, [])

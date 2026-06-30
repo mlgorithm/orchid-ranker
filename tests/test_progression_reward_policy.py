@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import pytest
+
 from orchid_ranker.learning_policy import ProgressionValuePolicy
 from orchid_ranker.progression_reward import (
     ProgressionRewardConfig,
@@ -20,6 +22,24 @@ class _FakeTracer:
     def observe(self, user_id, item_id, correct):
         self.observed.append((user_id, item_id, correct))
         return len(self.observed)
+
+
+def test_competence_blend_wires_tracer_into_competence():
+    """competence_blend>0 blends the tracer's concept ability with the empirical
+    rolling mean; blend=0 preserves the historical pure-empirical default."""
+    concept_by_item = {10: "a", 20: "a", 30: "a"}
+
+    pure = ProgressionValuePolicy(_FakeTracer(), concept_by_item=concept_by_item, competence_blend=0.0)
+    blended = ProgressionValuePolicy(_FakeTracer(), concept_by_item=concept_by_item, competence_blend=1.0)
+
+    # No history: pure-empirical falls back to default_competence; the blended
+    # policy uses the tracer's mean concept ability (mean of 0.95, 0.70, 0.35).
+    assert pure.competence_for("u", "a") == pure.config.default_competence
+    assert blended.competence_for("u", "a") == pytest.approx((0.95 + 0.70 + 0.35) / 3.0)
+
+    # Cache is invalidated when state changes.
+    blended.record_outcome("u", 10, 1)
+    assert blended.competence_for("u", "a") == pytest.approx((0.95 + 0.70 + 0.35) / 3.0)
 
 
 def test_expected_progression_reward_penalizes_too_easy_items():
