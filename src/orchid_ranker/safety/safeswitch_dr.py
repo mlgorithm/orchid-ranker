@@ -23,13 +23,30 @@ class SafeSwitchDRConfig:
     step_up : float
         Increase in p per positive signal (default: 0.05).
     step_down : float
-        Additive decrease in p per negative signal (default: 0.5).
+        Additive decrease in p per negative signal (default: 0.5). The retreat
+        is ``p -> max(p_min, p - step_down)``, so any ``step_down >= p_max -
+        p_min`` collapses ``p`` to ``p_min`` in a single negative signal; larger
+        values do not retreat any faster.
     u_max : float
         Maximum reward value (default: 1.0).
     a_max : float
         Maximum acceptance rate (default: 6.0).
     accept_floor : float
-        Minimum acceptance rate LCB threshold (default: 2.0).
+        Minimum acceptance rate LCB threshold (default: 2.0). Enforced via the
+        empirical-Bernstein LCB once at least ``warmup_rounds`` observations
+        have accumulated.
+    warmup_rounds : int
+        Number of observations to collect before the LCB acceptance guardrail
+        arms (default: 5). The LCB radius is uninformative on the first few
+        rounds, so the LCB check is deferred until the variance estimate
+        settles.
+    warmup_accept_floor_frac : float
+        Fraction of ``accept_floor`` used as an absolute raw-mean acceptance
+        floor *during* warm-up (default: 0.5). This closes the warm-up
+        fail-open window: if the running mean acceptance collapses below
+        ``accept_floor * warmup_accept_floor_frac`` before the LCB guardrail
+        arms, the gate halts immediately. Set to 0.0 to disable warm-up
+        protection (restoring the pre-guardrail warm-up behavior).
     """
 
     delta: float = 0.01
@@ -40,6 +57,8 @@ class SafeSwitchDRConfig:
     u_max: float = 1.0
     a_max: float = 6.0
     accept_floor: float = 2.0
+    warmup_rounds: int = 5
+    warmup_accept_floor_frac: float = 0.5
 
 
 class SafeSwitchDR:
@@ -70,6 +89,10 @@ class SafeSwitchDR:
             raise ValueError("step_up and step_down must be non-negative")
         if cfg.u_max <= 0.0 or cfg.a_max <= 0.0:
             raise ValueError("u_max and a_max must be positive")
+        if int(cfg.warmup_rounds) < 1:
+            raise ValueError("warmup_rounds must be a positive integer")
+        if not 0.0 <= cfg.warmup_accept_floor_frac <= 1.0:
+            raise ValueError("warmup_accept_floor_frac must be in [0, 1]")
         self.cfg = cfg
         self.p = cfg.p_min
         self.t = 0
@@ -102,6 +125,30 @@ class SafeSwitchDR:
         )
         return self.acc_mean - rad
 
+    def _acceptance_breached(self) -> bool:
+        """Return True if the acceptance guardrail should halt the gate.
+
+        Two regimes share one floor (``accept_floor``):
+
+        * **steady state** (``t >= warmup_rounds``): the empirical-Bernstein
+          lower confidence bound must stay at or above ``accept_floor``.
+        * **warm-up** (``1 <= t < warmup_rounds``): the LCB radius is
+          uninformative, so instead the *raw* running mean must stay at or
+          above ``accept_floor * warmup_accept_floor_frac``. This catches a
+          catastrophic early collapse without false-halting on ordinary
+          early-round variance.
+
+        Requires at least one observation; returns False when the guardrail is
+        disabled (``accept_floor <= 0``) or before any update.
+        """
+        if self.cfg.accept_floor <= 0.0 or self.t < 1:
+            return False
+        if self.t >= self.cfg.warmup_rounds:
+            return self._acc_lcb() < self.cfg.accept_floor
+        if self.cfg.warmup_accept_floor_frac <= 0.0:
+            return False
+        return self.acc_mean < self.cfg.accept_floor * self.cfg.warmup_accept_floor_frac
+
     def decide(self) -> tuple[bool, float]:
         """Make a deployment decision for this round.
 
@@ -117,7 +164,7 @@ class SafeSwitchDR:
             if self._state == self._STATE_HALTED:
                 self._last_decision = (False, 0.0)
                 return self._last_decision
-            if self.cfg.accept_floor > 0.0 and self.t >= 5 and self._acc_lcb() < self.cfg.accept_floor:
+            if self._acceptance_breached():
                 self.p = 0.0
                 self._state = self._STATE_HALTED
                 self._last_decision = (False, 0.0)
@@ -187,7 +234,7 @@ class SafeSwitchDR:
             if self._state == self._STATE_HALTED:
                 return
 
-            if self.cfg.accept_floor > 0.0 and self.t >= 5 and self._acc_lcb() < self.cfg.accept_floor:
+            if self._acceptance_breached():
                 self.p = 0.0
                 self._state = self._STATE_HALTED
                 return

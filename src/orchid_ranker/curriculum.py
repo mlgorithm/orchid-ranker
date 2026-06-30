@@ -260,8 +260,8 @@ class DependencyGraph:
         return result
 
     def prerequisites_met(
-        self, node: str, completed: Set[str] = None,
-        *, mastered: Set[str] = None, succeeded: Set[str] = None,
+        self, node: str, completed: Optional[Set[str]] = None,
+        *, mastered: Optional[Set[str]] = None, succeeded: Optional[Set[str]] = None,
     ) -> bool:
         """Check if all prerequisites for a node have been completed.
 
@@ -326,8 +326,8 @@ class DependencyGraph:
     is_ready = prerequisites_met
 
     def available(
-        self, completed: Set[str] = None,
-        *, mastered: Set[str] = None, succeeded: Set[str] = None,
+        self, completed: Optional[Set[str]] = None,
+        *, mastered: Optional[Set[str]] = None, succeeded: Optional[Set[str]] = None,
     ) -> List[str]:
         """Return nodes whose prerequisites are all completed but node itself is not.
 
@@ -734,9 +734,9 @@ class ProgressionRecommender:
                 f"has_difficulty={self._has_difficulty})")
 
     def recommend(
-        self, completed: Set[str] = None, n: int = 5,
-        *, student_mastery: Set[str] = None,
-        user_competence: Set[str] = None,
+        self, completed: Optional[Set[str]] = None, n: int = 5,
+        *, student_mastery: Optional[Set[str]] = None,
+        user_competence: Optional[Set[str]] = None,
     ) -> List[str]:
         """Recommend next items considering dependencies, progress, and difficulty.
 
@@ -809,8 +809,8 @@ class ProgressionRecommender:
         return candidates[:n_int]
 
     def filter_candidates(
-        self, candidates: List[str], completed: Set[str] = None,
-        *, mastered: Set[str] = None, succeeded: Set[str] = None,
+        self, candidates: List[str], completed: Optional[Set[str]] = None,
+        *, mastered: Optional[Set[str]] = None, succeeded: Optional[Set[str]] = None,
     ) -> List[str]:
         """Filter candidates to only those whose prerequisites are completed.
 

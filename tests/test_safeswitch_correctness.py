@@ -346,12 +346,13 @@ class TestAcceptanceGuardrail:
     """Test acceptance guardrail: t>=5 AND acc_lcb < accept_floor => p=0."""
 
     def test_acceptance_guardrail_not_active_before_t5(self):
-        """Guardrail should not activate before t=5."""
+        """LCB guardrail should not activate before t=5 (warm-up floor disabled)."""
         cfg = SafeSwitchDRConfig(
             delta=0.01,
             p_min=0.1,
             p_max=1.0,
             accept_floor=0.5,
+            warmup_accept_floor_frac=0.0,  # isolate the LCB-timing path
         )
         gate = SafeSwitchDR(cfg)
 
@@ -362,14 +363,75 @@ class TestAcceptanceGuardrail:
         # Even with low acceptance, p should not be 0 yet (t < 5)
         assert gate.p > 0.0
 
+    def test_warmup_floor_halts_on_catastrophic_early_collapse(self):
+        """Acceptance collapsing to ~0 must halt during warm-up (t < warmup_rounds).
+
+        Closes the warm-up fail-open window: before the LCB guardrail arms, the
+        raw running mean must stay at/above accept_floor * warmup_accept_floor_frac.
+        """
+        cfg = SafeSwitchDRConfig(
+            delta=0.01,
+            p_min=0.1,
+            p_max=1.0,
+            accept_floor=2.0,
+            warmup_accept_floor_frac=0.5,  # warm-up floor = 1.0
+        )
+        gate = SafeSwitchDR(cfg)
+
+        # A single round of zero acceptance collapses the mean below 1.0.
+        gate.update(True, 0.5, 0.0, 0.5, 0.3, gate.p)
+        assert gate.is_halted
+        assert pytest.approx(gate.p, abs=1e-10) == 0.0
+        assert gate.t < cfg.warmup_rounds  # halted during warm-up, not at t5
+
+    def test_warmup_floor_tolerates_moderate_early_acceptance(self):
+        """Acceptance between the warm-up floor and accept_floor must NOT halt early.
+
+        Moderate early variance (above accept_floor * frac) should survive the
+        warm-up so the LCB guardrail can take over once the radius settles.
+        """
+        cfg = SafeSwitchDRConfig(
+            delta=0.01,
+            p_min=0.1,
+            p_max=1.0,
+            accept_floor=2.0,
+            warmup_accept_floor_frac=0.5,  # warm-up floor = 1.0
+        )
+        gate = SafeSwitchDR(cfg)
+
+        for _ in range(4):  # acc=1.5 is below accept_floor but above warm-up floor
+            gate.update(True, 0.5, 1.5, 0.5, 0.3, gate.p)
+        assert not gate.is_halted
+        assert gate.p > 0.0
+
+    def test_warmup_floor_disabled_when_frac_zero(self):
+        """warmup_accept_floor_frac=0.0 restores the pre-guardrail warm-up behavior."""
+        cfg = SafeSwitchDRConfig(
+            delta=0.01,
+            p_min=0.1,
+            accept_floor=2.0,
+            warmup_accept_floor_frac=0.0,
+        )
+        gate = SafeSwitchDR(cfg)
+        gate.update(True, 0.5, 0.0, 0.5, 0.3, gate.p)  # zero acceptance, t=1
+        assert not gate.is_halted
+
+    def test_warmup_config_validation(self):
+        """Invalid warm-up parameters are rejected at construction."""
+        with pytest.raises(ValueError, match="warmup_rounds"):
+            SafeSwitchDR(SafeSwitchDRConfig(warmup_rounds=0))
+        with pytest.raises(ValueError, match="warmup_accept_floor_frac"):
+            SafeSwitchDR(SafeSwitchDRConfig(warmup_accept_floor_frac=1.5))
+
     def test_acceptance_guardrail_activates_at_t5_with_low_acceptance(self):
-        """Guardrail should activate at t=5 if acc_lcb < accept_floor."""
+        """LCB guardrail should activate at t=5 if acc_lcb < accept_floor."""
         cfg = SafeSwitchDRConfig(
             delta=0.01,
             p_min=0.1,
             p_max=1.0,
             accept_floor=2.0,
             a_max=1.0,
+            warmup_accept_floor_frac=0.0,  # isolate the LCB-timing path
         )
         gate = SafeSwitchDR(cfg)
 
@@ -413,6 +475,7 @@ class TestAcceptanceGuardrail:
             p_min=0.1,
             accept_floor=2.0,
             a_max=1.0,
+            warmup_accept_floor_frac=0.0,  # isolate the LCB-timing path
         )
         gate = SafeSwitchDR(cfg)
 
@@ -624,6 +687,7 @@ class TestBoundaryBehavior:
             step_down=0.5,
             accept_floor=2.0,
             a_max=1.0,
+            warmup_accept_floor_frac=0.0,  # isolate the LCB-timing path
         )
         gate = SafeSwitchDR(cfg)
 
@@ -687,7 +751,7 @@ class TestSafeSwitchTelemetry:
 
     def test_telemetry_includes_all_keys(self):
         """telemetry() should include t, mean, rad, lcb, p, acc_lcb."""
-        cfg = SafeSwitchDRConfig()
+        cfg = SafeSwitchDRConfig(warmup_accept_floor_frac=0.0)
         gate = SafeSwitchDR(cfg)
 
         for _ in range(3):
