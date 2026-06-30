@@ -35,6 +35,44 @@ class ProgressionRewardConfig:
     repetition_window: int = 3
     clip_reward: bool = True
 
+    def __post_init__(self) -> None:
+        # Probabilities / thresholds that must live in the unit interval.
+        for name in (
+            "target_correct",
+            "stretch_margin",
+            "default_competence",
+            "easy_correct_threshold",
+            "hard_correct_threshold",
+            "incorrect_attempt_credit",
+        ):
+            value = float(getattr(self, name))
+            if not np.isfinite(value) or not 0.0 <= value <= 1.0:
+                raise ValueError(f"{name} must be a finite value in [0, 1], got {value!r}")
+        if not 0.0 < float(self.target_correct) < 1.0:
+            raise ValueError(f"target_correct must be in (0, 1), got {self.target_correct!r}")
+        if not np.isfinite(self.stretch_width) or self.stretch_width <= 0.0:
+            raise ValueError(f"stretch_width must be a positive finite value, got {self.stretch_width!r}")
+        if self.hard_correct_threshold >= self.easy_correct_threshold:
+            raise ValueError(
+                "hard_correct_threshold must be < easy_correct_threshold "
+                f"(got {self.hard_correct_threshold!r} >= {self.easy_correct_threshold!r})"
+            )
+        # All term weights must be non-negative and finite (signs are fixed in the formula).
+        for name in (
+            "correctness_weight",
+            "mastery_gain_weight",
+            "stretch_weight",
+            "difficulty_weight",
+            "easy_penalty_weight",
+            "hard_penalty_weight",
+            "repetition_penalty_weight",
+        ):
+            value = float(getattr(self, name))
+            if not np.isfinite(value) or value < 0.0:
+                raise ValueError(f"{name} must be a finite non-negative value, got {value!r}")
+        if int(self.repetition_window) < 1:
+            raise ValueError(f"repetition_window must be a positive integer, got {self.repetition_window!r}")
+
 
 @dataclass(frozen=True)
 class ProgressionRewardBreakdown:
