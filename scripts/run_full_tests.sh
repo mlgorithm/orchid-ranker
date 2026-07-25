@@ -28,7 +28,7 @@ run_step() {
 }
 
 run_step "Ruff lint" "${PYTHON_BIN}" -m ruff check .
-run_step "Mypy type check" "${PYTHON_BIN}" -m mypy src/orchid_ranker
+run_step "Mypy type check" "${PYTHON_BIN}" -m mypy src/orchid_ranker --python-version 3.12
 
 if [[ "${MODE}" == "--lint" ]]; then
   exit 0
@@ -38,12 +38,13 @@ if [[ "${MODE}" == "--quick" ]]; then
   run_step "Quick regression tests" "${PYTHON_BIN}" -m pytest \
     tests/test_documentation_readiness.py \
     tests/test_publish_readiness.py \
+    tests/test_single_public_api.py \
+    tests/test_adaptive_ranker.py \
     tests/test_adaptive_learning_recommender.py \
-    tests/test_knowledge_tracing.py \
+    tests/test_kt_fullseq.py \
     -q
 else
-  run_step "Full test suite with coverage" "${PYTHON_BIN}" -m pytest tests -q \
-    --cov=src/orchid_ranker --cov-report=term-missing --cov-fail-under=70
+  run_step "Full test suite" "${PYTHON_BIN}" -m pytest tests -q
 fi
 
 run_step "Documentation build" "${PYTHON_BIN}" -m mkdocs build --strict

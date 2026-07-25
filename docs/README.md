@@ -1,12 +1,11 @@
 # Documentation Index
 
-- `quickstart.md` – step-by-step install and usage tutorial.
-- `guides/01-fit-offline.md` – adaptive-learning fit workflow from learner outcomes.
-- `guides/02-serve-streaming.md` – live learner-state serving with decision logging.
-- `guides/03-operate-safely.md` – adaptive-learning guardrails and fallback.
-- `scenarios.md` – adaptive-learning deployment recipes.
-- `overview.md` – module reference and entry points.
+- `index.md` – the single `AdaptiveRanker` entry point.
+- `quickstart.md` – neutral four-column fit, recommend, and observe tutorial.
+- `overview.md` – the product contract and application responsibilities.
+- `api_reference.md` – the small supported API.
+- `guides/01-fit-offline.md` – fit chronological outcome history.
+- `guides/02-serve-streaming.md` – production decisions and delayed outcomes.
+- `examples.md` – three runnable reference-pilot integrations.
+- `benchmarks/credibility.md` – reproducible logged-policy validation and rollout claims.
 - `coding-standards.md` – public API, testing, docs, and review standards.
-- `deployment.md` – Docker/Helm/Terraform guidance.
-- `security.md` – SBOM workflow, audit forwarding, compliance artefacts.
-- `compliance/` – data retention, incident response, FERPA/GDPR alignment.

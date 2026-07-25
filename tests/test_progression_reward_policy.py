@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import pytest
 
-from orchid_ranker.learning_policy import ProgressionValuePolicy
+from orchid_ranker.learning_policy import HybridAdaptivePolicy, ProgressionValuePolicy
 from orchid_ranker.progression_reward import (
     ProgressionRewardConfig,
     expected_progression_reward,
@@ -40,6 +40,39 @@ def test_competence_blend_wires_tracer_into_competence():
     # Cache is invalidated when state changes.
     blended.record_outcome("u", 10, 1)
     assert blended.competence_for("u", "a") == pytest.approx((0.95 + 0.70 + 0.35) / 3.0)
+
+
+def test_hybrid_policy_uses_empirical_priors_near_target_correctness():
+    class _FlatTracer:
+        def predict_many(self, user_id, item_ids):
+            del user_id
+            return {item_id: 0.7 for item_id in item_ids}
+
+        def observe(self, user_id, item_id, correct):
+            del user_id, item_id, correct
+            return None
+
+    policy = HybridAdaptivePolicy(
+        _FlatTracer(),
+        difficulty_by_item={10: 0.5, 20: 0.5},
+        concept_by_item={10: "fractions", 20: "fractions"},
+        item_correct={10: 18.0, 20: 7.0},
+        item_count={10: 20.0, 20: 10.0},
+        concept_correct={"fractions": 25.0},
+        concept_count={"fractions": 30.0},
+        global_correct=0.75,
+        item_prior_weight=1.0,
+        progression_weight=0.0,
+        concept_prior_weight=0.0,
+        kt_weight=0.0,
+        support_weight=0.0,
+        unsupported_penalty_weight=0.0,
+    )
+
+    ranked = policy.rank("u", [10, 20], top_k=2)
+
+    assert ranked[0].item_id == 20
+    assert ranked[0].item_fit > ranked[1].item_fit
 
 
 def test_expected_progression_reward_penalizes_too_easy_items():

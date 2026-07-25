@@ -27,7 +27,11 @@ import pandas as pd
 _REPO_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(_REPO_ROOT / "src"))
 
-from orchid_ranker.kt_benchmark import _binary_labels, time_ordered_user_split  # noqa: E402
+from orchid_ranker.kt_benchmark import (  # noqa: E402
+    _binary_labels,
+    derive_train_only_item_difficulty,
+    time_ordered_user_split,
+)
 from orchid_ranker.learning_policy import (  # noqa: E402
     DelayedGainValuePolicy,
     KTValuePolicy,
@@ -36,6 +40,7 @@ from orchid_ranker.learning_policy import (  # noqa: E402
 from orchid_ranker.ope import compare_logged_policies  # noqa: E402
 from orchid_ranker.policy_benchmark import (  # noqa: E402
     _candidate_pool,
+    _context_candidate_pools,
     _fit_tracer,
     attach_delayed_gain_rewards,
     estimate_delayed_gain_priors,
@@ -78,11 +83,17 @@ def parse_args(argv: Optional[list[str]] = None) -> argparse.Namespace:
     parser.add_argument("--item-col", default="item_id")
     parser.add_argument("--correct-col", default="correct")
     parser.add_argument("--timestamp-col", default="timestamp")
-    parser.add_argument("--item-difficulty-col", default="difficulty")
+    parser.add_argument("--item-difficulty-col", default=None)
+    parser.add_argument(
+        "--derive-item-difficulty",
+        action="store_true",
+        help="Estimate item difficulty from training labels after the temporal split.",
+    )
     parser.add_argument("--concept-col", default="skill_id")
     parser.add_argument("--model", choices=["sakt", "akt"], default="akt")
     parser.add_argument("--test-fraction", type=float, default=0.2)
     parser.add_argument("--candidate-size", type=int, default=20)
+    parser.add_argument("--candidate-context-cols", nargs="*", default=None)
     parser.add_argument("--max-events", type=int, default=5000)
     parser.add_argument("--seeds", type=int, nargs="+", default=[11, 17, 23])
     parser.add_argument("--max-seq-len", type=int, default=50)
@@ -110,6 +121,7 @@ def main(argv: Optional[list[str]] = None) -> int:
             "split": "chronological_by_user",
             "logging": "synthetic_uniform_over_candidate_set",
             "candidate_size": float(args.candidate_size),
+            "candidate_context_cols": list(args.candidate_context_cols or []),
             "max_events": float(args.max_events),
             "baseline_policy": "random_uniform_candidate",
             "target_correct": float(args.target_correct),
@@ -140,6 +152,10 @@ def _run_seed(frame: pd.DataFrame, *, args: argparse.Namespace, seed: int) -> di
         timestamp_col=args.timestamp_col,
         test_fraction=args.test_fraction,
     )
+    difficulty_col = args.item_difficulty_col
+    if args.derive_item_difficulty:
+        difficulty_col = difficulty_col or "__orchid_train_difficulty__"
+        split = derive_train_only_item_difficulty(split, output_col=difficulty_col)
     tracer = _fit_tracer(
         split,
         model=args.model,
@@ -147,7 +163,7 @@ def _run_seed(frame: pd.DataFrame, *, args: argparse.Namespace, seed: int) -> di
         item_col=args.item_col,
         correct_col=args.correct_col,
         timestamp_col=args.timestamp_col,
-        item_difficulty_col=args.item_difficulty_col,
+        item_difficulty_col=difficulty_col,
         max_seq_len=args.max_seq_len,
         d_model=args.d_model,
         n_heads=args.n_heads,
@@ -165,7 +181,7 @@ def _run_seed(frame: pd.DataFrame, *, args: argparse.Namespace, seed: int) -> di
         split.train,
         item_col=args.item_col,
         correct_col=args.correct_col,
-        difficulty_col=args.item_difficulty_col,
+        difficulty_col=difficulty_col,
         concept_col=args.concept_col,
         delayed_gain_priors=priors,
     )
@@ -174,6 +190,7 @@ def _run_seed(frame: pd.DataFrame, *, args: argparse.Namespace, seed: int) -> di
         tracer=tracer,
         stats=stats,
         candidate_size=args.candidate_size,
+        candidate_context_cols=args.candidate_context_cols or [],
         max_events=args.max_events,
         random_state=seed,
         target_correct=args.target_correct,
@@ -215,6 +232,7 @@ def _build_events(
     tracer: Any,
     stats: ItemStats,
     candidate_size: int,
+    candidate_context_cols: list[str],
     max_events: int,
     random_state: int,
     target_correct: float,
@@ -222,6 +240,7 @@ def _build_events(
     rng = np.random.default_rng(random_state)
     known_items = sorted(split.train[split.item_col].drop_duplicates().tolist(), key=lambda value: str(value))
     known_set = set(known_items)
+    context_pools = _context_candidate_pools(split, context_cols=candidate_context_cols, known_set=known_set)
     config = ProgressionRewardConfig(target_correct=target_correct)
     kt_policy = KTValuePolicy(tracer, target_correct=target_correct, difficulty_by_item=stats.difficulty)
     progression_policy = ProgressionValuePolicy(
@@ -279,6 +298,9 @@ def _build_events(
             known_items=known_items,
             candidate_size=candidate_size,
             rng=rng,
+            row=data,
+            context_cols=candidate_context_cols,
+            context_pools=context_pools,
         )
         reward_ranked = reward_policy.rank(user_id, candidates, top_k=len(candidates))
         logged_reward_rec = {rec.item_id: rec for rec in reward_ranked}[logged_item]
@@ -365,7 +387,7 @@ def _item_stats(
     *,
     item_col: str,
     correct_col: str,
-    difficulty_col: str,
+    difficulty_col: Optional[str],
     concept_col: str,
     delayed_gain_priors: dict[str, Any],
 ) -> ItemStats:
@@ -373,7 +395,7 @@ def _item_stats(
     work["__label__"] = _binary_labels(work[correct_col].tolist())
     support = {item: float(value) for item, value in work.groupby(item_col).size().items()}
     correctness = {item: float(value) for item, value in work.groupby(item_col)["__label__"].mean().items()}
-    if difficulty_col in work.columns:
+    if difficulty_col is not None and difficulty_col in work.columns:
         difficulty = {item: float(value) for item, value in work.groupby(item_col)[difficulty_col].mean().items()}
     else:
         difficulty = {item: float(1.0 - correctness.get(item, 0.5)) for item in support}

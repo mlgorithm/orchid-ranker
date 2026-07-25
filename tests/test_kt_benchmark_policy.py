@@ -5,6 +5,7 @@ import json
 import subprocess
 import sys
 
+import numpy as np
 import pandas as pd
 
 from orchid_ranker.delayed_gain import (
@@ -16,6 +17,7 @@ from orchid_ranker.delayed_gain import (
 from orchid_ranker.kt import SAKTTracer
 from orchid_ranker.kt_benchmark import (
     KTHoldoutSplit,
+    derive_train_only_item_difficulty,
     evaluate_item_mean_baseline,
     evaluate_sakt_replay,
     run_akt_benchmark,
@@ -24,7 +26,10 @@ from orchid_ranker.kt_benchmark import (
 )
 from orchid_ranker.learning_policy import DelayedGainValuePolicy, KTValuePolicy, SupportConstrainedDelayedGainPolicy
 from orchid_ranker.policy_benchmark import (
+    _candidate_pool,
+    _sample_replay_events,
     attach_delayed_gain_rewards,
+    attach_mastery_transition_rewards,
     build_kt_policy_ope_events,
     estimate_delayed_gain_priors,
     run_kt_policy_ope_benchmark,
@@ -49,6 +54,46 @@ def _events() -> pd.DataFrame:
     return pd.DataFrame(rows)
 
 
+def test_candidate_pool_prefers_context_items_then_fills_broad_pool():
+    candidates = _candidate_pool(
+        10,
+        known_items=[10, 20, 30, 40],
+        candidate_size=4,
+        rng=np.random.default_rng(3),
+        row={"skill_id": "fractions"},
+        context_cols=["skill_id"],
+        context_pools={"skill_id": {"fractions": [10, 20, 30]}},
+    )
+
+    assert 10 in candidates
+    assert 20 in candidates
+    assert 30 in candidates
+    assert len(candidates) == 4
+
+
+def test_replay_event_cap_samples_learners_and_keeps_each_sequence_ordered():
+    rows = [
+        {"user_id": user_id, "item_id": step, "correct": 1, "timestamp": step}
+        for user_id in range(100)
+        for step in range(3)
+    ]
+    frame = pd.DataFrame(rows)
+
+    sampled = _sample_replay_events(
+        frame,
+        user_col="user_id",
+        timestamp_col="timestamp",
+        max_events=30,
+        rng=np.random.default_rng(7),
+    )
+
+    assert len(sampled) == 30
+    assert sampled["user_id"].nunique() == 10
+    assert set(sampled["user_id"]) != set(range(10))
+    for _user_id, group in sampled.groupby("user_id", sort=False):
+        assert group["timestamp"].is_monotonic_increasing
+
+
 def _delayed_gain_events() -> pd.DataFrame:
     rows = []
     items = [(10, 0.2, "a"), (20, 0.4, "b"), (10, 0.2, "a"), (20, 0.4, "b"), (10, 0.2, "a"), (20, 0.4, "b")]
@@ -61,6 +106,24 @@ def _delayed_gain_events() -> pd.DataFrame:
                     "correct": int(ability + 0.1 >= difficulty),
                     "difficulty": difficulty,
                     "skill_id": skill_id,
+                    "timestamp": step,
+                }
+            )
+    return pd.DataFrame(rows)
+
+
+def _mastery_transition_events() -> pd.DataFrame:
+    rows = []
+    for user_id in range(1, 5):
+        outcomes = [0, 0, 0, 1, 1, 1]
+        for step, correct in enumerate(outcomes):
+            rows.append(
+                {
+                    "user_id": user_id,
+                    "item_id": 10,
+                    "correct": correct,
+                    "difficulty": 0.5,
+                    "skill_id": "a",
                     "timestamp": step,
                 }
             )
@@ -80,6 +143,26 @@ def test_time_ordered_user_split_keeps_future_events_in_test():
     for user_id, train_group in split.train.groupby("user_id"):
         test_group = split.test[split.test["user_id"] == user_id]
         assert train_group["timestamp"].max() < test_group["timestamp"].min()
+
+
+def test_train_only_item_difficulty_ignores_heldout_labels():
+    split = time_ordered_user_split(_events(), timestamp_col="timestamp", test_fraction=0.4)
+    changed_test = split.test.copy()
+    changed_test["correct"] = 1 - changed_test["correct"]
+    changed = KTHoldoutSplit(
+        train=split.train,
+        test=changed_test,
+        user_col=split.user_col,
+        item_col=split.item_col,
+        correct_col=split.correct_col,
+        timestamp_col=split.timestamp_col,
+    )
+
+    original_features = derive_train_only_item_difficulty(split)
+    changed_features = derive_train_only_item_difficulty(changed)
+
+    assert original_features.train["difficulty"].equals(changed_features.train["difficulty"])
+    assert original_features.test["difficulty"].equals(changed_features.test["difficulty"])
 
 
 def test_item_mean_baseline_returns_metrics():
@@ -320,6 +403,7 @@ def test_build_kt_policy_ope_events_creates_logged_policy_frame():
 def test_build_kt_policy_ope_events_uses_real_propensity_column():
     source = _events()
     source["propensity"] = 0.25
+    source["candidates"] = source["item_id"].map(lambda item_id: [10, 20, 30])
     split = time_ordered_user_split(source, timestamp_col="timestamp", test_fraction=0.4)
     tracer = SAKTTracer(
         max_seq_len=3,
@@ -338,9 +422,36 @@ def test_build_kt_policy_ope_events_uses_real_propensity_column():
         max_events=4,
         random_state=11,
         logging_propensity_col="propensity",
+        candidate_set_col="candidates",
     )
 
     assert events["logging_propensity"].tolist() == [0.25, 0.25, 0.25, 0.25]
+
+
+def test_progression_replay_seeds_training_history_before_first_decision():
+    split = time_ordered_user_split(_events(), timestamp_col="timestamp", test_fraction=0.4)
+    tracer = SAKTTracer(
+        max_seq_len=3,
+        d_model=16,
+        n_heads=2,
+        epochs=1,
+        batch_size=4,
+        random_state=35,
+        device="cpu",
+    ).fit(split.train, timestamp_col="timestamp")
+
+    events = build_kt_policy_ope_events(
+        tracer,
+        split,
+        candidate_size=3,
+        random_state=11,
+        policy="progression",
+        reward_mode="progression",
+        concept_by_item={10: 10, 20: 20, 30: 30},
+        difficulty_by_item={10: 0.2, 20: 0.4, 30: 0.6},
+    )
+
+    assert events.iloc[0]["logged_competence"] == 1.0
 
 
 def test_run_kt_policy_ope_benchmark_returns_policy_uplift_report():
@@ -393,6 +504,31 @@ def test_run_kt_policy_ope_benchmark_supports_progression_policy_and_reward():
     assert 0.0 <= metrics["logging_reward"] <= 1.0
 
 
+def test_run_kt_policy_ope_benchmark_supports_hybrid_policy():
+    metrics = run_kt_policy_ope_benchmark(
+        _events(),
+        model="akt",
+        timestamp_col="timestamp",
+        item_difficulty_col="difficulty",
+        concept_col="item_id",
+        policy="hybrid",
+        reward_mode="progression",
+        test_fraction=0.4,
+        candidate_size=3,
+        max_events=6,
+        max_seq_len=3,
+        d_model=16,
+        epochs=1,
+        batch_size=4,
+        random_state=41,
+        device="cpu",
+    )
+
+    assert metrics["n_events"] == 6
+    assert metrics["assumptions"]["policy"] == "hybrid"
+    assert metrics["assumptions"]["reward_mode"] == "progression"
+
+
 def test_attach_delayed_gain_rewards_adds_future_same_concept_reward():
     source = _delayed_gain_events()
     split = time_ordered_user_split(source, timestamp_col="timestamp", test_fraction=0.5)
@@ -422,6 +558,38 @@ def test_attach_delayed_gain_rewards_adds_future_same_concept_reward():
     assert "delayed_gain_reward" in with_delayed.columns
     assert with_delayed["delayed_gain_reward"].notna().any()
     assert with_delayed["future_same_concept_count"].max() >= 1
+
+
+def test_attach_mastery_transition_rewards_adds_below_mastery_outcome():
+    source = _mastery_transition_events()
+    split = time_ordered_user_split(source, timestamp_col="timestamp", test_fraction=0.5)
+    tracer = SAKTTracer(
+        max_seq_len=3,
+        d_model=16,
+        n_heads=2,
+        epochs=1,
+        batch_size=4,
+        random_state=43,
+        device="cpu",
+    ).fit(split.train, timestamp_col="timestamp")
+    events = build_kt_policy_ope_events(
+        tracer,
+        split,
+        candidate_size=1,
+        max_events=8,
+        random_state=11,
+        policy="progression",
+        reward_mode="progression",
+        concept_by_item={10: "a"},
+        difficulty_by_item={10: 0.5},
+    )
+
+    with_mastery = attach_mastery_transition_rewards(events, split, concept_col="skill_id", future_window=1)
+
+    assert "mastery_transition_reward" in with_mastery.columns
+    assert "prior_competence" in with_mastery.columns
+    assert with_mastery["mastery_transition_reward"].notna().any()
+    assert with_mastery["mastery_transition_reward"].dropna().isin([0.0, 1.0]).all()
 
 
 def test_estimate_delayed_gain_priors_uses_train_split_only():
@@ -543,6 +711,35 @@ def test_run_kt_policy_ope_benchmark_supports_delayed_gain_reward():
     assert metrics["delayed_gain"]["future_same_concept_count_mean"] >= 1.0
 
 
+def test_run_kt_policy_ope_benchmark_supports_mastery_transition_reward():
+    metrics = run_kt_policy_ope_benchmark(
+        _mastery_transition_events(),
+        model="akt",
+        timestamp_col="timestamp",
+        item_difficulty_col="difficulty",
+        concept_col="skill_id",
+        policy="progression",
+        reward_mode="mastery_transition",
+        delayed_gain_window=1,
+        test_fraction=0.5,
+        candidate_size=1,
+        max_events=8,
+        max_seq_len=3,
+        d_model=16,
+        epochs=1,
+        batch_size=4,
+        random_state=47,
+        device="cpu",
+    )
+
+    assert metrics["n_events"] > 0
+    assert metrics["assumptions"]["reward_mode"] == "mastery_transition"
+    assert metrics["assumptions"]["reward"] == "below_mastery_to_future_mastery"
+    assert metrics["comparison"]["target"]["estimator"] == "snips"
+    assert metrics["target_value_mean"] is None
+    assert "mastery_transition" in metrics
+
+
 def test_run_kt_policy_ope_benchmark_supports_delayed_gain_policy():
     metrics = run_kt_policy_ope_benchmark(
         _delayed_gain_events(),
@@ -623,6 +820,67 @@ def test_run_kt_policy_ope_seed_sweep_returns_aggregate_summary():
     assert metrics["summary"]["seeds"] == [3, 5]
     assert len(metrics["runs"]) == 2
     assert "uplift_mean" in metrics["summary"]
+    assert "target_coverage_mean" in metrics["summary"]
+    assert "target_ess_fraction_mean" in metrics["summary"]
+    assert "target_clipped_fraction_mean" in metrics["summary"]
+
+
+def test_policy_ope_target_exploration_improves_support():
+    deterministic = run_kt_policy_ope_benchmark(
+        _events(),
+        model="sakt",
+        timestamp_col="timestamp",
+        test_fraction=0.4,
+        candidate_size=3,
+        max_events=5,
+        max_seq_len=3,
+        d_model=16,
+        n_heads=2,
+        epochs=1,
+        batch_size=4,
+        random_state=3,
+        device="cpu",
+    )
+    explored = run_kt_policy_ope_benchmark(
+        _events(),
+        model="sakt",
+        timestamp_col="timestamp",
+        test_fraction=0.4,
+        candidate_size=3,
+        max_events=5,
+        max_seq_len=3,
+        d_model=16,
+        n_heads=2,
+        epochs=1,
+        batch_size=4,
+        random_state=3,
+        target_exploration=0.2,
+        device="cpu",
+    )
+
+    assert explored["comparison"]["target"]["coverage"] >= deterministic["comparison"]["target"]["coverage"]
+    assert explored["assumptions"]["target_exploration"] == 0.2
+
+
+def test_policy_ope_accepts_kt_item_mean_blend():
+    metrics = run_kt_policy_ope_benchmark(
+        _events(),
+        model="sakt",
+        timestamp_col="timestamp",
+        test_fraction=0.4,
+        candidate_size=3,
+        max_events=5,
+        max_seq_len=3,
+        d_model=16,
+        n_heads=2,
+        epochs=1,
+        batch_size=4,
+        random_state=3,
+        kt_item_mean_blend=0.5,
+        device="cpu",
+    )
+
+    assert metrics["assumptions"]["kt_item_mean_blend"] == 0.5
 
 
 def test_kt_policy_ope_cli_smoke(tmp_path):
@@ -727,75 +985,6 @@ def test_kt_policy_ope_cli_seed_sweep_smoke(tmp_path):
     assert result.returncode == 0, result.stderr
     metrics = json.loads(output_path.read_text())
     assert metrics["summary"]["seeds"] == [3, 5]
-
-
-def test_adaptive_efficiency_benchmark_cli_smoke(tmp_path):
-    data_path = tmp_path / "events.csv"
-    output_path = tmp_path / "adaptive_efficiency.json"
-    report_path = tmp_path / "adaptive_efficiency.md"
-    _delayed_gain_events().to_csv(data_path, index=False)
-
-    result = subprocess.run(
-        [
-            sys.executable,
-            "benchmarks/adaptive_efficiency_benchmark.py",
-            "--data",
-            str(data_path),
-            "--models",
-            "akt",
-            "--seeds",
-            "3",
-            "--timestamp-col",
-            "timestamp",
-            "--item-difficulty-col",
-            "difficulty",
-            "--concept-col",
-            "skill_id",
-            "--policy-targets",
-            "0.7",
-            "--policy-rewards",
-            "progression",
-            "delayed_gain",
-            "--test-fraction",
-            "0.5",
-            "--candidate-size",
-            "2",
-            "--max-events",
-            "8",
-            "--max-seq-len",
-            "3",
-            "--d-model",
-            "16",
-            "--n-heads",
-            "2",
-            "--epochs",
-            "1",
-            "--batch-size",
-            "4",
-            "--device",
-            "cpu",
-            "--output",
-            str(output_path),
-            "--report-md",
-            str(report_path),
-            "--benchmark-name",
-            "Smoke credibility benchmark",
-        ],
-        capture_output=True,
-        text=True,
-        timeout=90,
-    )
-
-    assert result.returncode == 0, result.stderr
-    metrics = json.loads(output_path.read_text())
-    assert "akt" in metrics["quality"]["summary"]
-    assert metrics["policy"]["summary"]["table"]
-    assert metrics["summary"]["best_policy"]["policy"] in {"progression", "delayed_gain", "support_delayed_gain"}
-    report = report_path.read_text()
-    assert "# Smoke credibility benchmark" in report
-    assert "## KT Prediction Quality" in report
-    assert "## Policy OPE" in report
-    assert "research evidence" in report
 
 
 def test_delayed_gain_model_benchmark_cli_smoke(tmp_path):

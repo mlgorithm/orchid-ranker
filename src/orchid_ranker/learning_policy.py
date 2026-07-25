@@ -16,6 +16,8 @@ from .progression_reward import (
 __all__ = [
     "DelayedGainPolicyRecommendation",
     "DelayedGainValuePolicy",
+    "HybridAdaptivePolicy",
+    "HybridPolicyRecommendation",
     "KTPolicyRecommendation",
     "KTValuePolicy",
     "ProgressionPolicyRecommendation",
@@ -357,6 +359,248 @@ class ProgressionValuePolicy:
 
 
 @dataclass(frozen=True)
+class HybridPolicyRecommendation:
+    """Recommendation from the robust hybrid adaptive policy."""
+
+    item_id: Any
+    score: float
+    p_correct: float
+    difficulty: float
+    concept_id: Any
+    competence: float
+    expected_reward: float
+    reward: ProgressionRewardBreakdown
+    item_prior: float
+    concept_prior: float
+    support_confidence: float
+    kt_fit: float
+    item_fit: float
+    concept_fit: float
+    recent_repetition: int = 0
+    item_support: float = 0.0
+    concept_support: float = 0.0
+    support_penalty: float = 0.0
+
+
+class HybridAdaptivePolicy(ProgressionValuePolicy):
+    """Rank with empirical priors, KT state, and progression value.
+
+    This is the conservative production default: item/concept correctness priors
+    carry the ranking when KT is weak or sparse, while progression reward keeps
+    the policy from degenerating into "always easiest item".
+    """
+
+    def __init__(
+        self,
+        tracer: Any,
+        *,
+        difficulty_by_item: Optional[Mapping[Any, float]] = None,
+        concept_by_item: Optional[Mapping[Any, Any]] = None,
+        item_correct: Optional[Mapping[Any, float]] = None,
+        item_count: Optional[Mapping[Any, float]] = None,
+        concept_correct: Optional[Mapping[Any, float]] = None,
+        concept_count: Optional[Mapping[Any, float]] = None,
+        global_correct: float = 0.5,
+        prior_smoothing: float = 8.0,
+        concept_smoothing: float = 20.0,
+        min_item_support: float = 20.0,
+        min_concept_support: float = 100.0,
+        config: Optional[ProgressionRewardConfig] = None,
+        correct_threshold: float = 0.5,
+        competence_blend: float = 0.35,
+        progression_weight: float = 0.45,
+        item_prior_weight: float = 0.25,
+        concept_prior_weight: float = 0.10,
+        kt_weight: float = 0.15,
+        support_weight: float = 0.05,
+        unsupported_penalty_weight: float = 0.05,
+    ) -> None:
+        weights = [
+            progression_weight,
+            item_prior_weight,
+            concept_prior_weight,
+            kt_weight,
+            support_weight,
+            unsupported_penalty_weight,
+        ]
+        if min(weights) < 0.0:
+            raise ValueError("hybrid policy weights must be non-negative")
+        if prior_smoothing < 0.0 or concept_smoothing < 0.0:
+            raise ValueError("hybrid smoothing values must be non-negative")
+        if min_item_support <= 0.0 or min_concept_support <= 0.0:
+            raise ValueError("hybrid support thresholds must be positive")
+        super().__init__(
+            tracer,
+            difficulty_by_item=difficulty_by_item,
+            concept_by_item=concept_by_item,
+            config=config,
+            correct_threshold=correct_threshold,
+            competence_blend=competence_blend,
+        )
+        self.item_correct = {item: float(value) for item, value in dict(item_correct or {}).items()}
+        self.item_count = {item: float(value) for item, value in dict(item_count or {}).items()}
+        self.concept_correct = {concept: float(value) for concept, value in dict(concept_correct or {}).items()}
+        self.concept_count = {concept: float(value) for concept, value in dict(concept_count or {}).items()}
+        self.global_correct = _clamp01(global_correct)
+        self.prior_smoothing = float(prior_smoothing)
+        self.concept_smoothing = float(concept_smoothing)
+        self.min_item_support = float(min_item_support)
+        self.min_concept_support = float(min_concept_support)
+        self.progression_weight = float(progression_weight)
+        self.item_prior_weight = float(item_prior_weight)
+        self.concept_prior_weight = float(concept_prior_weight)
+        self.kt_weight = float(kt_weight)
+        self.support_weight = float(support_weight)
+        self.unsupported_penalty_weight = float(unsupported_penalty_weight)
+
+    def seed_history(
+        self,
+        interactions: Any,
+        *,
+        user_col: str = "user_id",
+        item_col: str = "item_id",
+        correct_col: str = "correct",
+        timestamp_col: Optional[str] = None,
+        reset: bool = True,
+    ) -> "HybridAdaptivePolicy":
+        """Warm-start learner state without double-counting supplied priors."""
+        required = {user_col, item_col, correct_col}
+        if timestamp_col is not None:
+            required.add(timestamp_col)
+        missing = required - set(interactions.columns)
+        if missing:
+            raise ValueError(f"interactions missing required columns: {sorted(missing)}")
+        if reset:
+            self._correct_by_user_concept = {}
+            self._recent_concepts_by_user = {}
+
+        update_priors = not self.item_count and not self.concept_count
+        work = interactions.copy()
+        work["__orchid_order__"] = range(len(work))
+        sort_cols = [user_col]
+        if timestamp_col is not None:
+            sort_cols.append(timestamp_col)
+        sort_cols.append("__orchid_order__")
+        work = work.sort_values(sort_cols, kind="mergesort")
+        for user_id, item_id, correct in work[[user_col, item_col, correct_col]].itertuples(index=False, name=None):
+            if update_priors:
+                self.record_outcome(user_id, item_id, correct)
+            else:
+                ProgressionValuePolicy.record_outcome(self, user_id, item_id, correct)
+        return self
+
+    def rank(
+        self,
+        user_id: Any,
+        candidate_item_ids: Sequence[Any],
+        *,
+        top_k: int = 5,
+    ) -> list[HybridPolicyRecommendation]:
+        """Rank candidate items by robust adaptive value."""
+        if top_k <= 0 or not candidate_item_ids:
+            return []
+        predictions: Dict[Any, float] = self.tracer.predict_many(user_id, list(candidate_item_ids))
+        recs = []
+        for item_id in candidate_item_ids:
+            p_correct = float(predictions[item_id])
+            difficulty = self._difficulty_for(item_id)
+            concept = self._concept_for(item_id)
+            competence = self._competence_for(user_id, concept)
+            recent_repetition = self._recent_repetition(user_id, concept)
+            reward = expected_progression_reward(
+                p_correct=p_correct,
+                difficulty=difficulty,
+                competence=competence,
+                recent_repetition=recent_repetition,
+                config=self.config,
+            )
+            item_prior = self._item_prior(item_id)
+            concept_prior = self._concept_prior(concept)
+            item_fit = self._target_fit(item_prior)
+            concept_fit = self._target_fit(concept_prior)
+            kt_fit = self._target_fit(p_correct)
+            item_support = self.item_count.get(item_id, 0.0)
+            concept_support = self.concept_count.get(concept, 0.0)
+            support_confidence = self._support_confidence(item_support, concept_support)
+            support_penalty = 1.0 - support_confidence
+            score = (
+                self.progression_weight * reward.expected_reward
+                + self.item_prior_weight * item_fit
+                + self.concept_prior_weight * concept_fit
+                + self.kt_weight * kt_fit
+                + self.support_weight * support_confidence
+                - self.unsupported_penalty_weight * support_penalty
+            )
+            recs.append(
+                HybridPolicyRecommendation(
+                    item_id=item_id,
+                    score=float(score),
+                    p_correct=p_correct,
+                    difficulty=reward.difficulty,
+                    concept_id=concept,
+                    competence=competence,
+                    expected_reward=float(score),
+                    reward=reward,
+                    item_prior=item_prior,
+                    concept_prior=concept_prior,
+                    support_confidence=support_confidence,
+                    kt_fit=kt_fit,
+                    item_fit=item_fit,
+                    concept_fit=concept_fit,
+                    recent_repetition=recent_repetition,
+                    item_support=item_support,
+                    concept_support=concept_support,
+                    support_penalty=support_penalty,
+                )
+            )
+        recs.sort(
+            key=lambda rec: (
+                rec.score,
+                rec.item_fit,
+                rec.reward.stretch_fit,
+                rec.support_confidence,
+                str(rec.item_id),
+            ),
+            reverse=True,
+        )
+        return recs[: min(int(top_k), len(recs))]
+
+    def record_outcome(self, user_id: Any, item_id: Any, correct: Any) -> None:
+        """Update progression state and empirical item/concept priors."""
+        super().record_outcome(user_id, item_id, correct)
+        label = float(float(correct) >= self.correct_threshold)
+        concept = self._concept_for(item_id)
+        self.item_correct[item_id] = self.item_correct.get(item_id, 0.0) + label
+        self.item_count[item_id] = self.item_count.get(item_id, 0.0) + 1.0
+        self.concept_correct[concept] = self.concept_correct.get(concept, 0.0) + label
+        self.concept_count[concept] = self.concept_count.get(concept, 0.0) + 1.0
+        total = sum(self.item_correct.values())
+        count = sum(self.item_count.values())
+        if count > 0.0:
+            self.global_correct = _clamp01(total / count)
+
+    def _item_prior(self, item_id: Any) -> float:
+        total = self.item_correct.get(item_id, 0.0)
+        count = self.item_count.get(item_id, 0.0)
+        return _clamp01((total + self.prior_smoothing * self.global_correct) / (count + self.prior_smoothing))
+
+    def _concept_prior(self, concept: Any) -> float:
+        total = self.concept_correct.get(concept, 0.0)
+        count = self.concept_count.get(concept, 0.0)
+        return _clamp01((total + self.concept_smoothing * self.global_correct) / (count + self.concept_smoothing))
+
+    def _target_fit(self, value: float) -> float:
+        target = float(self.config.target_correct)
+        normalizer = max(target, 1.0 - target, 1e-6)
+        return _clamp01(1.0 - abs(float(value) - target) / normalizer)
+
+    def _support_confidence(self, item_support: float, concept_support: float) -> float:
+        item_part = min(1.0, math.log1p(max(0.0, item_support)) / math.log1p(self.min_item_support))
+        concept_part = min(1.0, math.log1p(max(0.0, concept_support)) / math.log1p(self.min_concept_support))
+        return _clamp01(0.7 * item_part + 0.3 * concept_part)
+
+
+@dataclass(frozen=True)
 class DelayedGainPolicyRecommendation:
     """Recommendation from a delayed-gain-aware learning policy."""
 
@@ -397,6 +641,7 @@ class DelayedGainValuePolicy(ProgressionValuePolicy):
         global_gain_prior: float = 0.5,
         config: Optional[ProgressionRewardConfig] = None,
         correct_threshold: float = 0.5,
+        competence_blend: float = 0.0,
         progression_weight: float = 0.35,
         delayed_gain_weight: float = 0.55,
         stretch_weight: float = 0.10,
@@ -409,6 +654,7 @@ class DelayedGainValuePolicy(ProgressionValuePolicy):
             concept_by_item=concept_by_item,
             config=config,
             correct_threshold=correct_threshold,
+            competence_blend=competence_blend,
         )
         self.item_gain_prior = {item: _clamp01(value) for item, value in dict(item_gain_prior or {}).items()}
         self.concept_gain_prior = {
@@ -506,6 +752,7 @@ class SupportConstrainedDelayedGainPolicy(DelayedGainValuePolicy):
         concept_support: Optional[Mapping[Any, float]] = None,
         config: Optional[ProgressionRewardConfig] = None,
         correct_threshold: float = 0.5,
+        competence_blend: float = 0.0,
         model_weight: float = 0.65,
         prior_weight: float = 0.20,
         progression_weight: float = 0.10,
@@ -527,6 +774,7 @@ class SupportConstrainedDelayedGainPolicy(DelayedGainValuePolicy):
             global_gain_prior=global_gain_prior,
             config=config,
             correct_threshold=correct_threshold,
+            competence_blend=competence_blend,
             progression_weight=progression_weight,
             delayed_gain_weight=prior_weight,
             stretch_weight=stretch_weight,

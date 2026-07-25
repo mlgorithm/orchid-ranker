@@ -18,12 +18,8 @@ from typing import Any, Dict, List, Optional, Sequence, Tuple, cast
 
 import numpy as np
 import pandas as pd
-
-from ._compat import require_torch
-
-require_torch("orchid_ranker.kt")
-import torch  # noqa: E402
-import torch.nn as nn  # noqa: E402
+import torch
+import torch.nn as nn
 
 __all__ = [
     "AKTTracer",
@@ -400,14 +396,16 @@ class _AKTModel(nn.Module):
     def _question_embedding(self, item: torch.Tensor) -> torch.Tensor:
         """Rasch question embedding: c_c + mu_q * d_c."""
         mu = self.difficulty(item)  # (B, L, 1)
-        return self.concept_emb(item) + mu * self.variation_emb(item)
+        out: torch.Tensor = self.concept_emb(item) + mu * self.variation_emb(item)
+        return out
 
     def _interaction_embedding(
         self, item: torch.Tensor, interaction_codes: torch.Tensor
     ) -> torch.Tensor:
         """Rasch interaction embedding: e_(c,r) + mu_q * f_(c,r)."""
         mu = self.difficulty(item)  # (B, L, 1)
-        return self.response_emb(interaction_codes) + mu * self.response_variation_emb(interaction_codes)
+        out: torch.Tensor = self.response_emb(interaction_codes) + mu * self.response_variation_emb(interaction_codes)
+        return out
 
     def _monotonic_attention(
         self,
@@ -804,7 +802,6 @@ class _DKVMNModel(nn.Module):
         query_items: torch.Tensor,
     ) -> torch.Tensor:
         bsz, seq_len = history_items.shape
-        device = history_items.device
         pad_mask = history_items.eq(0)
         interaction_codes = history_items + history_correct.long() * self.num_items
         interaction_codes = interaction_codes.masked_fill(pad_mask, 0)
@@ -1538,7 +1535,6 @@ class AKTTracer(SAKTTracer):
         epochs: int = 5,
         batch_size: int = 128,
         correct_threshold: float = 0.5,
-        monotonic_decay: float = 0.25,
         device: Optional[str] = None,
         random_state: Optional[int] = None,
     ) -> None:
@@ -1554,13 +1550,7 @@ class AKTTracer(SAKTTracer):
             device=device,
             random_state=random_state,
         )
-        if monotonic_decay < 0:
-            raise ValueError("monotonic_decay must be non-negative")
         self._full_sequence = True
-        # ``monotonic_decay`` is retained for API compatibility; the faithful AKT
-        # decay is a LEARNED per-head ``gammas`` parameter, so this value is no
-        # longer used to set a fixed positional ramp.
-        self.monotonic_decay = float(monotonic_decay)
         self.item_difficulty_: Dict[Any, float] = {}
         self._item_difficulty_tensor: Optional[torch.Tensor] = None
         self._fit_item_difficulty_col: Optional[str] = None

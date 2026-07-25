@@ -1,112 +1,92 @@
-# Guide 1: Fit Offline
+# Fit historical outcomes
 
-Fit Orchid as an adaptive-learning ranker: learner outcomes in, staged
-learner-state and progression policy out. This is the default path for new
-projects.
+This guide covers the one required preparation step: fitting
+`AdaptiveRanker` from chronological outcomes.
 
 ## Install
 
 ```bash
-pip install 'orchid-ranker[adaptive]'
+pip install orchid-ranker
 ```
 
-## Load learner events
-
-At minimum, provide learner ID, item ID, correctness, and timestamp. Concept
-and difficulty metadata make the policy materially more useful.
+## Required data
 
 ```python
 import pandas as pd
 
-events = pd.read_csv("learner_events.csv")
-catalog = pd.read_csv("exercise_catalog.csv")
-
-training = events.merge(catalog, on="item_id", how="left")
+events = pd.DataFrame({
+    "user_id":   ["a", "a", "a", "b", "b", "b"],
+    "item_id":   [101, 102, 201, 101, 102, 201],
+    "outcome":   [1,   1,   0,   1,   0,   0],
+    "timestamp": [1,   2,   3,   1,   2,   3],
+})
 ```
 
-Expected columns:
+The requirements are:
 
-| Column | Meaning |
-|--------|---------|
-| `learner_id` | Learner or user identifier |
-| `item_id` | Exercise / lesson / task identifier |
-| `correct` | Binary or thresholdable outcome |
-| `ts` | Monotonic timestamp for chronological splits and time-aware KT |
-| `concept_id` | Skill/concept label for competence and prerequisites |
-| `difficulty` | Item difficulty in `[0, 1]` when available |
+- user and item identifiers must be stable;
+- outcomes must be binary `0` or `1`;
+- timestamps must be non-negative; and
+- timestamps must preserve event order within each user.
+
+Missing outcomes should not be silently converted to failures. Keep incomplete
+interactions out of the fitting table until their outcome is known.
 
 ## Fit
 
 ```python
 from orchid_ranker import AdaptiveRanker
 
-ranker = AdaptiveRanker(
-    kt_backbone="saint+",
-    policy="auto",
-    epochs=2,
-    d_model=32,
-).fit_kt(
-    training,
-    learner_col="learner_id",
-    item_col="item_id",
-    correct_col="correct",
-    timestamp_col="ts",
-    concept_col="concept_id",
-    item_difficulty_col="difficulty",
-)
+ranker = AdaptiveRanker().fit(events)
 ```
 
-Use `kt_backbone="sakt"` for a compact attention baseline, `"dkt"` or
-`"dkvmn"` for sequence ablations, and `"akt"` / `"saint+"` when you have
-difficulty or timestamp signal.
+Orchid chooses the internal adaptive policy. There is no model-selection step
+in the supported workflow.
 
-## Recommend And Observe
+## Custom column names
+
+You can identify existing columns without renaming the source table:
 
 ```python
-candidates = catalog["item_id"].tolist()
-ranked = ranker.recommend("learner-42", candidates, top_k=5)
-
-ranker.observe(
-    learner_id="learner-42",
-    ts=123456,
-    item_id=ranked[0].item_id,
-    concept_id=None,
-    correct=1,
+ranker.fit(
+    events,
+    user_col="account",
+    item_col="task",
+    outcome_col="success",
+    timestamp_col="event_time",
 )
 ```
 
-The next call to `recommend(...)` uses the updated learner state.
-
-## Add Semantic Cold Start
+## Optional category and difficulty
 
 ```python
-ranker.fit_semantic_items(
-    catalog,
-    item_col="item_id",
-    text_col="item_text",
-    metadata_cols=["concept_id", "difficulty"],
-)
-
-ranked = ranker.recommend(
-    "learner-42",
-    top_k=5,
-    item_query_text="fraction addition with unlike denominators",
+ranker.fit(
+    events,
+    category_col="skill_id",
+    difficulty_col="difficulty",
 )
 ```
 
-Semantic candidates outside the KT training universe can still be returned with
-`policy="semantic_cold_start"` when catalog metadata is available.
+Use these only when they already have a defensible domain meaning. Categories
+can connect related items. Difficulty can distinguish trivial success from an
+appropriate challenge. Neither is required.
 
-## Logged-Policy Learning
-
-When you have logged candidate sets, chosen actions, propensities, and rewards:
+## Verify the fit
 
 ```python
-policy_report = ranker.fit_policy(logged_decisions, algo="cql")
-ope = ranker.ope_report(logged_decisions)
+assert ranker.is_fitted
+
+recommendations = ranker.recommend(
+    user_id="a",
+    candidate_item_ids=[101, 102, 201],
+    top_k=2,
+)
 ```
 
-Use OPE and rollout gates before serving a learned policy to live learners.
+Evaluate on a chronological holdout rather than a random row split. Future
+interactions from a user must not leak into the training side of an evaluation.
 
-Continue to [Guide 2: Serve Adaptive Recommendations](02-serve-streaming.md)
-for online serving patterns.
+## Refreshing
+
+Use `observe` for immediate per-user updates. Refit periodically when enough
+new history accumulates or when monitoring shows material drift.

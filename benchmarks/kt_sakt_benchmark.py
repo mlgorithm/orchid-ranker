@@ -9,7 +9,7 @@ Example:
         --correct-col correct \
         --timestamp-col timestamp \
         --model akt \
-        --item-difficulty-col difficulty \
+        --derive-item-difficulty \
         --output benchmarks/results_kt_sakt.json
 """
 from __future__ import annotations
@@ -37,6 +37,11 @@ def parse_args(argv: Optional[list[str]] = None) -> argparse.Namespace:
     parser.add_argument("--correct-col", default="correct")
     parser.add_argument("--timestamp-col", default=None)
     parser.add_argument("--item-difficulty-col", default=None, help="Optional difficulty column for --model akt")
+    parser.add_argument(
+        "--derive-item-difficulty",
+        action="store_true",
+        help="Estimate item difficulty from training labels after the temporal split.",
+    )
     parser.add_argument("--test-fraction", type=float, default=0.2)
     parser.add_argument("--max-rows", type=int, default=None, help="Optional smoke-test row cap")
     parser.add_argument("--max-seq-len", type=int, default=50)
@@ -63,6 +68,7 @@ def main(argv: Optional[list[str]] = None) -> int:
         correct_col=args.correct_col,
         timestamp_col=args.timestamp_col,
         item_difficulty_col=args.item_difficulty_col,
+        derive_item_difficulty=args.derive_item_difficulty,
         test_fraction=args.test_fraction,
         max_seq_len=args.max_seq_len,
         d_model=args.d_model,

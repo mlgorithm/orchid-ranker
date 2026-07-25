@@ -4,8 +4,8 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "orchid-ranker"
-version = "0.5.0"
-description = "Adaptive-learning engine with learner-state tracing, progression reward, prerequisites, and safe rollout."
+version = "0.6.0"
+description = "Outcome-driven adaptive recommender that learns what to choose next."
 readme = "README.md"
 authors = [
   {name = "Sam Urmian", email = "sam.urmian@gmail.com"}
@@ -18,20 +18,15 @@ dependencies = [
   "pandas>=1.5.3",
   "scikit-learn>=1.2",
   "scipy>=1.9.3",
-  "pyyaml>=6.0",
-  "joblib>=1.2",
-  "prometheus-client>=0.16,<1",
+  "torch>=2.0,<3",
 ]
 keywords = [
-  "adaptive-learning",
-  "learner-state",
-  "knowledge-tracing",
-  "progression-reward",
-  "prerequisites",
-  "learning-analytics",
   "adaptive-recommendation",
-  "safe-rollout",
-  "bandits",
+  "sequential-recommendation",
+  "online-learning",
+  "personalization",
+  "adaptive-systems",
+  "feedback-loops",
 ]
 classifiers = [
   "Development Status :: 4 - Beta",
@@ -48,107 +43,28 @@ classifiers = [
 ]
 
 [project.optional-dependencies]
-adaptive = [
-  "torch>=2.0,<3",
-]
-offline_rl = [
-  "torch>=2.0,<3",
-]
-bandits = [
-  "torch>=2.0,<3",
-]
-sketch = [
-  "numpy>=1.23.5",
-]
-privacy = [
-  "PyJWT[crypto]>=2.8,<3",
-]
-torch = [
-  "torch>=2.0,<3",
-]
-viz = [
-  "matplotlib>=3.6,<4",
-]
 docs = [
   "mkdocs>=1.5,<2",
   "mkdocs-material>=9.5,<10",
   "mkdocstrings[python]>=0.24,<1",
   "pymdown-extensions>=10,<11",
 ]
-streaming = [
-  "torch>=2.0,<3",
-  "confluent-kafka>=2.1,<3",
-]
-enterprise = [
-  "torch>=2.0,<3",
-  "prometheus-client>=0.16,<1",
-  "PyJWT[crypto]>=2.8,<3",
-]
-auth = [
-  "PyJWT[crypto]>=2.8,<3",
-]
-agentic = [
-  "torch>=2.0,<3",
-  "matplotlib>=3.6,<4",
-  "tqdm>=4.60,<5",
-]
-observability = [
-  "prometheus-client>=0.16,<1",
-  "opentelemetry-api>=1.24,<2",
-  "opentelemetry-sdk>=1.24,<2",
-  "opentelemetry-exporter-otlp>=1.24,<2",
-]
-connectors = [
-  "snowflake-connector-python>=3.0,<4",
-  "google-cloud-bigquery>=3.11,<4",
-  "boto3>=1.28,<2",
-  "mlflow>=2.14,<3",
-]
-benchmarks = [
-  "torch>=2.0,<3",
-  "pandas>=1.5.3",
-  "matplotlib>=3.6,<4",
-  "tqdm>=4.60,<5",
-]
 dev = [
-  "torch>=2.0,<3",
   "pytest>=7.0,<9",
-  "pytest-cov>=4.0,<6",
   "mypy>=1.4,<2",
   "ruff>=0.1.5,<1",
-  "types-PyYAML>=6.0,<7",
   "mkdocs>=1.5,<2",
   "mkdocs-material>=9.5,<10",
   "mkdocstrings[python]>=0.24,<1",
   "pymdown-extensions>=10,<11",
   "build>=1.0,<2",
   "twine>=6.0,<7",
-  "prometheus-client>=0.16,<1",
-]
-all = [
-  "torch>=2.0,<3",
-  "matplotlib>=3.6,<4",
-  "mkdocs>=1.5,<2",
-  "mkdocs-material>=9.5,<10",
-  "mkdocstrings[python]>=0.24,<1",
-  "pymdown-extensions>=10,<11",
-  "confluent-kafka>=2.1,<3",
-  "prometheus-client>=0.16,<1",
-  "PyJWT[crypto]>=2.8,<3",
-  "opentelemetry-api>=1.24,<2",
-  "opentelemetry-sdk>=1.24,<2",
-  "opentelemetry-exporter-otlp>=1.24,<2",
-  "snowflake-connector-python>=3.0,<4",
-  "google-cloud-bigquery>=3.11,<4",
-  "boto3>=1.28,<2",
-  "mlflow>=2.14,<3",
-  "tqdm>=4.60,<5",
 ]
 
 [project.urls]
 Homepage = "https://github.com/mlgorithm/orchid-ranker"
 Source = "https://github.com/mlgorithm/orchid-ranker"
-Documentation = "https://github.com/mlgorithm/orchid-ranker/tree/main/docs"
+Documentation = "https://mlgorithm.github.io/orchid-ranker/"
 Changelog = "https://github.com/mlgorithm/orchid-ranker/blob/main/CHANGELOG.md"
 Issues = "https://github.com/mlgorithm/orchid-ranker/issues"
 
@@ -156,14 +72,11 @@ Issues = "https://github.com/mlgorithm/orchid-ranker/issues"
 include-package-data = true
 
 [tool.setuptools.package-data]
-orchid_ranker = ["py.typed", "native/*.cpp"]
+orchid_ranker = ["py.typed"]
 
 [tool.setuptools.packages.find]
 where = ["src"]
 include = ["orchid_ranker", "orchid_ranker.*"]
-
-[project.scripts]
-orchid-serve = "orchid_ranker.cli.serve:main"
 
 [tool.ruff]
 line-length = 120
@@ -173,39 +86,16 @@ target-version = "py311"
 select = ["E", "F", "W", "I"]
 ignore = ["E501", "E402", "E701", "E702", "E741"]
 
-[tool.ruff.lint.per-file-ignores]
-"src/orchid_ranker/__init__.py" = ["F822"]
-"src/orchid_ranker/agents/__init__.py" = ["F822"]
-"src/orchid_ranker/agents/student_agent.py" = ["F822"]
-"src/orchid_ranker/curriculum.py" = ["F822"]
-"src/orchid_ranker/evaluation.py" = ["F822"]
-"src/orchid_ranker/knowledge_tracing.py" = ["F822"]
-
 [tool.mypy]
 python_version = "3.11"
 warn_return_any = true
 warn_unused_configs = true
 ignore_missing_imports = true
 
-# NOTE: adaptive_ranker, adaptive_learning, and offline_policy are now fully
-# type-checked (removed from this ignore list). learning_policy remains ignored
-# because of genuine LSP override signatures on the policy subclasses that cannot
-# be tightened without an API/behavior change.
 [[tool.mypy.overrides]]
 module = [
-  "orchid_ranker.agents.*",
-  "orchid_ranker.baselines",
-  "orchid_ranker.calibration",
-  "orchid_ranker.connectors.*",
-  "orchid_ranker.contrib.*",
-  "orchid_ranker.curriculum",
-  "orchid_ranker.data.*",
   "orchid_ranker.delayed_gain",
-  "orchid_ranker.experiments.*",
-  "orchid_ranker.learning_policy",  # TODO: re-enable mypy (subclass rank() override return-type variance)
-  "orchid_ranker.native.fast_score",
-  "orchid_ranker.security.audit",
-  "orchid_ranker.streaming",
+  "orchid_ranker.learning_policy",
 ]
 ignore_errors = true
 
@@ -214,11 +104,4 @@ testpaths = ["tests"]
 pythonpath = ["src"]
 filterwarnings = [
   "ignore:The PyTorch API of nested tensors is in prototype stage.*:UserWarning",
-]
-
-[tool.coverage.run]
-omit = [
-  "src/orchid_ranker/contrib/*",
-  "src/orchid_ranker/experiments/*",
-  "src/orchid_ranker/visualization/*",
 ]

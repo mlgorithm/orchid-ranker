@@ -2,7 +2,7 @@
 """Preprocess EdNet KT1-style data into Orchid's KT benchmark schema.
 
 Output schema:
-    user_id,item_id,correct,timestamp,difficulty[,elapsed_time]
+    user_id,item_id,correct,timestamp[,elapsed_time]
 
 Supported raw shapes:
     - a single denormalized CSV with user/question/correctness columns
@@ -170,9 +170,7 @@ def _clean_and_filter(
         out = out[out["item_id"].isin(item_counts[item_counts >= min_item_events].index)]
 
     out = out.sort_values(["user_id", "timestamp"], kind="mergesort").reset_index(drop=True)
-    item_accuracy = out.groupby("item_id")["correct"].mean()
-    out["difficulty"] = (1.0 - out["item_id"].map(item_accuracy).astype(float)).clip(0.0, 1.0)
-    columns = ["user_id", "item_id", "correct", "timestamp", "difficulty"]
+    columns = ["user_id", "item_id", "correct", "timestamp"]
     if "elapsed_time" in out.columns:
         columns.append("elapsed_time")
     return out[columns]

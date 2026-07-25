@@ -1,34 +1,30 @@
 # Coding Standards
 
 This standard keeps Orchid Ranker focused, maintainable, and easy to use as an
-adaptive-learning and knowledge-tracing recommender library.
+outcome-driven adaptive recommender.
 
 ## Product Scope
 
-Orchid should be best at:
+Orchid does one public job:
 
-- learner-state tracing from outcome sequences;
-- prerequisite-aware and difficulty-aware progression ranking;
-- semantic exercise cold start for sparse catalogs;
-- logged-policy learning and offline policy evaluation;
-- safe rollout, observability, privacy, and auditability.
+- fit chronological user outcomes;
+- rank an application-provided candidate set;
+- observe the result and adapt; and
+- log decisions safely when evaluation requires it.
 
-Do not reintroduce generic recommender surfaces such as movie/music/feed
-benchmarks, broad model-selection APIs, or package-root tuning and
-serialization helpers.
+Do not introduce additional package-root models, policy selectors, domain
+engines, or tuning APIs. Lower-level algorithms may support the implementation
+and research, but they are not separate product surfaces.
 
 ## Public API
 
-- Start new user-facing workflows from `AdaptiveRanker` or
-  `AdaptiveLearningEngine`.
-- Use lower-level APIs only for explicit building blocks: KT tracers,
-  `DependencyGraph`, `ProgressionRecommender`, progression policies, OPE,
-  guardrails, connectors, and observability.
-- Keep heavy dependencies optional. Torch-backed workflows belong behind extras
-  such as `[adaptive]`; torch-free utilities must continue to import from a
-  base install.
-- Keep deprecated names isolated to compatibility shims and deprecation tests.
-  New examples and docs should use the current names.
+- Start every new user-facing workflow from `AdaptiveRanker`.
+- Keep `orchid_ranker.__all__` limited to `AdaptiveRanker`.
+- Treat lower-level modules as implementation details, not alternate products.
+- Keep the normal install complete: `pip install orchid-ranker` must run the
+  supported workflow without an extra.
+- Do not add compatibility shims or deprecated aliases. Make breaking changes
+  explicitly and update the supported documentation in the same change.
 
 ## Python Style
 
@@ -37,7 +33,7 @@ serialization helpers.
 - Type public functions, dataclasses, and return values. Avoid expanding
   `ignore_errors` coverage unless there is a concrete migration plan.
 - Use `logging.getLogger(__name__)` in library code. Do not add `print()` calls
-  outside examples, CLI entry points, or scripts.
+  outside examples or scripts.
 - Prefer explicit validation errors over silent coercion for user-provided
   schema, tensor shape, and policy configuration.
 - Keep randomness reproducible in tests and examples through `random_state`,
@@ -48,8 +44,8 @@ serialization helpers.
 
 - Use structured pandas, numpy, sklearn, and torch APIs rather than ad hoc
   string parsing or manual dtype guessing.
-- Preserve chronological splits for KT and policy evaluation. Do not leak future
-  learner outcomes into training examples or candidate features.
+- Preserve chronological splits for fitting and policy evaluation. Do not leak
+  future user outcomes into training examples or candidate features.
 - Report policy quality with support diagnostics, clipped weights, and
   confidence intervals when making rollout claims.
 - Treat benchmark results as evidence artifacts: include command, dataset
@@ -76,7 +72,7 @@ Use `./scripts/run_full_tests.sh --quick` during development and
 
 ## Documentation
 
-- Put the fastest successful path first: install, data shape, fit, rank,
+- Put the fastest successful path first: install, data shape, fit, recommend,
   observe, evaluate.
 - Link runnable examples from guides.
 - Update `README.md`, `docs/README.md`, `docs/index.md`, and `mkdocs.yml` when
@@ -86,6 +82,6 @@ Use `./scripts/run_full_tests.sh --quick` during development and
 
 ## Review Bar
 
-A change is ready when it is scoped to Orchid's adaptive-learning purpose,
-uses current terminology, has tests for public behavior, keeps docs
+A change is ready when it strengthens the single adaptive recommendation loop,
+uses neutral public terminology, has tests for public behavior, keeps docs
 discoverable, and passes the required quality gates.

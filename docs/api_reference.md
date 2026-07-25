@@ -1,748 +1,115 @@
-# API Reference
+# API
 
-Complete reference for public classes and functions in Orchid Ranker v0.5.0.
-
----
-
-## Start here: adaptive learning
-
-The primary public workflow is `AdaptiveRanker`: fit learner-state tracing,
-optionally fit a reward model and conservative logged policy, serve next-item
-recommendations, observe outcomes, and run OPE from logged decisions.
+The supported package-root API is:
 
 ```python
 from orchid_ranker import AdaptiveRanker
+```
 
-ranker = AdaptiveRanker(policy="auto", epochs=1).fit_kt(
+## `AdaptiveRanker()`
+
+Create an unfitted adaptive recommender.
+
+```python
+ranker = AdaptiveRanker()
+```
+
+The defaults select the internal adaptive policy. Most applications should not
+pass model or training options.
+
+## `fit`
+
+```python
+ranker.fit(
     events,
-    learner_col="learner_id",
-    correct_col="correct",
-    concept_col="concept_id",
-    item_difficulty_col="difficulty",
-)
-ranked = ranker.recommend("learner-7", [10, 20, 30], top_k=3)
-ranker.observe(learner_id="learner-7", ts=10, item_id=ranked[0].item_id, concept_id=None, correct=1)
-```
-
-New work should start from the adaptive APIs below. Generic recommender APIs
-are not part of Orchid's public package-root surface.
-
----
-
-## orchid_ranker.adaptive_ranker
-
-Staged adaptive-learning product facade.
-
-```python
-class AdaptiveRanker:
-    def fit_kt(self, events, *, learner_col="learner_id", item_col="item_id", correct_col="correct", timestamp_col="ts")
-    def fit_reward_model(self)
-    def fit_policy(self, logged_decisions, *, algo="cql", reward_col="reward")
-    def fit_semantic_items(self, catalog, *, item_col="item_id", text_col="item_text", metadata_cols=None)
-    def recommend(self, learner_id, candidate_item_ids=None, *, top_k=10, mode=None, item_query_text=None)
-    def observe(self, event=None, **kwargs)
-    def ope_report(self, logged_decisions, *, reward_col="reward", propensity_col="propensity")
-```
-
-`kt_backbone` accepts `"akt"`, `"sakt"`, `"dkt"`, `"dkvmn"`, `"saint"`, and `"saint+"`.
-`"saint+"` uses elapsed-time and lag-time features when timestamped events are
-available, and falls back to zero temporal features otherwise.
-`AdaptiveRanker.observe(...)` forwards `LearnerEvent.ts` to time-aware tracers
-so live SAINT+ state keeps using timestamp features after fit.
-
-`fit_policy(..., algo="cql")` implements a dependency-light tabular
-CQL-style contextual-bandit learner over logged candidate sets and rewards.
-Logged propensities are validated by the decision schema and used as clipped,
-normalized inverse-propensity update weights. Deeper CQL/IQL/CRR
-implementations can slot behind the same facade later.
-
-`fit_semantic_items(...)` fits the built-in hashing-vectorizer semantic encoder
-for text/metadata cold start. Passing `item_query_text` to `recommend(...)`
-uses semantic retrieval to build the candidate set before KT/policy reranking.
-If a semantic candidate is not present in the fitted KT item universe, the
-facade can still return it with a `semantic_cold_start` score that blends text
-similarity, concept/difficulty metadata, and prior uncertainty.
-
-`mode="sketch"` uses an attached `SketchCandidateGenerator` to produce a
-bounded candidate set before final reranking.
-
----
-
-## Adaptive Algorithm Collection
-
-Orchid intentionally exposes a curated adaptive-learning collection rather than
-a generic recommender model zoo.
-
-| Area | Public APIs |
-|------|-------------|
-| Transformer KT | `SAKTTracer`, `AKTTracer`, `SAINTTracer`, `SAINTPlusTracer` |
-| Recurrent / memory KT | `DKTTracer`, `DKVMNTracer` |
-| Classical EDM | `PFATracer`, `AFMTracer`, `BayesianKnowledgeTracing`, `fit_bkt_em` |
-| Calibration | `TemperatureScaler`, `IsotonicProbabilityCalibrator`, `expected_calibration_error`, `brier_score` |
-| Adaptive testing | `IRTAdaptiveSelector`, `IRTItem` |
-| Retention | `FSRSScheduler`, `FSRSReviewState` |
-| Exploration | `PersonalizedLinUCB` |
-| Policy evaluation | `evaluate_logged_policy`, `bootstrap_logged_policy`, `TabularFQE` |
-
-The compact KT implementations should be described as `SAKT-style`,
-`AKT-inspired`, `DKVMN-style`, etc. until a benchmark card validates exact
-paper-level reproduction.
-
----
-
-## orchid_ranker.adaptive_learning
-
-High-level adaptive-learning recommender that composes KT prediction,
-progression reward, delayed-gain priors, support-aware reward modeling, and
-optional prerequisite gating.
-
-```python
-class AdaptiveLearningRecommender:
-    def __init__(self, config: AdaptiveLearningConfig | None = None, **overrides)
-    def fit(
-        self,
-        interactions,
-        *,
-        user_col="user_id",
-        item_col="item_id",
-        correct_col="correct",
-        timestamp_col=None,
-        concept_col=None,
-        item_difficulty_col=None,
-        item_difficulty_map=None,
-        concept_by_item=None,
-        prerequisite_by_concept=None,
-    )
-    def rank(self, user_id, candidate_item_ids, *, top_k=5) -> list[AdaptiveLearningRecommendation]
-    def observe(self, user_id, item_id, correct)
-```
-
-`policy="auto"` resolves to `ProgressionValuePolicy`, the stable default for
-adaptive-learning serving. `DelayedGainValuePolicy` and
-`SupportConstrainedDelayedGainPolicy` remain explicit opt-ins because they need
-stronger logged-support and reward-model calibration evidence. The policy state
-is warm-started from historical outcomes, so prerequisite gating and competence
-estimates reflect the learner's prior history before the first live `observe`.
-
-```python
-from orchid_ranker import AdaptiveLearningEngine
-
-rec = AdaptiveLearningEngine(
-    tracer_model="akt",
-    policy="auto",
-    epochs=2,
-    d_model=32,
-).fit(
-    events,
-    timestamp_col="timestamp",
-    concept_col="skill_id",
-    item_difficulty_col="difficulty",
-)
-
-ranked = rec.rank("learner-7", [10, 20, 30], top_k=3)
-rec.observe("learner-7", ranked[0].item_id, correct=True)
-```
-
-### AdaptiveLearningRecommendation
-
-```python
-@dataclass
-class AdaptiveLearningRecommendation:
-    item_id: Any
-    score: float
-    p_correct: float
-    policy: str
-    difficulty: float | None = None
-    concept_id: Any | None = None
-    competence: float | None = None
-    expected_reward: float | None = None
-    delayed_gain_prior: float | None = None
-    model_prediction: float | None = None
-    support_penalty: float = 0.0
-    prerequisites_met: bool = True
-```
-
-Use `diagnostics()` to log the resolved tracer/policy, concept and item counts,
-delayed-gain prior coverage, and reward-model report.
-
-`AdaptiveLearningEngine` is a top-level alias for
-`AdaptiveLearningRecommender`; use whichever name is clearer in your codebase.
-
----
-
-## orchid_ranker.scenarios
-
-Scenario-selection helpers for choosing the right Orchid workflow before
-instantiating a model.
-
-```python
-from orchid_ranker import available_scenarios, recommend_scenarios
-
-matches = recommend_scenarios(
-    has_outcomes=True,
-    has_concepts=True,
-    has_difficulty=True,
-    has_prerequisites=True,
-    needs_live_adaptation=True,
-    use_case="adaptive math practice",
-)
-
-top = matches[0]
-print(top.scenario.id)
-print(top.scenario.entrypoints)
-```
-
-```python
-@dataclass(frozen=True)
-class ScenarioRecipe:
-    id: str
-    name: str
-    summary: str
-    use_when: str
-    signals: tuple[str, ...]
-    algorithms: tuple[str, ...]
-    entrypoints: tuple[str, ...]
-    docs_anchor: str
-    tags: tuple[str, ...] = ()
-
-@dataclass(frozen=True)
-class ScenarioFit:
-    scenario: ScenarioRecipe
-    score: float
-    reasons: tuple[str, ...]
-```
-
-`available_scenarios()` returns the stable catalog. `recommend_scenarios()`
-scores the catalog from product-level booleans such as `has_outcomes`,
-`has_concepts`, `needs_live_adaptation`, `needs_safe_rollout`,
-`has_new_users`, and `is_regulated`.
-
----
-
-## orchid_ranker.ope
-
-Offline policy evaluation utilities for adaptive rollout decisions.
-
-```python
-def evaluate_logged_policy(
-    events: pd.DataFrame,
     *,
-    reward_col: str,
-    propensity_col: str,
-    target_probability_col: str,
-    target_value_col: str | None = None,
-    logged_action_value_col: str | None = None,
-    max_weight: float | None = None,
-) -> LoggedPolicyReport
-```
-
-```python
-def compare_logged_policies(
-    events: pd.DataFrame,
-    *,
-    reward_col: str,
-    propensity_col: str,
-    target_probability_col: str,
-    baseline_probability_col: str,
-    target_value_col: str | None = None,
-    baseline_value_col: str | None = None,
-    logged_action_value_col: str | None = None,
-    max_weight: float | None = None,
-) -> PolicyComparisonReport
-```
-
-```python
-def bootstrap_logged_policy(..., n_bootstrap=500, cluster_col=None) -> BootstrapLoggedPolicyReport
-def bootstrap_compare_logged_policies(..., n_bootstrap=500, cluster_col=None) -> BootstrapPolicyComparisonReport
-def evaluate_rollout_gate(report, *, min_effect=0.0, min_ess_fraction=0.05) -> OPERolloutGateReport
-```
-
-Reports include IPS, SNIPS, direct-method and doubly robust estimates when the
-required columns are supplied, plus coverage, effective sample size, weight
-diagnostics, and confidence intervals. Bootstrap reports add row-resampled
-percentile intervals for rollout gates where normal approximation is too weak.
-Pass `cluster_col` to resample learners, classrooms, or courses as whole units
-when logged outcomes are clustered rather than row-independent.
-`evaluate_rollout_gate(...)` converts a single-policy or policy-comparison
-report into an allow/block decision using lower confidence bounds, effective
-sample size fraction, coverage, and clipped-weight fraction.
-
----
-
-## orchid_ranker.semantic
-
-Semantic item retrieval for new exercises or sparse catalogs.
-
-```python
-from orchid_ranker import DenseSemanticItemEncoder, SemanticItemEncoder
-
-encoder = SemanticItemEncoder(n_features=2**14).fit(
-    catalog,
+    user_col="user_id",
     item_col="item_id",
-    text_col="item_text",
-    metadata_cols=["concept_id", "difficulty_bin"],
+    outcome_col="outcome",
+    timestamp_col="timestamp",
+    category_col=None,
+    difficulty_col=None,
 )
-
-candidate_ids = encoder.similar_items("add fractions with common denominators", top_k=50)
-
-dense = DenseSemanticItemEncoder(my_embedding_fn).fit(catalog)
 ```
 
-`SemanticItemEncoder` uses deterministic hashed text/metadata features, so it
-does not require model downloads or external embedding services. Use it for
-candidate generation and cold start, then let the KT/policy layer perform final
-adaptive reranking. `DenseSemanticItemEncoder` exposes the same retrieval API
-for sentence-transformer, e5/BGE, OpenAI-compatible, or in-house embedding
-providers supplied by the caller.
+Fits the ranker and returns the same object.
 
----
+By default, Orchid expects `user_id`, `item_id`, `outcome`, and `timestamp`.
+Pass the column arguments only when your source table uses different names.
 
-## orchid_ranker.irt
-
-Item-response-theory utilities for placement tests and mastery checks.
+## `recommend`
 
 ```python
-from orchid_ranker import IRTAdaptiveSelector, IRTItem
-
-selector = IRTAdaptiveSelector(initial_theta=0.0).fit_items([
-    IRTItem("warmup", difficulty=-1.0, concept_id="basics"),
-    IRTItem("stretch", difficulty=0.5, discrimination=1.2, concept_id="fractions"),
-])
-
-next_item = selector.recommend(top_k=1)[0]
-selector.observe(next_item.item_id, correct=True)
-```
-
-`IRTAdaptiveSelector` ranks by item information at the learner's current
-ability estimate. It supports Rasch/1PL behavior by default, 2PL with per-item
-discrimination, and 3PL with a non-zero guessing parameter. Optional
-prerequisite constraints can filter items before selection.
-
----
-
-## orchid_ranker.progression_reward / learning_policy
-
-Progression-aware policy scoring for adaptive sequencing.
-
-```python
-class ProgressionRewardConfig:
-    target_correct: float = 0.70
-    stretch_margin: float = 0.15
-    stretch_width: float = 0.30
-    default_competence: float = 0.50
-    correctness_weight: float = 0.25
-    mastery_gain_weight: float = 1.00
-    stretch_weight: float = 0.75
-    difficulty_weight: float = 0.20
-    easy_penalty_weight: float = 0.35
-    hard_penalty_weight: float = 0.15
-    repetition_penalty_weight: float = 0.25
-    easy_correct_threshold: float = 0.88
-    hard_correct_threshold: float = 0.25
-    incorrect_attempt_credit: float = 0.10
-    repetition_window: int = 3
-    clip_reward: bool = True
-```
-
-```python
-class ProgressionValuePolicy:
-    def rank(self, user_id, candidate_item_ids, *, top_k=5) -> list
-    def observe(self, user_id, item_id, correct)
-
-class DelayedGainValuePolicy:
-    def rank(self, user_id, candidate_item_ids, *, top_k=5) -> list
-    def observe(self, user_id, item_id, correct)
-
-class SupportConstrainedDelayedGainPolicy:
-    def rank(self, user_id, candidate_item_ids, *, top_k=5) -> list
-    def observe(self, user_id, item_id, correct)
-
-class DelayedGainRewardModel:
-    def predict_one(self, features) -> float
-    def predict_many(self, feature_rows) -> list[float]
-
-def build_delayed_gain_training_frame(split, *, concept_col, **kwargs) -> pd.DataFrame
-def fit_delayed_gain_reward_model_from_frame(
-    examples,
+recommendations = ranker.recommend(
+    user_id,
+    candidate_item_ids,
     *,
-    example_weighting="uniform",
-    sample_weight_col=None,
-    cross_fit_folds=1,
-) -> DelayedGainRewardModel
-def diagnose_delayed_gain_predictions(labels, predictions, *, n_bins=10) -> dict
+    top_k=10,
+)
 ```
 
-Use `ProgressionValuePolicy` when correctness alone is too shallow. It ranks
-items using expected progression reward, including target-correctness fit,
-stretch-zone fit, mastery-gain potential, difficulty, and repetition/easy-item
-penalties.
+Returns ranked recommendation objects. The fields intended for ordinary
+application use are:
 
-Use `DelayedGainValuePolicy` when you have concept labels and want ranking to
-prefer items that historically preceded future same-concept improvement. It
-combines training-only delayed-gain priors with the progression reward.
+| Field | Meaning |
+|-------|---------|
+| `item_id` | Recommended item identifier |
+| `score` | Relative adaptive ranking score |
+| `outcome_probability` | Estimated probability of a positive outcome |
 
-Use `SupportConstrainedDelayedGainPolicy` when you also have a fitted
-`DelayedGainRewardModel` and want to penalize items with weak logged support.
-The benchmark path exposes this as `--policy support_delayed_gain`.
+Scores are meaningful for ordering candidates from the same request; do not
+interpret them as globally calibrated business values.
 
-For direct reward-model work, `build_delayed_gain_training_frame` exposes the
-same feature frame used by the benchmark. `fit_delayed_gain_reward_model_from_frame`
-supports uniform weighting, support-inverse weighting, and MRDR-style weighting
-when `target_probability` and `logging_propensity` columns are available.
-`diagnose_delayed_gain_predictions` reports RMSE, MAE, calibration error, and
-decile lift for validation or target-policy action slices.
-
----
-
-## orchid_ranker.pykt_bridge
-
-Interoperability helpers for pyKT-style knowledge-tracing workflows.
+## `observe`
 
 ```python
-def export_pykt_sequences(
-    interactions: pd.DataFrame,
-    output_path: str | Path,
-    *,
-    user_col: str = "user_id",
-    item_col: str = "item_id",
-    correct_col: str = "correct",
-    concept_col: str | None = None,
-    timestamp_col: str | None = None,
-    duration_col: str | None = None,
-) -> list[PyKTSequence]
+ranker.observe(
+    user_id=user_id,
+    item_id=item_id,
+    outcome=outcome,
+    timestamp=timestamp,
+)
 ```
+
+Updates the user's state from one completed interaction. Outcomes must be
+binary `0` or `1`.
+
+## `recommend_and_log`
 
 ```python
-class PyKTPredictionAdapter:
-    def predict_many(self, user_id, item_ids) -> dict
-    def predict_correct(self, user_id, item_id) -> float
+recommendations, decision = ranker.recommend_and_log(
+    user_id,
+    candidate_item_ids,
+    timestamp=timestamp,
+    top_k=10,
+    exploration=0.0,
+)
 ```
 
-Use `export_pykt_sequences` to write Orchid interactions into pyKT's six-line
-learner-sequence format. Use `PyKTPredictionAdapter` to feed exported pyKT
-probability tables into `KTValuePolicy` and OPE.
+Performs a recommendation and creates an immutable decision record containing
+the candidate set, chosen item, scores, probabilities, propensity, policy
+version, and context needed for later evaluation.
 
----
+When exploration is nonzero, persist this record before returning the
+recommendation.
 
-## orchid_ranker.knowledge_tracing
-
-### BayesianKnowledgeTracing
-
-Hidden Markov Model for estimating category competence from response sequences.
+## `observe_decision`
 
 ```python
-class BayesianKnowledgeTracing:
-    def __init__(
-        self,
-        p_init: float = 0.1,
-        p_transit: float = 0.1,
-        p_slip: float = 0.1,
-        p_guess: float = 0.2,
-        mastery_threshold: float = 0.95,
-    )
+linked_outcome = ranker.observe_decision(
+    decision_id,
+    outcome=outcome,
+    timestamp=timestamp,
+)
 ```
 
-**Parameters:**
+Links a delayed outcome to an earlier decision and updates the live user state.
+A decision accepts only one linked outcome.
 
-- `p_init` — Prior probability of knowing the category before any observations.
-- `p_transit` — Probability of transitioning from unlearned to learned after each attempt.
-- `p_slip` — Probability of an incorrect response despite knowing the category.
-- `p_guess` — Probability of a correct response despite not knowing the category.
-- `mastery_threshold` — BKT compatibility name for the `p_known()` value above which the category is considered completed.
-
-**Methods:**
-
-| Method | Signature | Returns | Description |
-|--------|-----------|---------|-------------|
-| `update` | `(correct: bool)` | `float` | Process one observation, return updated p_known. |
-| `p_known` | `()` | `float` | Current probability of competence. |
-| `is_mastered` | `()` | `bool` | BKT compatibility method; whether p_known exceeds the competence threshold. |
-| `reset` | `()` | `None` | Reset to initial prior. |
-
-### CompetencyTracker
-
-Tracks competence across multiple categories simultaneously, each with its own BKT instance.
+## `is_fitted`
 
 ```python
-class CompetencyTracker:
-    def __init__(
-        self,
-        competencies: List[str],
-        bkt_params: Optional[Dict[str, Dict[str, float]]] = None,
-        default_params: Optional[Dict[str, float]] = None,
-        success_threshold: float = 0.95,
-    )
+ranker.is_fitted
 ```
 
-`ProficiencyTracker` is a non-deprecated alias for `CompetencyTracker`. The old `MasteryTracker` name and `skills` / `mastery_threshold` parameters remain as deprecated compatibility aliases.
-
-**Methods:**
-
-| Method | Signature | Returns | Description |
-|--------|-----------|---------|-------------|
-| `update` | `(competency, correct)` | `float` | Record an outcome and return updated competence. |
-| `proficiency` | `(competency)` | `float` | Current competence probability for one category. |
-| `get_mastery` | `()` | `Dict[str, float]` | Compatibility method returning all competence estimates. |
-| `succeeded` | `()` | `List[str]` | Categories above competence threshold. |
-| `remaining` | `()` | `List[str]` | Categories below competence threshold. |
-| `recommend_next` | `()` | `List[str]` | Suggest the next categories to engage with. |
-| `ready_for` | `(competency)` | `bool` | Whether prerequisites are met. |
-
-### ForgettingCurve
-
-Ebbinghaus exponential decay model for spaced repetition scheduling.
-
-```python
-class ForgettingCurve:
-    def __init__(
-        self,
-        initial_strength: float = 1.0,
-        strength_gain_on_review: float = 0.5,
-    )
-```
-
-**Methods:**
-
-| Method | Signature | Returns | Description |
-|--------|-----------|---------|-------------|
-| `review` | `()` | `None` | Record a review, increasing memory strength. |
-| `retention_at` | `(time_since_last_review: float)` | `float` | Predicted retention (0-1) after elapsed time. |
-| `should_review` | `(threshold: float = 0.5)` | `bool` | Whether retention has dropped below threshold. |
-
----
-
-## orchid_ranker.curriculum
-
-### DependencyGraph
-
-Directed acyclic graph for modeling category dependencies with automatic cycle detection.
-
-```python
-class DependencyGraph:
-    def __init__(self, edges: Optional[List[Tuple[str, str]]] = None)
-```
-
-The module name `curriculum` is retained for compatibility. `PrerequisiteGraph` and `SkillGraph` remain as deprecated aliases for `DependencyGraph`.
-
-**Methods:**
-
-| Method | Signature | Returns | Description |
-|--------|-----------|---------|-------------|
-| `add_edge` | `(prerequisite, dependent)` | `None` | Add a dependency. Raises `ValueError` on cycles or self-loops. |
-| `add_edges` | `(edges: List[Tuple[str, str]])` | `None` | Batch add with cumulative cycle detection. |
-| `prerequisites_for` | `(node)` | `Set[str]` | Direct prerequisites of a category/item. |
-| `all_prerequisites_for` | `(node)` | `Set[str]` | All transitive prerequisites. |
-| `dependents_of` | `(node)` | `Set[str]` | Categories/items that depend on this node. |
-| `topological_order` | `()` | `List[str]` | Valid progression sequence (Kahn's algorithm). |
-| `path_to` | `(target, completed=None)` | `List[str]` | Shortest path to target from completed nodes. |
-| `available` | `(completed: Set[str])` | `List[str]` | Categories/items whose prerequisites are all met. |
-| `prerequisites_met` | `(node, completed: Set[str])` | `bool` | Whether all prerequisites are met. |
-| `validate` | `()` | `None` | Validate graph integrity. |
-| `to_dict` | `()` | `Dict` | Serialize to dictionary. |
-| `from_dict` | `(data: Dict)` | `DependencyGraph` | Class method. Deserialize from dictionary. |
-| `summary` | `()` | `str` | Human-readable graph summary. |
-
-### ProgressionRecommender
-
-Stretch-zone-aware recommendations that respect prerequisite ordering.
-
-```python
-class ProgressionRecommender:
-    def __init__(
-        self,
-        graph: DependencyGraph,
-        difficulty_map: Optional[Dict[str, float]] = None,
-    )
-```
-
-`CurriculumRecommender` remains as a deprecated compatibility alias.
-
-**Methods:**
-
-| Method | Signature | Returns | Description |
-|--------|-----------|---------|-------------|
-| `recommend` | `(completed: Set[str], n: int = 5)` | `List[str]` | Recommend next items respecting prerequisites and stretch zone. |
-| `filter_candidates` | `(candidates, completed)` | `List[str]` | Filter items to those with satisfied prerequisites. |
-
----
-
-## orchid_ranker.evaluation
-
-### Ranking Metrics
-
-```python
-def precision_at_k(recommended: List, relevant: Set, k: int) -> float
-def recall_at_k(recommended: List, relevant: Set, k: int) -> float
-def ndcg_at_k(recommended: List, relevant_scores: Dict, k: int) -> float
-def average_precision(recommended: List, relevant: Set, k: int) -> float
-```
-
-### Progression Metrics
-
-```python
-def progression_gain(pre_score: float, post_score: float) -> float
-    # Normalized gain: (post - pre) / (1 - pre)
-
-def category_coverage(successful_categories: set, total_categories: set) -> float
-    # Fraction of total categories where competence is achieved
-
-def sequence_adherence(recommended_items: List, prerequisite_graph: DependencyGraph, completed: Set) -> float
-    # Fraction of recommendations with satisfied prerequisites
-
-def stretch_fit(recommended_difficulties: Sequence[float], user_competence: float, stretch_width: float = 0.25) -> float
-    # Fraction of items within the user's stretch zone
-
-def engagement_score(interactions: Sequence, total_available: int) -> float
-    # Ratio of interactions to available items
-```
-
-### ProgressionReport
-
-```python
-@dataclass
-class ProgressionReport:
-    metric_name: str
-    value: float
-    ci_lower: float
-    ci_upper: float
-    timestamp: float
-```
-
----
-
-## orchid_ranker.agents
-
-### AdaptiveAgent
-
-Simulates a user with knowledge, fatigue, trust, and engagement dynamics.
-
-```python
-class AdaptiveAgent:
-    def __init__(
-        self,
-        user_id: int,
-        knowledge_dim: int = 10,
-        knowledge_mode: str = "scalar",
-        learning_rate: float = 0.2,
-        decay: float = 0.1,
-        trust_influence: bool = True,
-        fatigue_growth: float = 0.05,
-        fatigue_recovery: float = 0.02,
-        ability_model: str = "ZPD",
-        seed: int = 42,
-        zpd_delta: float = 0.10,
-        zpd_width: float = 0.25,
-        position_bias: float = 0.85,
-    )
-```
-
-`StudentAgent`, `lr`, `act_mode`, and `pos_eta` remain as deprecated
-compatibility aliases; new code should use `AdaptiveAgent`, `learning_rate`,
-`ability_model`, and `position_bias`.
-
-**Key methods:** `accept(item_id, difficulty, correct, dwell_time, feedback)`, `get_knowledge()`, `get_fatigue()`, `get_engagement()`, `get_trust()`.
-
-### TwoTowerRecommender
-
-Neural two-tower recommender with FiLM gating.
-
-```python
-class TwoTowerRecommender:
-    def __init__(
-        self,
-        user_dim: int,
-        item_dim: int,
-        hidden_dim: int = 64,
-        device: str = "cpu",
-        learning_rate: float = 0.001,
-    )
-```
-
-**Key methods:** `fit(user_matrix, item_matrix, interactions_df)`, `infer(user_ids, item_ids)`, `get_candidates(user_idx, top_k)`.
-
-### MultiUserOrchestrator
-
-Runs multi-user adaptive experiments with online policy optimization.
-
-### DualRecommender
-
-Combines a fixed teacher recommender with an adaptive recommender for knowledge distillation.
-
----
-
-## orchid_ranker.security
-
-### AccessControl
-
-```python
-class AccessControl:
-    def __init__(self, policy: Dict)
-    def check_permission(self, role: str, action: str) -> bool
-```
-
-### AuditLogger
-
-```python
-class AuditLogger:
-    def __init__(self, log_path: str)
-    def log(self, event: str, user: str, details: Dict) -> None
-```
-
----
-
-## orchid_ranker.connectors
-
-### SnowflakeConnector
-
-```python
-class SnowflakeConnector:
-    def __init__(self, account, user, password, warehouse, database)
-```
-
-### BigQueryConnector
-
-```python
-class BigQueryConnector:
-    def __init__(self, project_id, credentials_path=None)
-```
-
-### S3StreamConnector
-
-```python
-class S3StreamConnector:
-    def __init__(self, bucket, prefix=None, aws_key=None, aws_secret=None)
-```
-
-### MLflowTracker
-
-```python
-class MLflowTracker:
-    def __init__(self, tracking_uri, experiment_name)
-```
-
----
-
-## orchid_ranker.observability
-
-```python
-def start_metrics_server(port: int = 8000) -> None
-def record_training(strategy: str, dataset: str, metric_name: str, value: float) -> None
-def export_metrics() -> str
-```
-
----
-
-## orchid_ranker.visualization
-
-```python
-def plot_user_activity(interactions_df, top_n=25)
-def plot_item_difficulty(items_df)
-def plot_learning_curve(round_summary_df, metric)
-def plot_acceptance_heatmap(...)
-def plot_round_comparison(...)
-def plot_knowledge_trajectory(...)
-def plot_metric_trajectory(...)
-def plot_metric_grid(...)
-```
-
-Each function returns a Matplotlib `Axes` object for further customization.
+Returns `True` after `fit` succeeds.

@@ -1,23 +1,15 @@
-# Developer conveniences mirroring `pip install orchid-ranker[dev,agentic,viz]`
+# Developer conveniences mirroring `pip install orchid-ranker[dev]`
 numpy>=1.23.5
 pandas>=1.5.3
 scikit-learn>=1.2
 scipy>=1.9.3
-pyyaml>=6.0
-joblib>=1.2
 torch>=2.0
-matplotlib>=3.6
-tqdm>=4.60
 pytest>=7.0
-pytest-cov>=4.0
 mypy>=1.4
 ruff>=0.1.5
-types-PyYAML>=6.0
 mkdocs>=1.5
 mkdocs-material>=9.5
 mkdocstrings[python]>=0.24
 pymdown-extensions>=10
 build>=1.0
 twine>=6.0
-opacus>=1.5
-prometheus-client>=0.16

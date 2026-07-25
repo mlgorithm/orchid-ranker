@@ -1,159 +1,93 @@
 # Orchid Ranker
 
 [![PyPI version](https://img.shields.io/pypi/v/orchid-ranker.svg)](https://pypi.org/project/orchid-ranker/)
+[![CI](https://github.com/mlgorithm/orchid-ranker/actions/workflows/ci.yaml/badge.svg)](https://github.com/mlgorithm/orchid-ranker/actions/workflows/ci.yaml)
 [![Python](https://img.shields.io/pypi/pyversions/orchid-ranker.svg)](https://pypi.org/project/orchid-ranker/)
 [![License](https://img.shields.io/badge/license-Apache%202.0-blue.svg)](LICENSE)
 
-**A first-class adaptive-learning engine for products where user outcomes matter more than short-term clicks.**
+Orchid Ranker is an outcome-driven adaptive recommender.
 
-Orchid Ranker is built for systems where the user is getting better at
-something over time: adaptive learning, corporate training, tutoring,
-onboarding, rehabilitation, fitness progression, and skill-based practice. It
-combines learner-state tracking, prerequisite-aware candidate selection,
-live learner-state updates, progression metrics, and safe fallback patterns.
+It does one thing: choose the next item from a candidate set, observe what
+happened, and adapt the next recommendation.
 
-It is not a generic CTR, ads, social-feed, or movie-recommendation model zoo.
-The core question is: **what should this learner work on next so they make
-measurable progress?**
+Use it for exercises, onboarding steps, training modules, practice tasks,
+gameplay challenges, or any other sequence with a measurable positive outcome.
 
-## Quickstart
+## Install
 
 ```bash
-pip install 'orchid-ranker[adaptive]'
+pip install orchid-ranker
 ```
+
+Python 3.11–3.13 is supported.
+
+## Use it
+
+You need four columns: user, item, outcome, and timestamp.
 
 ```python
 import pandas as pd
 from orchid_ranker import AdaptiveRanker
 
-outcomes = pd.read_csv("learner_outcomes.csv")  # learner_id, item_id, correct, ts
-catalog = pd.read_csv("exercise_catalog.csv")   # item_id, concept_id, difficulty, item_text
+history = pd.DataFrame({
+    "user_id":   ["a", "a", "a", "b", "b", "b"],
+    "item_id":   [101, 102, 201, 101, 102, 201],
+    "outcome":   [1,   1,   0,   1,   0,   0],
+    "timestamp": [1,   2,   3,   1,   2,   3],
+})
 
-ranker = AdaptiveRanker(
-    kt_backbone="saint+",
-    policy="auto",
-    epochs=2,
-    d_model=32,
-).fit_kt(
-    outcomes.merge(catalog, on="item_id"),
-    correct_col="correct",
-    concept_col="concept_id",
-    item_difficulty_col="difficulty",
+ranker = AdaptiveRanker().fit(history)
+
+ranked = ranker.recommend(
+    user_id="a",
+    candidate_item_ids=[101, 102, 201],
+    top_k=2,
 )
 
-ranker.fit_semantic_items(catalog, text_col="item_text", metadata_cols=["concept_id"])
-ranked = ranker.recommend(learner_id="7", candidate_item_ids=[101, 102, 201, 202], top_k=3)
-ranker.observe(learner_id="7", ts=123, item_id=ranked[0].item_id, concept_id=None, correct=1)
+ranker.observe(
+    user_id="a",
+    item_id=ranked[0].item_id,
+    outcome=1,
+    timestamp=4,
+)
 ```
 
-`policy="auto"` uses the progression-value policy: the most stable default for
-adaptive learning today. Delayed-gain and support-constrained delayed-gain
-policies are available as explicit opt-ins when you have the logged support and
-reward-model diagnostics to justify them.
+This is the complete loop. Orchid selects its internal policy; you do not
+choose a model. `outcome` is binary: `1` for the result you want and `0` for
+everything else.
 
-## Try it
+Your application supplies only eligible items. Orchid orders them; it does not
+override availability, safety, licensing, or business rules.
 
-Get up and running in under 5 minutes:
+## Learn more
 
-- [Adaptive learning quickstart](examples/adaptive_learning_quickstart.py) --- learner state + prerequisites + live re-ranking
-- [Use-case cookbook](examples/adaptive_learning_use_cases.py) --- compliance, language review, rehab, and safe rollout examples
-- [Scenario selection quickstart](examples/scenario_selection.py) --- choose the right Orchid workflow from product/data signals
-- [Knowledge tracing quickstart](examples/knowledge_tracing_quickstart.py) --- SAKT-style predicted correctness
-- [AKT quickstart](examples/akt_quickstart.py) --- difficulty-aware monotonic attention tracing
-- [KT policy quickstart](examples/kt_policy_quickstart.py) --- rank eligible items by predicted learning value
-- [Offline policy evaluation quickstart](examples/offline_policy_evaluation_quickstart.py) --- IPS/SNIPS/doubly robust rollout checks
-- [Progression policy quickstart](examples/progression_policy_quickstart.py) --- reward stretch and learning progress, not just correctness
-- [pyKT bridge quickstart](examples/pykt_bridge_quickstart.py) --- export pyKT sequences and reuse pyKT prediction tables
-- [Docs quickstart](docs/quickstart.md) --- install, fit, recommend, evaluate
-- [Algorithm roadmap](docs/algorithm-roadmap.md) --- KT, semantic exercise recommendation, and policy-learning direction
-- [Fit offline guide](docs/guides/01-fit-offline.md) --- train on a CSV, save, evaluate
-- [Usage scenarios](docs/scenarios.md) --- practical recipes for common Orchid deployments
-- [Use-case examples](docs/examples.md) --- domain examples that map Orchid APIs to concrete products
+- [Quickstart](docs/quickstart.md)
+- [How Orchid works](docs/overview.md)
+- [API](docs/api_reference.md)
+- [Production serving and decision logging](docs/guides/02-serve-streaming.md)
+- [Reference pilots](docs/examples.md)
+- [Validate an adaptive rollout](docs/benchmarks/credibility.md)
 
-## Build with it
+## Development
 
-Go from adaptive-learning fit to monitored rollout:
+```bash
+python -m pip install -e '.[dev]'
+./scripts/run_full_tests.sh
+```
 
-- [Serve adaptive recommendations](docs/guides/02-serve-streaming.md) --- log decisions, observe outcomes, and rerank from learner state
-- [Operate safely](docs/guides/03-operate-safely.md) --- add progression guardrails, Prometheus metrics, Grafana dashboards
-
-## Evaluate it
-
-Understand what makes Orchid different:
-
-- [Benchmark credibility protocol](docs/benchmarks/credibility.md) --- one-command JSON + Markdown evidence artifact
-- [ASSISTments KT benchmark](docs/benchmarks/assistments-kt.md) --- adaptive-learning correctness and policy evidence
-- [KT policy OPE benchmark](docs/benchmarks/kt-policy-ope.md) --- evaluate KT-guided next-item policies before rollout
-- [Progression policy](docs/progression-policy.md) --- transparent reward design for adaptive sequencing
-- [pyKT integration](docs/pykt-integration.md) --- use Orchid around research KT model zoos
-
----
-
-## Adaptive-learning capabilities
-
-1. **Learner state.** SAINT+/SAINT, AKT/SAKT, DKT/DKVMN-style, PFA/AFM, BKT, and IRT components estimate competence from learner outcomes.
-2. **Catalog structure.** Dependency graphs and difficulty metadata keep recommendations in the valid next-step set.
-3. **Semantic cold start.** Hashing and dense-adapter semantic encoders retrieve new exercises from text and metadata before interaction support exists.
-4. **Adaptive ranking.** Per-user online updates let the next recommendation change after each response.
-5. **Adaptive testing.** `IRTAdaptiveSelector` supports Rasch/2PL/3PL-style placement and mastery-check item selection by information.
-6. **Logged policy learning.** `AdaptiveRanker.fit_policy(..., algo="cql")` trains a conservative CQL-style contextual-bandit policy from candidate sets, rewards, and normalized inverse-propensity update weights.
-7. **Personalized exploration.** `PersonalizedLinUCB` scores `phi(learner, item)` features instead of item-only bandit features.
-8. **Retention scheduling.** `FSRSScheduler` adds FSRS-style review urgency for forgetting-aware practice.
-9. **Sketch mode.** Count-Min, Bloom-filter, reservoir, and exact-vector utilities shrink candidate generation before final reranking.
-10. **Offline policy evaluation.** IPS, SNIPS, direct-method, doubly robust, bootstrap, rollout gates, and tabular FQE test adaptive policies before rollout.
-11. **Safe operation.** Guardrails and reviewed fallback policies keep adaptive rollouts reviewable.
-12. **Audit and access-control primitives.** RBAC (`orchid_ranker.security.AccessControl`), HMAC-chained JSONL audit logging (`AuditLogger`), and hashed event IDs are available as library primitives you wire into your own service.
-
-## Adaptive algorithm collection
-
-| Family | Orchid APIs | Scenario |
-|--------|-------------|----------|
-| Transformer KT | `SAKTTracer`, `AKTTracer`, `SAINTTracer`, `SAINTPlusTracer` | Main next-correctness state models |
-| Recurrent / memory KT | `DKTTracer`, `DKVMNTracer` | Compact sequence baselines and ablations |
-| Classical EDM | `PFATracer`, `AFMTracer`, `fit_bkt_em`, `BayesianKnowledgeTracing` | Small-data, interpretable learner-state baselines |
-| Adaptive testing | `IRTAdaptiveSelector`, `IRTItem` | Placement, mastery checks, item-information selection |
-| Semantic retrieval | `SemanticItemEncoder`, `DenseSemanticItemEncoder`, `SemanticExerciseRanker` | Cold-start and metadata-aware exercise retrieval |
-| Policy learning | `CQLDiscretePolicy`, `TabularFQE`, `evaluate_logged_policy` | Logged-policy learning and rollout evidence |
-| Exploration | `PersonalizedLinUCB` | Safe personalized exploration with explicit feature maps |
-| Retention | `FSRSScheduler` | Review scheduling and forgetting-risk ranking |
-
-For adaptive learning, start with `AdaptiveRanker` when you want staged
-KT/reward/policy/OPE workflows, or `AdaptiveLearningEngine` when you only need
-fit/rank/observe. They compose
-SAINT+/SAINT, AKT/SAKT, DKT/DKVMN-style tracing, progression reward,
-difficulty/prerequisite metadata, semantic item retrieval, and live
-`observe()` updates into one fit/rank/observe API. Use lower-level
-pieces such as `BayesianKnowledgeTracing`, `DependencyGraph`,
-`ProgressionRecommender`, `orchid_ranker.kt.SAKTTracer`, and
-`orchid_ranker.kt.SAINTPlusTracer` only when you need a custom policy. Use
-`orchid_ranker.ope` to evaluate a new learning policy from logged randomized
-traffic before serving it, `bootstrap_logged_policy` when rollout decisions
-need row-resampled confidence intervals, and `evaluate_rollout_gate` to enforce
-minimum support/coverage/clipping thresholds before live learners see a policy. Modern KT and policy-learning
-algorithms are tracked in the [algorithm roadmap](docs/algorithm-roadmap.md).
-
-## Status
-
-[![CI](https://github.com/mlgorithm/orchid-ranker/actions/workflows/ci.yaml/badge.svg)](https://github.com/mlgorithm/orchid-ranker/actions/workflows/ci.yaml)
-![Python](https://img.shields.io/badge/python-3.11--3.13-blue)
-![License](https://img.shields.io/badge/license-Apache%202.0-blue)
+See [CONTRIBUTING.md](CONTRIBUTING.md),
+[docs/coding-standards.md](docs/coding-standards.md), and
+[RELEASING.md](RELEASING.md).
 
 ## License
 
 Apache 2.0. See [LICENSE](LICENSE).
 
-## Contributing
-
-See [CONTRIBUTING.md](CONTRIBUTING.md) and
-[docs/coding-standards.md](docs/coding-standards.md). Contributions should keep
-Orchid focused on adaptive learning, knowledge tracing, progression ranking,
-safe rollout, and evidence-backed documentation.
-
 ## Citation
 
 ```bibtex
 @software{orchid_ranker,
-  title={Orchid Ranker: Adaptive-Learning Engine},
+  title={Orchid Ranker: Outcome-Driven Adaptive Recommendation},
   author={Sam Urmian},
   year={2024},
   url={https://github.com/mlgorithm/orchid-ranker}

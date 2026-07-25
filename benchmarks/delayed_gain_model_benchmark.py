@@ -24,7 +24,10 @@ from orchid_ranker.delayed_gain import (  # noqa: E402
     diagnose_delayed_gain_predictions,
     fit_delayed_gain_reward_model,
 )
-from orchid_ranker.kt_benchmark import time_ordered_user_split  # noqa: E402
+from orchid_ranker.kt_benchmark import (  # noqa: E402
+    derive_train_only_item_difficulty,
+    time_ordered_user_split,
+)
 from orchid_ranker.policy_benchmark import (  # noqa: E402
     _fit_tracer,
     _mode_or_first,
@@ -44,6 +47,11 @@ def parse_args(argv: Optional[list[str]] = None) -> argparse.Namespace:
     parser.add_argument("--correct-col", default="correct")
     parser.add_argument("--timestamp-col", default=None)
     parser.add_argument("--item-difficulty-col", default=None)
+    parser.add_argument(
+        "--derive-item-difficulty",
+        action="store_true",
+        help="Estimate item difficulty from training labels after the temporal split.",
+    )
     parser.add_argument("--concept-col", required=True)
     parser.add_argument("--model", choices=["sakt", "akt"], default="akt")
     parser.add_argument("--test-fraction", type=float, default=0.2)
@@ -86,6 +94,9 @@ def main(argv: Optional[list[str]] = None) -> int:
         timestamp_col=args.timestamp_col,
         test_fraction=args.test_fraction,
     )
+    if args.derive_item_difficulty:
+        args.item_difficulty_col = args.item_difficulty_col or "__orchid_train_difficulty__"
+        split = derive_train_only_item_difficulty(split, output_col=args.item_difficulty_col)
     priors = estimate_delayed_gain_priors(
         split,
         concept_col=args.concept_col,

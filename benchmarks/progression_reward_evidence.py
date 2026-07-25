@@ -57,7 +57,11 @@ from scipy import stats as _sps
 _REPO_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(_REPO_ROOT / "src"))
 
-from orchid_ranker.kt_benchmark import _binary_labels, time_ordered_user_split  # noqa: E402
+from orchid_ranker.kt_benchmark import (  # noqa: E402
+    _binary_labels,
+    derive_train_only_item_difficulty,
+    time_ordered_user_split,
+)
 from orchid_ranker.learning_policy import ProgressionValuePolicy  # noqa: E402
 from orchid_ranker.policy_benchmark import (  # noqa: E402
     _candidate_pool,
@@ -90,7 +94,12 @@ def parse_args(argv: Optional[list[str]] = None) -> argparse.Namespace:
     parser.add_argument("--item-col", default="item_id")
     parser.add_argument("--correct-col", default="correct")
     parser.add_argument("--timestamp-col", default="timestamp")
-    parser.add_argument("--item-difficulty-col", default="difficulty")
+    parser.add_argument("--item-difficulty-col", default=None)
+    parser.add_argument(
+        "--derive-item-difficulty",
+        action="store_true",
+        help="Estimate item difficulty from training labels after the temporal split.",
+    )
     parser.add_argument("--concept-col", default="skill_id")
     parser.add_argument("--model", choices=["sakt", "akt"], default="akt")
     parser.add_argument("--test-fraction", type=float, default=0.2)
@@ -147,6 +156,10 @@ def _run_seed(frame: pd.DataFrame, *, args: argparse.Namespace, seed: int) -> di
         timestamp_col=args.timestamp_col,
         test_fraction=args.test_fraction,
     )
+    difficulty_col = args.item_difficulty_col
+    if args.derive_item_difficulty:
+        difficulty_col = difficulty_col or "__orchid_train_difficulty__"
+        split = derive_train_only_item_difficulty(split, output_col=difficulty_col)
     tracer = _fit_tracer(
         split,
         model=args.model,
@@ -154,7 +167,7 @@ def _run_seed(frame: pd.DataFrame, *, args: argparse.Namespace, seed: int) -> di
         item_col=args.item_col,
         correct_col=args.correct_col,
         timestamp_col=args.timestamp_col,
-        item_difficulty_col=args.item_difficulty_col,
+        item_difficulty_col=difficulty_col,
         max_seq_len=args.max_seq_len,
         d_model=args.d_model,
         n_heads=args.n_heads,
@@ -167,7 +180,7 @@ def _run_seed(frame: pd.DataFrame, *, args: argparse.Namespace, seed: int) -> di
         split.train,
         item_col=args.item_col,
         correct_col=args.correct_col,
-        difficulty_col=args.item_difficulty_col,
+        difficulty_col=difficulty_col,
         concept_col=args.concept_col,
         threshold=args.target_correct,
     )
@@ -214,11 +227,11 @@ def _difficulty_concept_maps(
     *,
     item_col: str,
     correct_col: str,
-    difficulty_col: str,
+    difficulty_col: Optional[str],
     concept_col: str,
     threshold: float,
 ) -> tuple[dict[Any, float], dict[Any, Any]]:
-    if difficulty_col in train.columns:
+    if difficulty_col is not None and difficulty_col in train.columns:
         difficulty = {
             item: float(np.clip(value, 0.0, 1.0))
             for item, value in train.groupby(item_col)[difficulty_col].mean().items()

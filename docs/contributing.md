@@ -22,14 +22,14 @@ python -m pip install -e ".[dev]"
 ```
 
 The quick gate runs lint, type checking, documentation-readiness checks,
-publish-readiness checks, and the core adaptive-learning smoke path. The full
-gate runs lint, types, all tests, strict docs build, and package build.
+publish-readiness checks, and the core adaptive-recommender smoke path. The
+full gate runs lint, types, all tests, strict docs build, and package build.
 
 ## Contribution Scope
 
-Good contributions improve adaptive learning, knowledge tracing, progression
-ranking, prerequisite-aware candidate selection, OPE, safe rollout, privacy,
-connectors, or documentation for those workflows.
+Good contributions improve the single `AdaptiveRanker` workflow, its outcome
+data contract, evaluation, or documentation.
 
-Do not reintroduce generic recommender APIs, generic feed/movie/music
-benchmarks, or package-root tuning and serialization helpers.
+Do not introduce another package-root model, domain engine, policy selector, or
+tuning API. Lower-level algorithms belong in implementation or research
+modules.

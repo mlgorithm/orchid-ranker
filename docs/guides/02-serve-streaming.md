@@ -1,93 +1,106 @@
-# Guide 2: Serve Adaptive Recommendations
+# Production serving
 
-Adaptive learning changes after every outcome. Serve Orchid by keeping a fitted
-`AdaptiveRanker` in memory, logging every decision, and feeding observed
-outcomes back through `observe(...)`.
+Keep one fitted `AdaptiveRanker` available to the serving process. For each
+request:
 
-## Serve A Candidate Set
+1. construct the eligible candidate set;
+2. recommend and persist the decision;
+3. return the selected item; and
+4. link the outcome when it arrives.
+
+## Recommend and log
 
 ```python
-from orchid_ranker import LoggedDecision, stable_context_hash
-
-learner_id = "learner-42"
-concept_goal = "fractions"
-candidates = ["frac-01", "frac-02", "frac-03"]
-context_hash = stable_context_hash(learner_id, concept_goal)
-
-ranked = ranker.recommend(
-    learner_id,
-    candidates,
+ranked, decision = ranker.recommend_and_log(
+    user_id="user-42",
+    candidate_item_ids=["step-01", "step-02", "step-03"],
+    timestamp=123456,
     top_k=3,
-    context_hash=context_hash,
-    concept_goal=concept_goal,
+    exploration=0.05,
 )
 ```
 
-## Log The Decision
+The chosen item is first in `ranked`. The decision records the exact candidate
+set, scores, action probabilities, chosen propensity, context, and policy
+version.
 
-Policy learning and OPE require candidate sets and propensities. Log the served
-decision even when the reward arrives later.
+Persist the decision in an append-only store before returning the response.
+Without that record, randomized traffic cannot be evaluated reliably.
+
+## Link the outcome
 
 ```python
-decision = LoggedDecision(
-    learner_id=learner_id,
-    ts=123456,
-    candidate_item_ids=candidates,
-    chosen_item_id=ranked[0].item_id,
-    propensity=1.0,  # deterministic policy; use exploration probability when randomized
-    policy_name="progression",
-    policy_version="v1",
-    scores=[rec.score for rec in ranked],
-    context_hash=context_hash,
+linked = ranker.observe_decision(
+    decision.decision_id,
+    outcome=1,
+    timestamp=123500,
 )
 ```
 
-Persist the decision row in an append-only event log. When reward/outcome is
-available, join it back by event ID or context/action fields before OPE.
+The decision ID prevents an outcome from being attached to the wrong
+recommendation. Duplicate outcomes and timestamps earlier than the decision
+are rejected.
 
-## Observe Outcomes
+If a request does not need an immutable decision record, the ordinary update
+is:
 
 ```python
 ranker.observe(
-    learner_id=learner_id,
-    ts=123500,
-    item_id=ranked[0].item_id,
-    concept_id=concept_goal,
-    correct=1,
+    user_id="user-42",
+    item_id="step-02",
+    outcome=1,
+    timestamp=123500,
 )
 ```
 
-For SAINT+ backbones, the timestamp is forwarded into the live tracer state so
-elapsed-time and lag-time features keep working after offline fit.
+## Candidate safety
 
-## Sketch Mode
-
-For large catalogs, attach a sketch candidate generator and let Orchid shrink
-the candidate set before final adaptive reranking.
+Candidate eligibility belongs outside the ranker. Apply hard rules before
+calling Orchid:
 
 ```python
-from orchid_ranker import ExactEmbeddingIndex, SketchCandidateGenerator
+eligible = [
+    item
+    for item in catalog
+    if item.available and item.allowed_for(user)
+]
 
-index = ExactEmbeddingIndex()
-index.add("frac-01", [0.9, 0.1])
-index.add("ratio-01", [0.1, 0.9])
-
-ranker.attach_sketch_generator(SketchCandidateGenerator(ann_index=index))
-ranked = ranker.recommend(
-    learner_id,
-    mode="sketch",
-    concept_goal="fractions",
-    item_query_vec=[1.0, 0.0],
-    top_k=5,
-)
+ranked = ranker.recommend(user.id, [item.id for item in eligible])
 ```
 
-## Production Loop
+Do not expect a statistical ranking score to enforce legal, safety, inventory,
+or access-control rules.
 
-1. Fit offline with chronological data.
-2. Serve recommendations from `AdaptiveRanker.recommend(...)`.
-3. Log candidates, scores, chosen action, propensity, policy version, and context hash.
-4. Call `observe(...)` after each outcome.
-5. Run `ope_report(...)`, bootstrap OPE, and rollout gates before enabling a new learned policy.
+## Exploration
 
-Continue to [Guide 3: Operate safely in production](03-operate-safely.md).
+Start with `exploration=0.0`. Introduce a small nonzero rate only after:
+
+- decisions are persisted successfully;
+- outcomes join back by decision ID;
+- candidate sets are complete and exact;
+- the fallback behavior has been reviewed; and
+- monitoring can detect coverage or outcome regressions.
+
+## Monitor
+
+```python
+report = ranker.shadow_report()
+print(report.to_dict())
+```
+
+Review decision volume, outcome coverage, candidate coverage, exploration,
+propensities, calibration, and drift. Offline estimates can reject a weak
+policy, but they do not replace a controlled live rollout.
+
+## Operational checklist
+
+- Preserve event order for every user.
+- Make decision writes idempotent.
+- Reject duplicate linked outcomes.
+- Version deployments and retain a known fallback.
+- Monitor missing and delayed outcomes.
+- Refit on chronological windows rather than random row splits.
+- Treat user identifiers and outcome histories as sensitive data.
+
+The same `AdaptiveRanker` object is used from first fit through production
+feedback; there is no separate serving model to configure.

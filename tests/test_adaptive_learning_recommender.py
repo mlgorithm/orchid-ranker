@@ -2,7 +2,8 @@ from __future__ import annotations
 
 import pandas as pd
 
-from orchid_ranker import AdaptiveLearningRecommender
+from orchid_ranker.adaptive_learning import AdaptiveLearningRecommender
+from orchid_ranker.learning_policy import ProgressionValuePolicy
 
 
 def _learning_events() -> pd.DataFrame:
@@ -53,7 +54,7 @@ def _small_rec(**kwargs) -> AdaptiveLearningRecommender:
     )
 
 
-def test_adaptive_learning_auto_uses_progression_policy_until_delayed_gain_is_explicit():
+def test_adaptive_learning_auto_uses_hybrid_policy_until_delayed_gain_is_explicit():
     rec = _small_rec().fit(
         _learning_events(),
         timestamp_col="timestamp",
@@ -64,10 +65,10 @@ def test_adaptive_learning_auto_uses_progression_policy_until_delayed_gain_is_ex
     ranked = rec.rank("ready", [10, 20, 30, 31], top_k=3)
     diagnostics = rec.diagnostics()
 
-    assert rec.policy_name_ == "progression"
+    assert rec.policy_name_ == "hybrid"
     assert len(ranked) == 3
-    assert all(0.0 <= item.p_correct <= 1.0 for item in ranked)
-    assert all(item.policy == "progression" for item in ranked)
+    assert all(0.0 <= item.outcome_probability <= 1.0 for item in ranked)
+    assert all(item.policy == "hybrid" for item in ranked)
     assert diagnostics["delayed_gain_priors"] is None
     assert diagnostics["delayed_gain_reward_model"] is None
 
@@ -108,9 +109,9 @@ def test_adaptive_learning_prerequisites_use_warm_started_mastery_state():
     blocked = rec.rank("needs-basics", [10, 20, 30], top_k=3)
     ready = rec.rank("ready", [20, 30], top_k=2)
 
-    assert rec.competence_for("needs-basics", "basics") == 0.0
+    assert 0.0 < rec.competence_for("needs-basics", "basics") < 0.3
     assert blocked
-    assert {item.concept_id for item in blocked} == {"basics"}
+    assert {item.category_id for item in blocked} == {"basics"}
     assert "basics" in rec.mastered_concepts("ready")
     assert ready
     assert all(item.prerequisites_met for item in ready)
@@ -131,7 +132,7 @@ def test_adaptive_learning_observe_updates_live_progression_state():
     assert length == 1
     assert before[0].recent_repetition == 0
     assert max(item.recent_repetition for item in after) >= 1
-    assert rec.competence_for("live-user", "fractions") == 1.0
+    assert 0.7 < rec.competence_for("live-user", "fractions") < 1.0
 
 
 def test_adaptive_learning_prerequisites_have_state_for_kt_value_policy():
@@ -148,3 +149,18 @@ def test_adaptive_learning_prerequisites_have_state_for_kt_value_policy():
 
     assert ready and ready[0].prerequisites_met
     assert blocked == []
+
+
+def test_progression_policy_configured_competence_blend_uses_kt_state_for_new_learners():
+    class _Tracer:
+        def predict_many(self, user_id, item_ids):
+            del user_id
+            return {item_id: {"a": 0.8, "b": 0.6}.get(item_id, 0.5) for item_id in item_ids}
+
+    policy = ProgressionValuePolicy(
+        _Tracer(),
+        concept_by_item={"a": "fractions", "b": "fractions"},
+        competence_blend=1.0,
+    )
+
+    assert policy.competence_for("new-learner", "fractions") == 0.7

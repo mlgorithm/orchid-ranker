@@ -24,12 +24,12 @@ def test_preprocess_ednet_with_question_metadata():
 
     processed = preprocess_ednet(raw, questions=questions, min_user_events=1, min_item_events=1)
 
-    assert list(processed.columns) == ["user_id", "item_id", "correct", "timestamp", "difficulty", "elapsed_time"]
+    assert list(processed.columns) == ["user_id", "item_id", "correct", "timestamp", "elapsed_time"]
     assert len(processed) == 9
     assert processed["user_id"].nunique() == 3
     assert processed["item_id"].nunique() == 3
     assert processed["correct"].tolist() == [1, 1, 0, 0, 1, 1, 1, 0, 1]
-    assert processed["difficulty"].between(0.0, 1.0).all()
+    assert "difficulty" not in processed.columns
 
 
 def test_preprocess_ednet_accepts_denormalized_is_correct(tmp_path):

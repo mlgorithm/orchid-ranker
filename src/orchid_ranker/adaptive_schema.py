@@ -1,37 +1,41 @@
-"""Typed adaptive-learning event and logged-decision contracts."""
+"""Typed event and logged-decision contracts for adaptive recommendation."""
 from __future__ import annotations
 
 import hashlib
 import json
 import os
-from dataclasses import asdict, dataclass
+import uuid
+from dataclasses import asdict, dataclass, field
 from typing import Any, Iterable, Mapping, Optional, Sequence, cast
 
 import numpy as np
 import pandas as pd
 
 __all__ = [
-    "LearnerEvent",
+    "DecisionOutcome",
     "LoggedDecision",
+    "UserEvent",
+    "decision_outcomes_to_frame",
     "hash_identifier",
-    "learner_events_to_frame",
     "logged_decisions_to_frame",
     "parse_candidate_list",
     "stable_context_hash",
-    "validate_learner_events",
+    "validate_decision_outcomes",
     "validate_logged_decisions",
+    "validate_user_events",
+    "user_events_to_frame",
 ]
 
 
 @dataclass(frozen=True)
-class LearnerEvent:
-    """One learner outcome event used by adaptive-learning training/serving."""
+class UserEvent:
+    """One outcome event used for adaptive training or live updates."""
 
-    learner_id: Any
-    ts: int
+    user_id: Any
+    timestamp: int
     item_id: Any
-    concept_id: Optional[Any]
-    correct: Optional[int]
+    outcome: Optional[int]
+    category_id: Optional[Any] = None
     latency_ms: Optional[int] = None
     session_id: Optional[str] = None
     item_text: Optional[str] = None
@@ -45,8 +49,8 @@ class LearnerEvent:
 class LoggedDecision:
     """One logged serving decision with candidate set and propensity."""
 
-    learner_id: Any
-    ts: int
+    user_id: Any
+    timestamp: int
     candidate_item_ids: Sequence[Any]
     chosen_item_id: Any
     propensity: float
@@ -54,17 +58,39 @@ class LoggedDecision:
     policy_version: str
     scores: Sequence[float]
     context_hash: str
+    decision_id: str = field(default_factory=lambda: uuid.uuid4().hex)
+    action_probabilities: Optional[Sequence[float]] = None
+    predicted_outcomes: Optional[Sequence[float]] = None
+    exploration_rate: float = 0.0
+    was_exploration: bool = False
     exploration_bonus: Optional[Sequence[float]] = None
+    policy_metadata: Optional[Mapping[str, Any]] = None
     reward: Optional[float] = None
 
     def to_dict(self) -> dict[str, Any]:
         return dict(asdict(self))
 
 
-def learner_events_to_frame(events: Iterable[LearnerEvent]) -> pd.DataFrame:
-    """Convert learner event dataclasses into a DataFrame and validate it."""
+@dataclass(frozen=True)
+class DecisionOutcome:
+    """One delayed outcome linked immutably to a serving decision."""
+
+    decision_id: str
+    user_id: Any
+    item_id: Any
+    outcome_timestamp: int
+    outcome: Optional[int] = None
+    reward: Optional[float] = None
+    category_id: Optional[Any] = None
+
+    def to_dict(self) -> dict[str, Any]:
+        return dict(asdict(self))
+
+
+def user_events_to_frame(events: Iterable[UserEvent]) -> pd.DataFrame:
+    """Convert user event dataclasses into a DataFrame and validate it."""
     frame = pd.DataFrame([event.to_dict() for event in events])
-    return validate_learner_events(frame)
+    return validate_user_events(frame)
 
 
 def logged_decisions_to_frame(decisions: Iterable[LoggedDecision]) -> pd.DataFrame:
@@ -72,6 +98,11 @@ def logged_decisions_to_frame(decisions: Iterable[LoggedDecision]) -> pd.DataFra
     frame = pd.DataFrame([decision.to_dict() for decision in decisions])
     reward_col = "reward" if "reward" in frame.columns and frame["reward"].notna().all() else None
     return validate_logged_decisions(frame, reward_col=reward_col)
+
+
+def decision_outcomes_to_frame(outcomes: Iterable[DecisionOutcome]) -> pd.DataFrame:
+    """Convert decision outcomes into a validated DataFrame."""
+    return validate_decision_outcomes(pd.DataFrame([outcome.to_dict() for outcome in outcomes]))
 
 
 def hash_identifier(value: Any, *, salt: Optional[str] = None) -> str:
@@ -90,41 +121,41 @@ def stable_context_hash(*parts: Any, salt: str = "orchid-context") -> str:
     return hash_identifier(payload, salt=salt)
 
 
-def validate_learner_events(
+def validate_user_events(
     events: pd.DataFrame,
     *,
-    learner_col: str = "learner_id",
-    ts_col: str = "ts",
+    user_col: str = "user_id",
+    timestamp_col: str = "timestamp",
     item_col: str = "item_id",
-    correct_col: str = "correct",
+    outcome_col: str = "outcome",
     require_timestamp: bool = True,
 ) -> pd.DataFrame:
-    """Validate adaptive learner events and return a defensive copy."""
-    required = {learner_col, item_col, correct_col}
+    """Validate adaptive user events and return a defensive copy."""
+    required = {user_col, item_col, outcome_col}
     if require_timestamp:
-        required.add(ts_col)
+        required.add(timestamp_col)
     _require_columns(events, *sorted(required), frame_name="events")
     if events.empty:
         raise ValueError("events DataFrame is empty")
 
     work = events.copy()
     if require_timestamp:
-        ts = _numeric(work[ts_col], ts_col)
-        if np.any(ts < 0):
-            raise ValueError(f"{ts_col} must be non-negative")
-    labels = work[correct_col].dropna()
+        timestamps = _numeric(work[timestamp_col], timestamp_col)
+        if np.any(timestamps < 0):
+            raise ValueError(f"{timestamp_col} must be non-negative")
+    labels = work[outcome_col].dropna()
     if not labels.empty:
         values = pd.to_numeric(labels, errors="raise").to_numpy(dtype=float)
         if np.any((values < 0.0) | (values > 1.0)):
-            raise ValueError(f"{correct_col} values must be in [0, 1] or missing")
+            raise ValueError(f"{outcome_col} values must be in [0, 1] or missing")
     return work
 
 
 def validate_logged_decisions(
     decisions: pd.DataFrame,
     *,
-    learner_col: str = "learner_id",
-    ts_col: str = "ts",
+    user_col: str = "user_id",
+    timestamp_col: str = "timestamp",
     candidate_col: str = "candidate_item_ids",
     chosen_col: str = "chosen_item_id",
     propensity_col: str = "propensity",
@@ -141,8 +172,8 @@ def validate_logged_decisions(
     supplied, rewards must be finite.
     """
     required = [
-        learner_col,
-        ts_col,
+        user_col,
+        timestamp_col,
         candidate_col,
         chosen_col,
         propensity_col,
@@ -158,6 +189,12 @@ def validate_logged_decisions(
         raise ValueError("decisions DataFrame is empty")
 
     work = decisions.copy()
+    if "decision_id" in work.columns:
+        identifiers = work["decision_id"].astype(str)
+        if (identifiers.str.len() == 0).any():
+            raise ValueError("decision_id must be non-empty")
+        if identifiers.duplicated().any():
+            raise ValueError("decision_id must be unique")
     propensities = _numeric(work[propensity_col], propensity_col)
     if np.any((propensities <= 0.0) | (propensities > 1.0)):
         raise ValueError(f"{propensity_col} values must be in (0, 1]")
@@ -174,8 +211,54 @@ def validate_logged_decisions(
         scores = _parse_float_list(row[scores_col])
         if len(scores) != len(candidates):
             raise ValueError(f"{scores_col} length must match {candidate_col} at row {row_id}")
+        if "action_probabilities" in work.columns and not _is_missing_scalar(row["action_probabilities"]):
+            probabilities = _parse_float_list(row["action_probabilities"])
+            if len(probabilities) != len(candidates):
+                raise ValueError(f"action_probabilities length must match {candidate_col} at row {row_id}")
+            if any(value < 0.0 or value > 1.0 for value in probabilities):
+                raise ValueError(f"action_probabilities values must be in [0, 1] at row {row_id}")
+            if not np.isclose(sum(probabilities), 1.0, atol=1e-8):
+                raise ValueError(f"action_probabilities must sum to 1 at row {row_id}")
+            chosen_probability = probabilities[candidates.index(chosen)]
+            if not np.isclose(chosen_probability, float(row[propensity_col]), atol=1e-8):
+                raise ValueError(f"{propensity_col} must equal the chosen action probability at row {row_id}")
+        if "predicted_outcomes" in work.columns and not _is_missing_scalar(row["predicted_outcomes"]):
+            predictions = _parse_float_list(row["predicted_outcomes"])
+            if len(predictions) != len(candidates):
+                raise ValueError(f"predicted_outcomes length must match {candidate_col} at row {row_id}")
+            if any(value < 0.0 or value > 1.0 for value in predictions):
+                raise ValueError(f"predicted_outcomes values must be in [0, 1] at row {row_id}")
+        if "exploration_rate" in work.columns and not _is_missing_scalar(row["exploration_rate"]):
+            exploration_rate = float(row["exploration_rate"])
+            if not 0.0 <= exploration_rate <= 1.0:
+                raise ValueError(f"exploration_rate must be in [0, 1] at row {row_id}")
         if not str(row[context_hash_col]):
             raise ValueError(f"{context_hash_col} must be non-empty at row {row_id}")
+    return work
+
+
+def validate_decision_outcomes(outcomes: pd.DataFrame) -> pd.DataFrame:
+    """Validate delayed outcomes linked to immutable decision IDs."""
+    required = ["decision_id", "user_id", "item_id", "outcome_timestamp", "outcome", "reward"]
+    _require_columns(outcomes, *required, frame_name="outcomes")
+    if outcomes.empty:
+        raise ValueError("outcomes DataFrame is empty")
+    work = outcomes.copy()
+    identifiers = work["decision_id"].astype(str)
+    if (identifiers.str.len() == 0).any() or identifiers.duplicated().any():
+        raise ValueError("outcome decision_id values must be non-empty and unique")
+    timestamps = _numeric(work["outcome_timestamp"], "outcome_timestamp")
+    if np.any(timestamps < 0):
+        raise ValueError("outcome_timestamp must be non-negative")
+    for column in ("outcome", "reward"):
+        present = work[column].dropna()
+        if present.empty:
+            continue
+        values = _numeric(present, column)
+        if column == "outcome" and np.any((values < 0.0) | (values > 1.0)):
+            raise ValueError("outcome values must be in [0, 1] or missing")
+    if work[["outcome", "reward"]].isna().all(axis=1).any():
+        raise ValueError("each decision outcome requires outcome or reward")
     return work
 
 
@@ -204,6 +287,12 @@ def _parse_float_list(value: Any) -> list[float]:
     if not np.all(np.isfinite(values)):
         raise ValueError("score list contains non-finite values")
     return values
+
+
+def _is_missing_scalar(value: Any) -> bool:
+    if value is None:
+        return True
+    return bool(isinstance(value, float) and np.isnan(value))
 
 
 def _require_columns(frame: pd.DataFrame, *columns: str, frame_name: str) -> None:

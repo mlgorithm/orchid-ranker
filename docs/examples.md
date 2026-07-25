@@ -1,157 +1,73 @@
-# Use-Case Examples
+# Reference pilots
 
-These examples show where Orchid Ranker fits when the product question is
-"what should this learner work on next?" The full runnable script is
-[`examples/adaptive_learning_use_cases.py`](https://github.com/mlgorithm/orchid-ranker/blob/main/examples/adaptive_learning_use_cases.py).
+These are compact, product-shaped templates—not extra Orchid models. Each one
+uses the same `AdaptiveRanker` loop and makes the application responsible for
+hard eligibility rules.
 
-Run it from the repository root:
+Run all three:
 
 ```bash
-python examples/adaptive_learning_use_cases.py
+python examples/adaptive_recommender_use_cases.py
 ```
 
-The cookbook uses only the torch-free core APIs. Install
-`orchid-ranker[adaptive]` when you want `AdaptiveLearningEngine` to learn
-knowledge-tracing state from historical learner outcomes.
+Or export the completed decision records in validation-ready JSON Lines:
 
-## Compliance Training
+```bash
+python examples/adaptive_recommender_use_cases.py \
+  --output-dir artifacts/reference-pilots
+```
 
-Use Orchid when employees should move through a certification path in a valid
-order. The prerequisite graph prevents the service from recommending
-incident-response material before policy basics and phishing response are
-complete.
+The supplied histories and exported records are simulated integration examples.
+They demonstrate the schema and logging workflow; they are not evidence of
+product improvement. Validate only with completed decisions from a real pilot.
+The runnable script uses a deliberately small training budget so it finishes
+quickly; a real pilot can begin with `AdaptiveRanker()` and its own history.
+
+## B2B onboarding
+
+The project ranks the next eligible activation step: connect data, create a
+project, or invite a teammate. Its outcome is completion of the recommended
+step within 24 hours.
+
+The application filters completed steps and enforces prompt-frequency limits
+before passing candidates to Orchid. A static checklist is the natural control
+for the first live experiment.
+
+## Compliance training
+
+The project ranks modules that an employee is eligible to take. Its outcome is
+passing the recommended module on the next attempt.
+
+Prerequisites, certification rules, legal requirements, and role restrictions
+stay in the application’s candidate filter. Orchid only orders the already
+eligible modules.
+
+## Content discovery
+
+The project ranks eligible help or educational articles. Its outcome is reading
+the recommended article to completion within 24 hours—not merely clicking it.
+
+Locale, subscription, availability, and previously seen content are filtered
+before ranking. This makes the adaptive objective align with useful discovery
+instead of empty engagement.
+
+## Move a pilot to real data
+
+1. Replace the simulated history with chronological completed outcomes.
+2. Keep the domain’s eligibility filter in the application.
+3. Persist `recommend_and_log` decisions before responding.
+4. Link outcomes through `observe_decision`.
+5. Export completed logs as JSON Lines and follow [Validate a rollout](benchmarks/credibility.md).
+
+Each pilot has the same public shape:
 
 ```python
-from orchid_ranker import DependencyGraph, ProgressionRecommender
-
-graph = DependencyGraph([
-    ("policy-basics", "secure-passwords"),
-    ("policy-basics", "data-handling"),
-    ("secure-passwords", "phishing-response"),
-    ("data-handling", "incident-reporting"),
-    ("phishing-response", "incident-reporting"),
-])
-difficulty = {
-    "policy-basics": 0.10,
-    "secure-passwords": 0.25,
-    "data-handling": 0.35,
-    "phishing-response": 0.45,
-    "incident-reporting": 0.70,
-}
-
-recommender = ProgressionRecommender(graph, difficulty_map=difficulty)
-next_modules = recommender.recommend({"policy-basics", "secure-passwords"}, n=3)
+ranker = AdaptiveRanker().fit(history)
+ranked, decision = ranker.recommend_and_log(
+    user_id=user_id,
+    candidate_item_ids=eligible_items,
+    timestamp=timestamp,
+    exploration=0.05,
+)
+ranker.observe_decision(decision.decision_id, outcome=outcome, timestamp=observed_at)
 ```
-
-Use this pattern for compliance, professional certification, onboarding
-checklists, and other structured training paths.
-
-## Language-Learning Review
-
-Use Orchid when the next item is a review, not a new lesson. The FSRS-style
-scheduler ranks cards by forgetting urgency and updates memory state after a
-review grade.
-
-```python
-from datetime import datetime, timedelta, timezone
-
-from orchid_ranker import FSRSReviewState, FSRSScheduler
-
-now = datetime.now(timezone.utc)
-scheduler = FSRSScheduler(request_retention=0.90)
-states = {
-    "bonjour": FSRSReviewState(
-        stability=2.0,
-        difficulty=3.5,
-        due_at=now - timedelta(hours=6),
-        last_review_at=now - timedelta(days=4),
-        repetitions=3,
-    ),
-    "se souvenir": FSRSReviewState(
-        stability=1.2,
-        difficulty=7.0,
-        due_at=now - timedelta(days=1),
-        last_review_at=now - timedelta(days=6),
-        repetitions=1,
-        lapses=1,
-    ),
-}
-
-due_cards = scheduler.recommend_reviews(states, now=now, top_k=2)
-updated_state = scheduler.review(states[due_cards[0].item_id], grade=3, now=now)
-```
-
-Use this pattern for vocabulary apps, exam prep, medical flashcards, and any
-product where retention matters.
-
-## Rehabilitation Progression
-
-Use Orchid when a successful recommendation should be a safe stretch, not the
-easiest task. `expected_progression_reward` scores candidates from predicted
-success, difficulty, competence, repetition, and stretch fit.
-
-```python
-from orchid_ranker.progression_reward import expected_progression_reward
-
-candidates = {
-    "range-of-motion-review": {"p_correct": 0.95, "difficulty": 0.20, "competence": 0.55},
-    "supported-step-up": {"p_correct": 0.72, "difficulty": 0.64, "competence": 0.55},
-    "unassisted-balance-hop": {"p_correct": 0.26, "difficulty": 0.90, "competence": 0.55},
-}
-
-ranked = sorted(
-    candidates,
-    key=lambda item_id: expected_progression_reward(**candidates[item_id]).expected_reward,
-    reverse=True,
-)
-```
-
-Use this pattern for rehabilitation exercises, fitness progression,
-instrument practice, and other skill-building workflows where "too easy" and
-"too hard" are both bad recommendations.
-
-## Onboarding Rollout Gate
-
-Use Orchid before a new adaptive policy reaches users. Offline policy
-evaluation estimates whether a proposed policy is better than a reviewed
-baseline from logged randomized decisions.
-
-```python
-from orchid_ranker.ope import (
-    compare_logged_policies,
-    deterministic_policy_probabilities,
-    evaluate_rollout_gate,
-)
-
-events["target_probability"] = deterministic_policy_probabilities(
-    events["action"].tolist(),
-    events["target_action"].tolist(),
-)
-events["baseline_probability"] = deterministic_policy_probabilities(
-    events["action"].tolist(),
-    events["baseline_action"].tolist(),
-)
-
-report = compare_logged_policies(
-    events,
-    reward_col="progression_reward",
-    propensity_col="logging_probability",
-    target_probability_col="target_probability",
-    baseline_probability_col="baseline_probability",
-)
-gate = evaluate_rollout_gate(report, min_effect=0.05)
-```
-
-Use this pattern for employee onboarding, certification products, adaptive
-tutoring, or any learner-facing system where a fallback policy must remain
-available until the evidence is good enough.
-
-## Which Example Should I Start With?
-
-| Situation | Start with |
-|-----------|------------|
-| You have prerequisites and a structured path | Compliance training |
-| You need to review old material before it is forgotten | Language-learning review |
-| You need a safe stretch-zone recommendation | Rehabilitation progression |
-| You need evidence before serving a new policy | Onboarding rollout gate |
-| You have historical learner outcomes and want live updates | [Quickstart](quickstart.md) |

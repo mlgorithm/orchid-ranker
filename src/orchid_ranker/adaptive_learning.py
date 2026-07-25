@@ -16,6 +16,7 @@ from .delayed_gain import DelayedGainRewardModel, fit_delayed_gain_reward_model
 from .kt_benchmark import KTHoldoutSplit
 from .learning_policy import (
     DelayedGainValuePolicy,
+    HybridAdaptivePolicy,
     KTValuePolicy,
     ProgressionValuePolicy,
     SupportConstrainedDelayedGainPolicy,
@@ -28,38 +29,6 @@ __all__ = [
     "AdaptiveLearningRecommendation",
     "AdaptiveLearningRecommender",
 ]
-
-
-class _Unset:
-    """Sentinel for distinguishing "argument omitted" from an explicit ``None``."""
-
-
-_UNSET: Any = _Unset()
-
-
-def _resolve_alias(primary_name: str, primary: Any, alias_name: str, alias: Any) -> Any:
-    """Resolve a positional argument that also accepts a backward-compatible alias.
-
-    Exactly one of ``primary``/``alias`` must be supplied (i.e. not ``_UNSET``).
-    Returns the supplied value. Raises ``TypeError`` if both or neither is given.
-    """
-    primary_given = primary is not _UNSET
-    alias_given = alias is not _UNSET
-    if primary_given and alias_given:
-        raise TypeError(f"Got both {primary_name!r} and its alias {alias_name!r}; pass only one")
-    if primary_given:
-        return primary
-    if alias_given:
-        return alias
-    raise TypeError(f"Missing required argument {primary_name!r} (or alias {alias_name!r})")
-
-
-def _apply_config_alias(overrides: Dict[str, Any], primary: str, alias: str) -> None:
-    """Translate a config-kwarg ``alias`` into ``primary`` in-place before validation."""
-    if alias in overrides:
-        if primary in overrides:
-            raise TypeError(f"Got both {primary!r} and its alias {alias!r}; pass only one")
-        overrides[primary] = overrides.pop(alias)
 
 
 @dataclass(frozen=True)
@@ -83,6 +52,17 @@ class AdaptiveLearningConfig:
     reward_model_example_weighting: str = "support_inverse"
     reward_model_cross_fit_folds: int = 2
     reward_model_max_sample_weight: float = 20.0
+    progression_competence_blend: float = 0.35
+    hybrid_progression_weight: float = 0.45
+    hybrid_item_prior_weight: float = 0.25
+    hybrid_concept_prior_weight: float = 0.10
+    hybrid_kt_weight: float = 0.15
+    hybrid_support_weight: float = 0.05
+    hybrid_unsupported_penalty_weight: float = 0.05
+    hybrid_prior_smoothing: float = 8.0
+    hybrid_concept_smoothing: float = 20.0
+    hybrid_min_item_support: float = 20.0
+    hybrid_min_concept_support: float = 100.0
     mastery_threshold: float = 0.80
     enforce_prerequisites: bool = True
     allow_prerequisite_fallback: bool = False
@@ -92,14 +72,14 @@ class AdaptiveLearningConfig:
 
 @dataclass(frozen=True)
 class AdaptiveLearningRecommendation:
-    """Normalized recommendation from the adaptive-learning policy stack."""
+    """Normalized recommendation returned by :class:`AdaptiveRanker`."""
 
     item_id: Any
     score: float
-    p_correct: float
+    outcome_probability: float
     policy: str
     difficulty: Optional[float] = None
-    concept_id: Optional[Any] = None
+    category_id: Optional[Any] = None
     competence: Optional[float] = None
     expected_reward: Optional[float] = None
     stretch_fit: Optional[float] = None
@@ -121,7 +101,8 @@ class AdaptiveLearningRecommendation:
 class AdaptiveLearningRecommender:
     """Adaptive-learning recommender with a production-oriented default stack.
 
-    ``policy="auto"`` resolves to ``ProgressionValuePolicy``. Delayed-gain and
+    ``policy="auto"`` resolves to ``HybridAdaptivePolicy``: empirical priors,
+    KT state, support confidence, and progression reward. Delayed-gain and
     support-constrained delayed-gain policies are available as explicit opt-ins
     because they require stronger reward-model and logged-support assumptions.
 
@@ -130,9 +111,6 @@ class AdaptiveLearningRecommender:
     """
 
     def __init__(self, config: Optional[AdaptiveLearningConfig] = None, **overrides: Any) -> None:
-        # Backward-compatible alias: ``kt_backbone`` (the AdaptiveRanker spelling)
-        # maps to ``tracer_model``. Resolve before strict field validation.
-        _apply_config_alias(overrides, "tracer_model", "kt_backbone")
         valid = {field.name for field in fields(AdaptiveLearningConfig)}
         unknown = sorted(set(overrides) - valid)
         if unknown:
@@ -150,6 +128,9 @@ class AdaptiveLearningRecommender:
         self.prerequisite_by_concept_: Dict[Any, set[Any]] = {}
         self.item_support_: Dict[Any, float] = {}
         self.concept_support_: Dict[Any, float] = {}
+        self.item_correct_: Dict[Any, float] = {}
+        self.concept_correct_: Dict[Any, float] = {}
+        self.global_correct_: float = 0.5
         self.item_ids_: list[Any] = []
         self.user_ids_: list[Any] = []
         self._training_concept_col: Optional[str] = None
@@ -235,8 +216,20 @@ class AdaptiveLearningRecommender:
         self.item_support_ = {item: float(value) for item, value in work.groupby(item_col).size().items()}
         self.concept_support_ = {
             concept: float(value)
-            for concept, value in work.groupby(training_concept_col).size().items()
+            for concept, value in work.groupby(training_concept_col, dropna=False).size().items()
         }
+        labels = (work[correct_col].astype(float) >= self.config.correct_threshold).astype(float)
+        label_work = work[[item_col, training_concept_col]].copy()
+        label_work["__orchid_label__"] = labels
+        self.item_correct_ = {
+            item: float(value)
+            for item, value in label_work.groupby(item_col)["__orchid_label__"].sum().items()
+        }
+        self.concept_correct_ = {
+            concept: float(value)
+            for concept, value in label_work.groupby(training_concept_col, dropna=False)["__orchid_label__"].sum().items()
+        }
+        self.global_correct_ = float(labels.mean()) if len(labels) else 0.5
         self.progression_config_ = ProgressionRewardConfig(target_correct=self.config.target_correct)
         has_concept_signal = concept_col is not None or concept_by_item is not None
         resolved_policy = self._resolve_policy(has_concept_signal=has_concept_signal)
@@ -292,6 +285,7 @@ class AdaptiveLearningRecommender:
                 concept_by_item=self.concept_by_item_,
                 config=self.progression_config_,
                 correct_threshold=self.config.correct_threshold,
+                competence_blend=self.config.progression_competence_blend,
             ).seed_history(
                 work,
                 user_col=user_col,
@@ -321,20 +315,14 @@ class AdaptiveLearningRecommender:
 
     def rank(
         self,
-        user_id: Any = _UNSET,
-        candidate_item_ids: Optional[Sequence[Any]] = None,
+        user_id: Any,
+        candidate_item_ids: Sequence[Any],
         *,
-        learner_id: Any = _UNSET,
         top_k: int = 5,
         enforce_prerequisites: Optional[bool] = None,
         allow_prerequisite_fallback: Optional[bool] = None,
     ) -> list[AdaptiveLearningRecommendation]:
-        """Rank candidate items for the next adaptive-learning action.
-
-        ``user_id`` is the canonical name; ``learner_id`` is accepted as a
-        backward-compatible alias (the AdaptiveRanker spelling).
-        """
-        user_id = _resolve_alias("user_id", user_id, "learner_id", learner_id)
+        """Rank candidate items for the next adaptive action."""
         self._require_fitted()
         if top_k <= 0 or not candidate_item_ids:
             return []
@@ -359,23 +347,15 @@ class AdaptiveLearningRecommender:
         raw = self.policy_.rank(user_id, ranked_candidates, top_k=min(int(top_k), len(ranked_candidates)))
         return [self._normalize_recommendation(user_id, rec) for rec in raw]
 
-    recommend = rank
-
     def observe(
         self,
-        user_id: Any = _UNSET,
-        item_id: Any = None,
-        correct: Any = None,
+        user_id: Any,
+        item_id: Any,
+        correct: Any,
         *,
-        learner_id: Any = _UNSET,
         timestamp: Optional[Any] = None,
     ) -> Any:
-        """Observe one live outcome and update learner state.
-
-        ``user_id`` is the canonical name; ``learner_id`` is accepted as a
-        backward-compatible alias (the AdaptiveRanker spelling).
-        """
-        user_id = _resolve_alias("user_id", user_id, "learner_id", learner_id)
+        """Observe one live outcome and update user state."""
         self._require_fitted()
         if item_id not in set(self.item_ids_):
             raise KeyError(f"Unknown item_id={item_id!r}")
@@ -409,6 +389,7 @@ class AdaptiveLearningRecommender:
         self._require_fitted()
         return {
             "tracer_model": self.config.tracer_model,
+            "requested_policy": self.config.policy,
             "policy": self.policy_name_,
             "n_users": len(self.user_ids_),
             "n_items": len(self.item_ids_),
@@ -572,10 +553,12 @@ class AdaptiveLearningRecommender:
 
     def _resolve_policy(self, *, has_concept_signal: bool) -> str:
         policy = self.config.policy.lower()
-        valid = {"auto", "kt_value", "progression", "delayed_gain", "support_delayed_gain"}
+        valid = {"auto", "kt_value", "hybrid", "progression", "canary_progression", "delayed_gain", "support_delayed_gain"}
         if policy not in valid:
             raise ValueError(f"policy must be one of {sorted(valid)}")
         if policy == "auto":
+            return "hybrid"
+        if policy == "canary_progression":
             return "progression"
         if policy in {"delayed_gain", "support_delayed_gain"} and not has_concept_signal:
             raise ValueError(f"policy={policy!r} requires concept_col or concept_by_item")
@@ -596,6 +579,7 @@ class AdaptiveLearningRecommender:
                 concept_support=self.concept_support_,
                 config=self.progression_config_,
                 correct_threshold=self.config.correct_threshold,
+                competence_blend=self.config.progression_competence_blend,
             )
         if policy == "delayed_gain":
             priors = self.delayed_gain_priors_ or {}
@@ -608,6 +592,31 @@ class AdaptiveLearningRecommender:
                 global_gain_prior=float(priors.get("global_gain_prior", 0.5)),
                 config=self.progression_config_,
                 correct_threshold=self.config.correct_threshold,
+                competence_blend=self.config.progression_competence_blend,
+            )
+        if policy == "hybrid":
+            return HybridAdaptivePolicy(
+                self.tracer_,
+                difficulty_by_item=self.difficulty_by_item_,
+                concept_by_item=self.concept_by_item_,
+                item_correct=self.item_correct_,
+                item_count=self.item_support_,
+                concept_correct=self.concept_correct_,
+                concept_count=self.concept_support_,
+                global_correct=self.global_correct_,
+                prior_smoothing=self.config.hybrid_prior_smoothing,
+                concept_smoothing=self.config.hybrid_concept_smoothing,
+                min_item_support=self.config.hybrid_min_item_support,
+                min_concept_support=self.config.hybrid_min_concept_support,
+                config=self.progression_config_,
+                correct_threshold=self.config.correct_threshold,
+                competence_blend=self.config.progression_competence_blend,
+                progression_weight=self.config.hybrid_progression_weight,
+                item_prior_weight=self.config.hybrid_item_prior_weight,
+                concept_prior_weight=self.config.hybrid_concept_prior_weight,
+                kt_weight=self.config.hybrid_kt_weight,
+                support_weight=self.config.hybrid_support_weight,
+                unsupported_penalty_weight=self.config.hybrid_unsupported_penalty_weight,
             )
         if policy == "progression":
             return ProgressionValuePolicy(
@@ -616,6 +625,7 @@ class AdaptiveLearningRecommender:
                 concept_by_item=self.concept_by_item_,
                 config=self.progression_config_,
                 correct_threshold=self.config.correct_threshold,
+                competence_blend=self.config.progression_competence_blend,
             )
         return KTValuePolicy(
             self.tracer_,
@@ -649,10 +659,10 @@ class AdaptiveLearningRecommender:
         return AdaptiveLearningRecommendation(
             item_id=item_id,
             score=float(rec.score),
-            p_correct=float(rec.p_correct),
+            outcome_probability=float(rec.p_correct),
             policy=str(self.policy_name_),
             difficulty=_optional_float(getattr(rec, "difficulty", self.difficulty_by_item_.get(item_id))),
-            concept_id=concept,
+            category_id=concept,
             competence=_optional_float(getattr(rec, "competence", None)),
             expected_reward=_optional_float(getattr(rec, "expected_reward", None)),
             stretch_fit=_optional_float(getattr(rec, "stretch_fit", getattr(reward, "stretch_fit", None))),
@@ -680,6 +690,22 @@ def _validate_config(config: AdaptiveLearningConfig) -> None:
         raise ValueError("correct_threshold must be in [0, 1]")
     if not 0.0 <= config.mastery_threshold <= 1.0:
         raise ValueError("mastery_threshold must be in [0, 1]")
+    if not 0.0 <= config.progression_competence_blend <= 1.0:
+        raise ValueError("progression_competence_blend must be in [0, 1]")
+    hybrid_weights = [
+        config.hybrid_progression_weight,
+        config.hybrid_item_prior_weight,
+        config.hybrid_concept_prior_weight,
+        config.hybrid_kt_weight,
+        config.hybrid_support_weight,
+        config.hybrid_unsupported_penalty_weight,
+    ]
+    if min(hybrid_weights) < 0.0:
+        raise ValueError("hybrid policy weights must be non-negative")
+    if config.hybrid_prior_smoothing < 0.0 or config.hybrid_concept_smoothing < 0.0:
+        raise ValueError("hybrid smoothing values must be non-negative")
+    if config.hybrid_min_item_support <= 0.0 or config.hybrid_min_concept_support <= 0.0:
+        raise ValueError("hybrid support thresholds must be positive")
     if config.delayed_gain_window < 1:
         raise ValueError("delayed_gain_window must be >= 1")
 

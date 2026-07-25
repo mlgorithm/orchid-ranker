@@ -2,6 +2,62 @@
 
 ## Unreleased
 
+### Product consolidation
+
+- Reduced the package to one public product: `AdaptiveRanker`.
+- Removed compatibility aliases, education-specific public schema names,
+  standalone model APIs, agentic tooling, connectors, streaming, service CLI,
+  and deployment scaffolding.
+- The supported schema is now `user_id`, `item_id`, `outcome`, and `timestamp`.
+- A normal `pip install orchid-ranker` includes the full supported workflow.
+
+### Credible rollout evidence
+
+- Added one reproducible logged-policy validation command with chronological
+  splitting, real candidate sets and propensities, user-cluster uncertainty,
+  and an explicit inconclusive outcome when evidence is weak.
+- Replaced the obsolete aggregate benchmark entry point with this validation
+  workflow and clear claim boundaries.
+
+### Reference pilots
+
+- Added runnable B2B onboarding, compliance-training, and content-discovery
+  templates with eligibility filtering, decision logging, delayed outcomes, and
+  validation-ready JSON Lines exports.
+
+## 0.6.0 - 2026-07-03
+
+### Official Adaptive Canary
+
+- Added `OFFICIAL_ADAPTIVE_POLICY`, `CANARY_PROGRESSION_POLICY`, and
+  `ASSISTMENTS_SEQUENCE_PROGRESSION_PRESET` as public serving constants.
+- Added the `canary_progression` adaptive serving alias, resolving to the
+  progression policy while preserving diagnostics for the evidence-backed
+  ASSISTments sequence-context canary.
+- Added `evaluate_adaptive_serving_guardrail(...)` and
+  `AdaptiveServingGuardrailReport` to catch misconfigured canary serving before
+  recommendations are emitted.
+- Added a runnable production-style serving example:
+  `examples/official_adaptive_serving.py`.
+
+### Adaptive Benchmark Evidence
+
+- Added attempt-level ASSISTments preprocessing with preserved raw sequence
+  features.
+- Added sequence-context candidate reconstruction to adaptive-efficiency and
+  static-baseline benchmarks.
+- Added the `assistments_sequence_progression` benchmark canary preset.
+- Added full-data ASSISTments canary artifacts showing progression/progression
+  passes the configured support gate, while delayed-gain objectives remain
+  research-only.
+
+### Documentation
+
+- Added the adaptive canary benchmark page and linked it from the docs nav.
+- Updated README, quickstart, API reference, benchmark credibility notes, and
+  serving docs to describe the official adaptive policy, rollout guardrail, and
+  known limitations.
+
 ### Adaptive-First Cleanup
 
 - Removed the old generic catalog-recommendation API surface from public

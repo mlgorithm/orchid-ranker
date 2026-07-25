@@ -1,80 +1,115 @@
-# Quickstart Guide
+# Quickstart
 
-This walkthrough installs Orchid Ranker from PyPI and fits the
-adaptive-learning recommender path: learner state, difficulty-aware ranking,
-prerequisites, and live re-ranking after an outcome.
+Orchid has one workflow:
 
-## 1. Install
+1. Fit historical outcomes.
+2. Recommend from eligible candidates.
+3. Observe the result.
+
+## Install
 
 ```bash
-python -m venv .venv
-source .venv/bin/activate  # Windows: .venv\\Scripts\\activate
-pip install --upgrade pip
-pip install 'orchid-ranker[adaptive]'
+python -m pip install orchid-ranker
 ```
 
-The base `pip install orchid-ranker` package is for torch-free progression
-utilities. `AdaptiveLearningEngine` uses PyTorch-backed tracing, so install
-the adaptive extra for the primary workflow.
+## Prepare four columns
 
-## 2. Fit, Rank, Observe
+| Column | Meaning |
+|--------|---------|
+| `user_id` | The person, account, or agent receiving the item |
+| `item_id` | The exercise, step, task, or content identifier |
+| `outcome` | Binary result: `1` for success, `0` otherwise |
+| `timestamp` | A non-negative time or sequence number |
 
 ```python
 import pandas as pd
-from orchid_ranker import AdaptiveLearningEngine
 
-events = pd.DataFrame({
-    "user_id": [1, 1, 2, 2, 3, 3],
-    "item_id": [101, 201, 101, 202, 101, 201],
-    "correct": [1, 0, 1, 1, 0, 1],
-    "concept": ["number-sense", "fractions", "number-sense", "fractions", "number-sense", "fractions"],
-    "difficulty": [0.20, 0.45, 0.20, 0.50, 0.20, 0.45],
+history = pd.DataFrame({
+    "user_id":   ["a", "a", "a", "b", "b", "b", "c", "c", "c"],
+    "item_id":   [101, 102, 201, 101, 102, 201, 101, 102, 201],
+    "outcome":   [1,   1,   0,   1,   0,   0,   1,   1,   1],
+    "timestamp": [1,   2,   3,   1,   2,   3,   1,   2,   3],
 })
+```
 
-rec = AdaptiveLearningEngine(policy="auto", epochs=1).fit(
-    events,
-    correct_col="correct",
-    concept_col="concept",
-    item_difficulty_col="difficulty",
-    prerequisite_by_concept={"fractions": ["number-sense"]},
+Rows represent completed interactions with meaningful outcomes, not
+impressions. Timestamps must preserve each user's event order.
+
+## Fit, recommend, observe
+
+```python
+from orchid_ranker import AdaptiveRanker
+
+ranker = AdaptiveRanker().fit(history)
+
+ranked = ranker.recommend(
+    user_id="a",
+    candidate_item_ids=[101, 102, 201],
+    top_k=2,
 )
 
-ranked = rec.rank(user_id=1, candidate_item_ids=[101, 201, 202], top_k=2)
-rec.observe(user_id=1, item_id=ranked[0].item_id, correct=True)
-print(ranked)
+for recommendation in ranked:
+    print(
+        recommendation.item_id,
+        recommendation.score,
+        recommendation.outcome_probability,
+    )
+
+ranker.observe(
+    user_id="a",
+    item_id=ranked[0].item_id,
+    outcome=1,
+    timestamp=4,
+)
 ```
 
-See `examples/adaptive_learning_quickstart.py` for the full adaptive-learning
-script.
-See `examples/adaptive_learning_use_cases.py` for concrete compliance,
-language-review, rehabilitation, and rollout-gate examples.
-See `examples/scenario_selection.py` when you want Orchid to choose a workflow
-from product and data signals. See `examples/knowledge_tracing_quickstart.py`
-for predicted-correctness ranking from learner sequences,
-`examples/akt_quickstart.py` for difficulty-aware tracing, and
-`examples/kt_policy_quickstart.py` for KT-guided next-item ranking.
+The new outcome updates that user immediately. Call `recommend` again to get
+the adapted ranking.
 
-## 3. Evaluate Adaptive Policies
+Your application must construct the candidate set using its hard constraints.
+Pass only items that are available, safe, licensed, or otherwise eligible.
 
-```bash
-python examples/adaptive_learning_quickstart.py
+## Optional information
+
+If you already have a meaningful category or difficulty column, identify it
+while fitting:
+
+```python
+ranker.fit(
+    history,
+    category_col="skill_id",
+    difficulty_col="difficulty",
+)
 ```
 
-Adaptive-learning policy evaluation should use progression reward,
-calibration, chronological splits, and OPE from logged decisions. Start with
-`examples/offline_policy_evaluation_quickstart.py` and
-`docs/benchmarks/credibility.md`.
+These fields are optional. Do not invent them merely to use Orchid.
 
-## 4. Optional Extras
+## Production logging
 
-- Prometheus metrics: `orchid_ranker.start_metrics_server()`.
-- Agentic simulations: install `[agentic]` extra and use them as adaptive-learning test harnesses.
+When you need an immutable decision record:
 
-## Next Steps
+```python
+ranked, decision = ranker.recommend_and_log(
+    user_id="a",
+    candidate_item_ids=[101, 102, 201],
+    timestamp=5,
+    exploration=0.05,
+)
 
-- Browse `docs/overview.md` for module map.
-- Browse `docs/scenarios.md` for practical deployment recipes.
-- Browse `docs/examples.md` for domain examples that map APIs to product use cases.
-- Browse `docs/algorithm-roadmap.md` for planned KT and policy-learning algorithms.
-- Use `docs/guides/01-fit-offline.md` for batch usage.
-- Use `docs/guides/02-serve-streaming.md` when you need live learner-state adaptation.
+ranker.observe_decision(
+    decision.decision_id,
+    outcome=1,
+    timestamp=6,
+)
+```
+
+Persist the decision before returning the recommendation. See
+[Production serving](guides/02-serve-streaming.md) for the operational
+contract.
+
+## Common issues
+
+- No recommendations: make sure candidates appear in the fitted history.
+- An outcome is rejected: values must be binary `0` or `1`.
+- Results do not adapt: call `observe` after completed interactions.
+- Timestamp errors: use non-negative values in chronological order.

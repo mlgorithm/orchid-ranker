@@ -2,7 +2,7 @@
 """Preprocess ASSISTments raw files into Orchid's KT benchmark schema.
 
 Output schema:
-    user_id,item_id,correct,timestamp,difficulty[,skill_id,skill_name]
+    user_id,item_id,correct,timestamp[,skill_id,skill_name]
 
 Supported raw shapes:
     classic: ASSISTments 2009/2012-style single interaction CSV.
@@ -13,7 +13,7 @@ from __future__ import annotations
 
 import argparse
 from pathlib import Path
-from typing import Optional
+from typing import Any, Optional
 
 import numpy as np
 import pandas as pd
@@ -22,6 +22,24 @@ CLASSIC_USER_COLS = ("user_id", "user", "student_id")
 CLASSIC_ITEM_COLS = ("problem_id", "assistment_id", "item_id", "question_id")
 CLASSIC_CORRECT_COLS = ("correct", "first_response_correct", "score")
 CLASSIC_TIME_COLS = ("order_id", "problem_log_id", "timestamp", "start_time", "end_time")
+CLASSIC_ATTEMPT_COLS = ("order_id", "problem_log_id")
+CLASSIC_RAW_FEATURE_COLS = (
+    "assignment_id",
+    "sequence_id",
+    "position",
+    "teacher_id",
+    "school_id",
+    "template_id",
+    "attempt_count",
+    "ms_first_response",
+    "hint_count",
+    "hint_total",
+    "overlap_time",
+    "bottom_hint",
+    "opportunity",
+    "opportunity_original",
+    "answer_type",
+)
 
 
 def _first_existing(frame: pd.DataFrame, candidates: tuple[str, ...]) -> Optional[str]:
@@ -47,17 +65,13 @@ def _normalize_binary(series: pd.Series) -> pd.Series:
     return lowered.isin(truthy).astype(int)
 
 
-def _difficulty_from_correctness(frame: pd.DataFrame) -> pd.Series:
-    item_accuracy = frame.groupby("item_id")["correct"].mean()
-    difficulty = 1.0 - frame["item_id"].map(item_accuracy).astype(float)
-    return difficulty.clip(0.0, 1.0)
-
-
 def preprocess_classic(
     interactions: pd.DataFrame,
     *,
     min_user_events: int = 3,
     min_item_events: int = 2,
+    attempt_level: bool = False,
+    preserve_raw_features: bool = False,
 ) -> pd.DataFrame:
     user_col = _first_existing(interactions, CLASSIC_USER_COLS)
     item_col = _first_existing(interactions, CLASSIC_ITEM_COLS)
@@ -83,9 +97,18 @@ def preprocess_classic(
             "timestamp": interactions[time_col] if time_col is not None else np.arange(len(interactions)),
         }
     )
+    attempt_col = _first_existing(interactions, CLASSIC_ATTEMPT_COLS)
+    if attempt_col is not None and (attempt_level or preserve_raw_features):
+        out["attempt_id"] = interactions[attempt_col]
     for optional in ("skill_id", "skill_name"):
         if optional in interactions.columns:
             out[optional] = interactions[optional]
+    if preserve_raw_features:
+        for optional in CLASSIC_RAW_FEATURE_COLS:
+            if optional in interactions.columns and optional not in out.columns:
+                out[optional] = interactions[optional]
+    if attempt_level:
+        out = _collapse_attempt_rows(out)
 
     return _clean_and_filter(out, min_user_events=min_user_events, min_item_events=min_item_events)
 
@@ -147,12 +170,65 @@ def _clean_and_filter(
         out = out[out["item_id"].isin(item_counts[item_counts >= min_item_events].index)]
 
     out = out.sort_values(["user_id", "timestamp"], kind="mergesort").reset_index(drop=True)
-    out["difficulty"] = _difficulty_from_correctness(out)
-    columns = ["user_id", "item_id", "correct", "timestamp", "difficulty"]
-    for optional in ("skill_id", "skill_name", "node_code"):
+    columns = ["user_id", "item_id", "correct", "timestamp"]
+    for optional in (
+        "attempt_id",
+        "skill_id",
+        "skill_ids",
+        "skill_name",
+        "skill_names",
+        "node_code",
+        *CLASSIC_RAW_FEATURE_COLS,
+    ):
         if optional in out.columns:
             columns.append(optional)
     return out[columns]
+
+
+def _collapse_attempt_rows(frame: pd.DataFrame) -> pd.DataFrame:
+    key = ["attempt_id"] if "attempt_id" in frame.columns else ["user_id", "item_id", "timestamp", "correct"]
+    rows = []
+    feature_cols = [col for col in CLASSIC_RAW_FEATURE_COLS if col in frame.columns]
+    for _, group in frame.groupby(key, sort=False, dropna=False):
+        first = group.iloc[0]
+        row = {
+            "user_id": first["user_id"],
+            "item_id": first["item_id"],
+            "correct": first["correct"],
+            "timestamp": first["timestamp"],
+        }
+        if "attempt_id" in group.columns:
+            row["attempt_id"] = first["attempt_id"]
+        if "skill_id" in group.columns:
+            skills = _unique_join(group["skill_id"])
+            row["skill_ids"] = skills
+            row["skill_id"] = _first_notna(group["skill_id"])
+        if "skill_name" in group.columns:
+            names = _unique_join(group["skill_name"])
+            row["skill_names"] = names
+            row["skill_name"] = _first_notna(group["skill_name"])
+        for col in feature_cols:
+            row[col] = first[col]
+        rows.append(row)
+    return pd.DataFrame(rows)
+
+
+def _unique_join(values: pd.Series) -> str:
+    seen = []
+    for value in values:
+        if pd.isna(value):
+            continue
+        text = str(value)
+        if text not in seen:
+            seen.append(text)
+    return "|".join(seen)
+
+
+def _first_notna(values: pd.Series) -> Any:
+    for value in values:
+        if not pd.isna(value):
+            return value
+    return np.nan
 
 
 def preprocess_file(
@@ -164,6 +240,8 @@ def preprocess_file(
     max_rows: Optional[int] = None,
     min_user_events: int = 3,
     min_item_events: int = 2,
+    attempt_level: bool = False,
+    preserve_raw_features: bool = False,
 ) -> pd.DataFrame:
     interactions = _read_csv(interactions_path, max_rows=max_rows)
     skills = _read_csv(skills_path) if skills_path is not None else None
@@ -183,6 +261,8 @@ def preprocess_file(
             interactions,
             min_user_events=min_user_events,
             min_item_events=min_item_events,
+            attempt_level=attempt_level,
+            preserve_raw_features=preserve_raw_features,
         )
     else:
         raise ValueError("fmt must be 'auto', 'classic', or 'foundational'")
@@ -201,6 +281,8 @@ def parse_args(argv: Optional[list[str]] = None) -> argparse.Namespace:
     parser.add_argument("--max-rows", type=int, help="Optional row cap for smoke runs")
     parser.add_argument("--min-user-events", type=int, default=3)
     parser.add_argument("--min-item-events", type=int, default=2)
+    parser.add_argument("--attempt-level", action="store_true", help="Collapse multi-skill rows into one row per attempt")
+    parser.add_argument("--preserve-raw-features", action="store_true", help="Keep raw learner/context fields when available")
     return parser.parse_args(argv)
 
 
@@ -214,6 +296,8 @@ def main(argv: Optional[list[str]] = None) -> int:
         max_rows=args.max_rows,
         min_user_events=args.min_user_events,
         min_item_events=args.min_item_events,
+        attempt_level=args.attempt_level,
+        preserve_raw_features=args.preserve_raw_features,
     )
     print(
         f"Wrote {args.output} rows={len(processed)} "

@@ -1,14 +1,12 @@
 # Contributing to Orchid Ranker
 
-Orchid Ranker is an adaptive-learning and knowledge-tracing recommender
-library. Contributions should strengthen learner-state estimation, progression
-ranking, prerequisite-aware candidate selection, offline policy evaluation,
-safety, privacy, deployment, or documentation for those workflows.
+Orchid Ranker is an outcome-driven adaptive recommender. Contributions should
+strengthen its single fit, recommend, and observe workflow; production
+decision logging; evaluation; or documentation.
 
-Do not add generic recommender APIs, movie/music/feed benchmarks, broad model
-selection helpers, or package-root tuning/serialization abstractions. Those
-surfaces were intentionally removed so the library can be excellent at adaptive
-learning instead of broad but shallow recommendation.
+Do not add another package-root model, domain engine, policy selector, or
+tuning abstraction. Lower-level algorithms can support research and the
+implementation without becoming additional user-facing products.
 
 ## Development Setup
 
@@ -27,8 +25,7 @@ Run the local quality gate before a pull request:
 ```
 
 The quick mode checks lint, types, documentation readiness, publish readiness,
-and the core adaptive-learning smoke path. The full mode mirrors the important
-CI gates.
+and the core adaptive-recommender smoke path. The full mode mirrors CI.
 
 ## Required Quality Gates
 
@@ -43,19 +40,18 @@ python -m mkdocs build --strict
 python -m build
 ```
 
-CI also runs package install contracts, lower-bound dependency smoke tests, and
-wheel-content checks.
+CI runs the same lint, type, test, documentation, and package-build checks.
 
 ## Coding Standards
 
 The detailed standard lives in
 [docs/coding-standards.md](docs/coding-standards.md). The short version:
 
-- Keep public workflows adaptive-first: `AdaptiveRanker`,
-  `AdaptiveLearningEngine`, KT tracers, progression policies, OPE, guardrails,
-  semantic exercise cold start, connectors, and deployment utilities.
-- Keep optional heavy dependencies behind extras and compatibility checks. A
-  base install must still expose torch-free progression utilities.
+- Keep the package-root product API to `AdaptiveRanker`.
+- Use `user_id`, `item_id`, `outcome`, and `timestamp` in new public examples.
+- Keep lower-level algorithms in research or implementation modules.
+- Keep the standard install complete. `pip install orchid-ranker` must run the
+  supported workflow without an extra.
 - Use explicit, typed public APIs. Preserve `py.typed`, avoid hidden global
   state, and prefer deterministic tests with `random_state` or seeded fixtures.
 - Library code should use `logging`, not `print`. Examples and CLIs may print
@@ -67,26 +63,22 @@ The detailed standard lives in
 
 ## Vocabulary
 
-Use adaptive-learning language consistently:
+Use neutral adaptive-recommendation language consistently:
 
 | Prefer | Avoid in new public docs/API | Notes |
 |:--|:--|:--|
-| learner | generic customer/user when progress is the point | `user_id` remains the identifier column |
-| concept/category | skill when the domain is not education-specific | Existing compatibility aliases may still mention skill |
-| competence/proficiency | mastery as a new API name | Deprecated aliases are isolated in compatibility shims |
-| progression reward | click/rating objective | Orchid optimizes learning progress |
-| stretch fit | difficulty appropriateness | Old metric aliases are deprecated |
-| dependency graph | prerequisite graph class name in new APIs | Prerequisite prose is fine when describing content |
-| adaptive-learning recommender | generic recommender | This is the core positioning |
+| user | learner in a domain-neutral workflow | Use `user_id` |
+| outcome | correct in a domain-neutral workflow | Outcomes are binary `0` or `1` |
+| timestamp | `ts` | Use `timestamp` |
+| category | concept or skill outside education | Categories are optional |
+| adaptive recommender | model zoo or generic ranking toolkit | The feedback loop is the product |
 
-Deprecated names such as `StudentAgent`, `MasteryTracker`, and
-`CurriculumRecommender` should appear only in compatibility shims, migration
-notes, changelog history, or tests that assert deprecation behavior.
+Do not add deprecated names, compatibility shims, or parallel public APIs.
 
 ## Documentation Standards
 
 - Every public feature needs a runnable example, API reference entry, or guide.
-- User-facing docs should start from data shape, fit, rank, observe, evaluate,
+- User-facing docs should start from data shape, fit, recommend, observe,
   then operate safely.
 - Update `README.md`, `docs/README.md`, `docs/index.md`, and `mkdocs.yml` when
   adding a new user-facing guide.
@@ -96,7 +88,7 @@ notes, changelog history, or tests that assert deprecation behavior.
 
 ## Pull Request Checklist
 
-- The change fits the adaptive-learning / KT recommender scope.
+- The change strengthens the single adaptive-recommendation workflow.
 - Public names and docs follow the vocabulary table.
 - New behavior has focused tests.
 - Docs and examples were updated when public behavior changed.

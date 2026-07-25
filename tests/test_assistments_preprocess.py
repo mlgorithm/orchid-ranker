@@ -25,10 +25,39 @@ def test_preprocess_classic_outputs_kt_schema():
 
     processed = preprocess_classic(raw, min_user_events=2, min_item_events=2)
 
-    assert list(processed.columns) == ["user_id", "item_id", "correct", "timestamp", "difficulty", "skill_id"]
+    assert list(processed.columns) == ["user_id", "item_id", "correct", "timestamp", "skill_id"]
     assert processed["user_id"].nunique() == 2
     assert processed["item_id"].nunique() == 2
-    assert processed["difficulty"].between(0.0, 1.0).all()
+    assert "difficulty" not in processed.columns
+
+
+def test_preprocess_classic_attempt_level_collapses_multiskill_rows():
+    raw = pd.DataFrame(
+        {
+            "order_id": [1, 1, 2, 2, 3, 3],
+            "user_id": ["u1", "u1", "u1", "u1", "u2", "u2"],
+            "problem_id": ["p1", "p1", "p2", "p2", "p1", "p1"],
+            "correct": [1, 1, 0, 0, 1, 1],
+            "skill_id": ["s1", "s2", "s1", "s3", "s1", "s2"],
+            "skill_name": ["A", "B", "A", "C", "A", "B"],
+            "attempt_count": [1, 1, 2, 2, 1, 1],
+            "hint_count": [0, 0, 1, 1, 0, 0],
+        }
+    )
+
+    processed = preprocess_classic(
+        raw,
+        min_user_events=1,
+        min_item_events=1,
+        attempt_level=True,
+        preserve_raw_features=True,
+    )
+
+    assert len(processed) == 3
+    assert "attempt_id" in processed.columns
+    assert "skill_ids" in processed.columns
+    assert "attempt_count" in processed.columns
+    assert processed.loc[processed["attempt_id"] == 1, "skill_ids"].iloc[0] == "s1|s2"
 
 
 def test_preprocess_foundational_merges_skills():

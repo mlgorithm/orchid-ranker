@@ -8,12 +8,12 @@ from typing import Any, Dict, Optional, Sequence
 import numpy as np
 import pandas as pd
 
-from .evaluation import expected_calibration_error
 from .kt import AKTTracer, SAKTTracer
 
 __all__ = [
     "KTHoldoutSplit",
     "KTEvaluationReport",
+    "derive_train_only_item_difficulty",
     "time_ordered_user_split",
     "evaluate_tracer_replay",
     "evaluate_sakt_replay",
@@ -50,6 +50,32 @@ class KTEvaluationReport:
 
     def to_dict(self) -> Dict[str, Any]:
         return asdict(self)
+
+
+def _expected_calibration_error(predictions: np.ndarray, outcomes: np.ndarray, bins: int = 10) -> float:
+    """Compute expected calibration error for binary outcome predictions."""
+    predictions = np.asarray(predictions, dtype=float)
+    outcomes = np.asarray(outcomes, dtype=float)
+    if predictions.shape != outcomes.shape:
+        raise ValueError("predictions and outcomes must have the same shape")
+    if predictions.size == 0:
+        return 0.0
+    if np.any(~np.isfinite(predictions)) or np.any(~np.isfinite(outcomes)):
+        raise ValueError("predictions and outcomes must be finite")
+    if np.any((predictions < 0.0) | (predictions > 1.0)):
+        raise ValueError("predictions must be probabilities in [0, 1]")
+    if np.any(~(np.isclose(outcomes, 0.0) | np.isclose(outcomes, 1.0))):
+        raise ValueError("outcomes must be binary values 0 or 1")
+    bins = max(1, int(bins))
+    indices = np.clip(np.digitize(predictions, np.linspace(0.0, 1.0, bins + 1)) - 1, 0, bins - 1)
+    return float(
+        sum(
+            (count / len(predictions))
+            * abs(float(outcomes[mask].mean()) - float(predictions[mask].mean()))
+            for bucket in range(bins)
+            if (count := int((mask := indices == bucket).sum()))
+        )
+    )
 
 
 def _validate_frame(
@@ -154,6 +180,53 @@ def time_ordered_user_split(
     )
 
 
+def derive_train_only_item_difficulty(
+    split: KTHoldoutSplit,
+    *,
+    output_col: str = "difficulty",
+    threshold: float = 0.5,
+    smoothing: float = 1.0,
+) -> KTHoldoutSplit:
+    """Attach an item-difficulty feature estimated only from training labels.
+
+    This helper exists for public interaction logs that do not contain
+    independently calibrated item metadata. The same training-derived mapping
+    is attached to train and test rows, so held-out outcomes cannot influence
+    model inputs or policy rewards.
+    """
+    if not output_col:
+        raise ValueError("output_col must be non-empty")
+    if smoothing < 0.0:
+        raise ValueError("smoothing must be non-negative")
+
+    train = split.train.copy()
+    test = split.test.copy()
+    labels = _binary_labels(train[split.correct_col].tolist(), threshold=threshold)
+    work = train[[split.item_col]].copy()
+    work["__orchid_label__"] = labels
+    global_correct = float(work["__orchid_label__"].mean())
+    grouped = work.groupby(split.item_col)["__orchid_label__"].agg(["sum", "count"])
+    difficulty_by_item = {
+        item_id: float(
+            1.0
+            - (float(row["sum"]) + float(smoothing) * global_correct)
+            / (float(row["count"]) + float(smoothing))
+        )
+        for item_id, row in grouped.iterrows()
+    }
+    global_difficulty = float(1.0 - global_correct)
+    train[output_col] = train[split.item_col].map(difficulty_by_item).fillna(global_difficulty).astype(float)
+    test[output_col] = test[split.item_col].map(difficulty_by_item).fillna(global_difficulty).astype(float)
+    return KTHoldoutSplit(
+        train=train,
+        test=test,
+        user_col=split.user_col,
+        item_col=split.item_col,
+        correct_col=split.correct_col,
+        timestamp_col=split.timestamp_col,
+    )
+
+
 def _binary_labels(values: Sequence[Any], threshold: float = 0.5) -> np.ndarray:
     numeric = np.asarray([float(value) for value in values], dtype=np.float64)
     if not np.all(np.isfinite(numeric)):
@@ -190,7 +263,7 @@ def _report(labels: np.ndarray, preds: np.ndarray, *, decision_threshold: float 
         auc=_auc(labels, preds),
         brier=brier,
         log_loss=log_loss,
-        ece=expected_calibration_error(preds.astype(float), labels.astype(float), bins=10),
+        ece=_expected_calibration_error(preds.astype(float), labels.astype(float), bins=10),
     )
 
 
@@ -294,6 +367,7 @@ def run_kt_benchmark(
     correct_col: str = "correct",
     timestamp_col: Optional[str] = None,
     item_difficulty_col: Optional[str] = None,
+    derive_item_difficulty: bool = False,
     test_fraction: float = 0.2,
     max_seq_len: int = 50,
     d_model: int = 64,
@@ -302,7 +376,7 @@ def run_kt_benchmark(
     batch_size: int = 128,
     random_state: Optional[int] = 42,
     device: Optional[str] = None,
-) -> Dict[str, Dict[str, float]]:
+) -> Dict[str, Any]:
     """Fit a KT model on a time split and compare against an item-mean baseline."""
     split = time_ordered_user_split(
         interactions,
@@ -312,6 +386,11 @@ def run_kt_benchmark(
         timestamp_col=timestamp_col,
         test_fraction=test_fraction,
     )
+    difficulty_source = "external_metadata" if item_difficulty_col is not None else "none"
+    if derive_item_difficulty:
+        item_difficulty_col = item_difficulty_col or "__orchid_train_difficulty__"
+        split = derive_train_only_item_difficulty(split, output_col=item_difficulty_col)
+        difficulty_source = "train_labels_only"
     normalized = model.lower().replace("_", "-")
     if normalized == "sakt":
         tracer = SAKTTracer(
@@ -363,6 +442,7 @@ def run_kt_benchmark(
             "test_users": float(split.test[user_col].nunique()),
             "train_items": float(split.train[item_col].nunique()),
             "test_items": float(split.test[item_col].nunique()),
+            "item_difficulty_source": difficulty_source,
         },
     }
 
@@ -370,7 +450,7 @@ def run_kt_benchmark(
 def run_sakt_benchmark(
     interactions: pd.DataFrame,
     **kwargs: Any,
-) -> Dict[str, Dict[str, float]]:
+) -> Dict[str, Any]:
     """Fit SAKT on a time split and compare against an item-mean baseline."""
     kwargs.pop("model", None)
     return run_kt_benchmark(interactions, model="sakt", **kwargs)
@@ -379,7 +459,7 @@ def run_sakt_benchmark(
 def run_akt_benchmark(
     interactions: pd.DataFrame,
     **kwargs: Any,
-) -> Dict[str, Dict[str, float]]:
+) -> Dict[str, Any]:
     """Fit AKT-inspired tracing on a time split and compare against item mean."""
     kwargs.pop("model", None)
     return run_kt_benchmark(interactions, model="akt", **kwargs)
