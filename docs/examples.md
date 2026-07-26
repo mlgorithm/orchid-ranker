@@ -23,6 +23,20 @@ product improvement. Validate only with completed decisions from a real pilot.
 The runnable script uses a deliberately small training budget so it finishes
 quickly; a real pilot can begin with `AdaptiveRanker()` and its own history.
 
+## Optional offline-policy promotion
+
+The ordinary workflow does not need an offline policy. When enough completed,
+randomized decisions have accumulated, run the safety-gated example:
+
+```bash
+python examples/offline_policy_promotion.py
+```
+
+It demonstrates two chronological decision windows and calls `fit_policy()`.
+Orchid evaluates the deployed adaptive-base+CQL blend on the later window and
+only promotes it when the rollout gate passes. The simulated result may be a
+safe rejection; use real append-only completed decisions for any decision.
+
 ## B2B onboarding
 
 The project ranks the next eligible activation step: connect data, create a

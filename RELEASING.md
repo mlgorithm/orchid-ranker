@@ -22,8 +22,8 @@
 
 5. Confirm the wheel contains only the intended package files and that the
    source archive contains the current documentation and examples. Install the
-   built wheel into a clean environment and run the package smoke test before
-   publication.
+   built wheel with dependencies into a clean environment that does not inherit
+   system packages, then run the package smoke test before publication.
 
 ## Publish
 

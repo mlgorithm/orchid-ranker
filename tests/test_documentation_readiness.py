@@ -138,6 +138,7 @@ def test_top_level_examples_use_only_the_product_api() -> None:
     assert [path.name for path in examples] == [
         "adaptive_recommender_quickstart.py",
         "adaptive_recommender_use_cases.py",
+        "offline_policy_promotion.py",
         "production_serving.py",
     ]
     for path in examples:

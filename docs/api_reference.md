@@ -86,8 +86,8 @@ ranker.register_items(catalog)
 ```
 
 Registers catalog items that were absent from fitting history. Registered items
-can be served and observed immediately with a conservative OOV representation;
-refit to learn item-specific parameters from their accumulated outcomes.
+can be served and observed immediately with a learned global OOV prior; refit
+to learn item-specific parameters from their accumulated outcomes.
 
 ## `recommend_and_log`
 
@@ -103,11 +103,32 @@ recommendations, decision = ranker.recommend_and_log(
 
 Performs a recommendation and creates an immutable decision record containing
 the candidate set, chosen item, scores, probabilities, propensity, policy
-version, and context needed for later evaluation. The default policy version is
-derived from the fitted model and configuration.
+version, and context needed for later evaluation. The record also retains the
+base adaptive scores so a future CQL promotion can evaluate the exact deployed
+blend. The default policy version is derived from the fitted model's learned
+state and deployed overlay.
 
 When exploration is nonzero, persist this record before returning the
 recommendation.
+
+Items without local feedback support are rejected by default. Use
+`allow_unsupported_feedback=True` only if an external system is responsible for
+the entire feedback path.
+
+## `fit_policy`
+
+```python
+ranker.fit_policy(
+    earlier_completed_decisions,
+    evaluation_decisions=later_completed_decisions,
+)
+```
+
+Optionally fit and promote a conservative CQL overlay. Promotion requires a
+strictly future, duplicate-resistant holdout with at least 30 events and 30
+users by default, plus user-cluster-bootstrap rollout evidence. A passing
+candidate is served and evaluated as the exact adaptive-base+CQL blend, not as
+standalone CQL.
 
 ## `observe_decision`
 

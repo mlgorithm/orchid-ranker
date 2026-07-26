@@ -1,6 +1,8 @@
 """Conservative offline policy learning for discrete next-item actions."""
 from __future__ import annotations
 
+import hashlib
+import json
 from dataclasses import asdict, dataclass
 from typing import Any, Optional, Sequence
 
@@ -186,6 +188,41 @@ class CQLDiscretePolicy:
         self._require_fitted()
         assert self.report_ is not None
         return self.report_.to_dict()
+
+    def state_fingerprint(self) -> str:
+        """Return a stable fingerprint of the fitted policy and learned values.
+
+        Configuration alone is not a deployment identity: two CQL fits with the
+        same hyperparameters can learn different action values.  The ranker uses
+        this digest when recording a promoted hybrid+CQL deployment.
+        """
+        self._require_fitted()
+        payload = {
+            "config": {
+                "conservative_weight": self.conservative_weight,
+                "learning_rate": self.learning_rate,
+                "epochs": self.epochs,
+                "random_state": self.random_state,
+                "unseen_penalty": self.unseen_penalty,
+                "propensity_weighting": self.propensity_weighting,
+                "max_update_weight": self.max_update_weight,
+            },
+            "default_value": self.default_value_,
+            "q_floor": self.q_floor_,
+            "global_value_ceiling": self.global_value_ceiling_,
+            "q_values": [
+                (repr(context), repr(action), value)
+                for (context, action), value in sorted(
+                    self.q_values_.items(), key=lambda entry: (repr(entry[0][0]), repr(entry[0][1]))
+                )
+            ],
+            "global_action_values": [
+                (repr(action), value)
+                for action, value in sorted(self.global_action_values_.items(), key=lambda entry: repr(entry[0]))
+            ],
+        }
+        encoded = json.dumps(payload, sort_keys=True, separators=(",", ":"), allow_nan=False).encode("utf-8")
+        return hashlib.sha256(encoded).hexdigest()
 
     def _update_one(
         self,

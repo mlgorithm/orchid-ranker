@@ -92,10 +92,13 @@ ranker.register_items(catalog)
 ```
 
 `fit_semantic_items(catalog)` registers the same catalog automatically. New
-items use a conservative OOV representation until the next offline refit, but
-they can be recommended, logged, observed, and included in that refit. Check
-`recommendation.feedback_supported` before serving an item produced by a custom
-candidate source.
+items use a learned global OOV prior until the next offline refit, but they can
+be recommended, logged, observed, and included in that refit. An item returned
+by a separately attached semantic encoder is not automatically registered.
+Such a recommendation has `feedback_supported=False` and
+`recommend_and_log()` rejects it by default. Register the item before serving
+it, or use `allow_unsupported_feedback=True` only when an external system owns
+the complete feedback path.
 
 ## Exploration
 
@@ -106,6 +109,29 @@ Start with `exploration=0.0`. Introduce a small nonzero rate only after:
 - candidate sets are complete and exact;
 - the fallback behavior has been reviewed; and
 - monitoring can detect coverage or outcome regressions.
+
+`min_item_support` is an explicit per-call safety floor. With exploration on,
+it overrides the configured default exactly; set it to `0` only when newly
+registered items are intentionally eligible for exploration.
+
+## Offline-policy promotion
+
+`fit_policy()` is optional. It promotes a CQL overlay only after evaluating the
+same blended adaptive-base+CQL action rule that Orchid serves:
+
+```python
+ranker.fit_policy(
+    earlier_completed_decisions,
+    evaluation_decisions=later_completed_decisions,
+)
+```
+
+The evaluation window must be strictly later, disjoint by both decision ID and
+event content, and contain at least 30 events from 30 users by default. Orchid
+uses a user-cluster bootstrap by default and preserves the unblended base scores
+in every new decision record so the future evaluation can replay the actual
+deployment rule. A successful promotion is logged as a distinct `hybrid+cql`
+policy name and learned-state version.
 
 ## Monitor
 

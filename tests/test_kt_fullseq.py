@@ -122,6 +122,44 @@ def test_akt_has_rasch_difficulty_and_learned_decay():
     assert abs(float(out_a[0, 4]) - float(out_b[0, 4])) > 1e-5
 
 
+@pytest.mark.parametrize("tracer_cls", _ALL_TRACERS)
+def test_reserved_oov_embeddings_use_learned_mean_priors(tracer_cls):
+    """Catalog OOV rows must not retain untrained random initialization."""
+    tracer = _fit_tracer(tracer_cls, max_seq_len=6, d_model=16)
+    model = tracer.model
+    assert model is not None
+    unknown = tracer._unknown_item_idx
+    num_items = tracer._model_num_items
+    item_embedding_names = {
+        "interaction_emb",
+        "query_item_emb",
+        "concept_emb",
+        "variation_emb",
+        "difficulty",
+        "response_emb",
+        "response_variation_emb",
+        "exercise_emb",
+        "exercise_key_emb",
+        "interaction_value_emb",
+    }
+
+    checked = 0
+    for name, module in model.named_modules():
+        if name not in item_embedding_names or not isinstance(module, torch.nn.Embedding):
+            continue
+        if module.num_embeddings == num_items + 1:
+            assert torch.allclose(module.weight[unknown], module.weight[1:unknown].mean(dim=0))
+            checked += 1
+        elif module.num_embeddings == 2 * num_items + 1:
+            assert torch.allclose(module.weight[unknown], module.weight[1:unknown].mean(dim=0))
+            response_unknown = num_items + unknown
+            assert torch.allclose(
+                module.weight[response_unknown], module.weight[num_items + 1 : response_unknown].mean(dim=0)
+            )
+            checked += 1
+    assert checked > 0
+
+
 def test_dkvmn_has_key_value_memory_that_evolves():
     """DKVMN mechanism: key matrix (N, d_k), value-memory matrix (N, d_v), and
     a working value memory that mutates as timesteps are processed."""

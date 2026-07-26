@@ -1001,6 +1001,7 @@ class SAKTTracer:
                 loss.backward()
                 optimizer.step()
                 last_loss = float(loss.detach().cpu().item())
+        self._initialize_unknown_item_embeddings()
         self.result_ = {"train_loss": last_loss, "num_examples": float(len(examples))}
         return self
 
@@ -1015,6 +1016,43 @@ class SAKTTracer:
             n_heads=self.n_heads,
             dropout=self.dropout,
         )
+
+    def _initialize_unknown_item_embeddings(self) -> None:
+        """Set the reserved OOV rows to the learned mean of known item rows.
+
+        Registered catalog items intentionally share one OOV representation
+        until the next offline fit.  Leaving that row at framework-random
+        initialization would make a cold item's score depend on an untrained
+        vector.  Mean initialization supplies a reproducible global prior for
+        both query and response-side embeddings across every bundled tracer.
+        """
+        if self.model is None or self._unknown_item_idx < 1:
+            return
+        item_embedding_names = {
+            "interaction_emb",
+            "query_item_emb",
+            "concept_emb",
+            "variation_emb",
+            "difficulty",
+            "response_emb",
+            "response_variation_emb",
+            "exercise_emb",
+            "exercise_key_emb",
+            "interaction_value_emb",
+        }
+        num_items = self._model_num_items
+        unknown = self._unknown_item_idx
+        with torch.no_grad():
+            for name, module in self.model.named_modules():
+                if name not in item_embedding_names or not isinstance(module, nn.Embedding):
+                    continue
+                weights = module.weight
+                if module.num_embeddings == num_items + 1:
+                    weights[unknown].copy_(weights[1:unknown].mean(dim=0))
+                elif module.num_embeddings == 2 * num_items + 1:
+                    weights[unknown].copy_(weights[1:unknown].mean(dim=0))
+                    response_unknown = num_items + unknown
+                    weights[response_unknown].copy_(weights[num_items + 1 : response_unknown].mean(dim=0))
 
     def _logits_from_batch(self, batch: Sequence[torch.Tensor]) -> torch.Tensor:
         assert self.model is not None

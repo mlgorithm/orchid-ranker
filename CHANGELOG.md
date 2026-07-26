@@ -4,6 +4,17 @@
 
 ### Serving safety
 
+- Made offline-policy promotion evaluate the exact adaptive-base+CQL action
+  rule used in serving. Promotion now requires a strictly future,
+  duplicate-resistant holdout, minimum evaluation events and users, and a
+  user-cluster bootstrap by default. Promoted decisions use a distinct
+  `hybrid+cql` learned-state deployment identity.
+- Fixed explicit exploration support overrides and reject semantic items that
+  lack local feedback support from `recommend_and_log()` unless the caller
+  explicitly owns an external feedback path.
+- Initialize reserved OOV embedding rows from learned known-item means rather
+  than leaving cold catalog items with untrained random vectors.
+- Isolated the wheel smoke test from system site packages.
 - Moved `main` to the development version `0.7.0.dev0`; the consolidated API
   is not mislabeled as the released `0.6.0` package.
 - Made explicit empty candidate sets return no recommendations. Catalog fallback

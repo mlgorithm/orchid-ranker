@@ -2,9 +2,10 @@
 from __future__ import annotations
 
 import hashlib
+import json
 import threading
 from dataclasses import asdict, dataclass, fields, replace
-from typing import Any, Optional, Sequence
+from typing import Any, Mapping, Optional, Sequence
 
 import numpy as np
 import pandas as pd
@@ -297,7 +298,7 @@ class AdaptiveRanker:
         self.offline_policy_gate_ = None
         self.offline_policy_bootstrap_ = None
         self.rolling_policy_report_ = None
-        self._deployment_version = self._derive_deployment_version(work)
+        self._deployment_version = self._derive_deployment_version()
         return self
 
     def fit_reward_model(self) -> "AdaptiveRanker":
@@ -312,7 +313,7 @@ class AdaptiveRanker:
             self.offline_policy_ = None
             self.offline_policy_gate_ = None
             self.offline_policy_bootstrap_ = None
-            self._deployment_version = self._derive_deployment_version(self._events)
+            self._deployment_version = self._derive_deployment_version()
             return self
 
     def fit_policy(
@@ -322,8 +323,10 @@ class AdaptiveRanker:
         algo: str = "cql",
         reward_col: str = "reward",
         evaluation_decisions: Optional[pd.DataFrame] = None,
-        cluster_bootstrap_samples: int = 0,
+        cluster_bootstrap_samples: int = 300,
         cluster_col: str = "user_id",
+        min_evaluation_events: int = 30,
+        min_evaluation_users: int = 30,
         **policy_kwargs: Any,
     ) -> CQLTrainingReport:
         """Fit, evaluate, and atomically promote a conservative offline policy.
@@ -335,12 +338,29 @@ class AdaptiveRanker:
         normalized = algo.lower()
         if normalized not in {"cql", "conservative", "tabular_cql"}:
             raise NotImplementedError("Only the tabular CQL policy learner is implemented in this roadmap slice")
+        self._require_fitted()
         if evaluation_decisions is None:
             raise ValueError("fit_policy requires held-out evaluation_decisions before a policy can be promoted")
-        if cluster_bootstrap_samples < 0:
-            raise ValueError("cluster_bootstrap_samples must be non-negative")
+        if cluster_bootstrap_samples < 1:
+            raise ValueError("fit_policy requires cluster_bootstrap_samples >= 1")
+        if min_evaluation_events < 1 or min_evaluation_users < 1:
+            raise ValueError("minimum evaluation event and user counts must be >= 1")
         training = validate_logged_decisions(logged_decisions, reward_col=reward_col)
         evaluation = validate_logged_decisions(evaluation_decisions, reward_col=reward_col)
+        if cluster_col not in evaluation.columns:
+            raise ValueError(f"cluster_col={cluster_col!r} is not present in evaluation_decisions")
+        if len(evaluation) < min_evaluation_events:
+            raise ValueError(
+                f"evaluation_decisions has {len(evaluation)} events; requires at least {min_evaluation_events}"
+            )
+        evaluation_users = int(evaluation[cluster_col].nunique())
+        if evaluation_users < min_evaluation_users:
+            raise ValueError(
+                f"evaluation_decisions has {evaluation_users} {cluster_col} values; "
+                f"requires at least {min_evaluation_users}"
+            )
+        if training["timestamp"].max() >= evaluation["timestamp"].min():
+            raise ValueError("evaluation_decisions must be strictly later than policy training")
         _require_disjoint_policy_logs(training, evaluation)
 
         candidate_policy = CQLDiscretePolicy(
@@ -370,6 +390,7 @@ class AdaptiveRanker:
                 self.offline_policy_bootstrap_ = (
                     evidence if isinstance(evidence, BootstrapPolicyComparisonReport) else None
                 )
+                self._deployment_version = self._derive_deployment_version()
         assert candidate_policy.report_ is not None
         return candidate_policy.report_
 
@@ -450,6 +471,8 @@ class AdaptiveRanker:
             evaluation_decisions=evaluation,
             cluster_bootstrap_samples=cluster_bootstrap_samples,
             cluster_col=cluster_col,
+            min_evaluation_events=min_evaluation_events,
+            min_evaluation_users=min_evaluation_users,
             **policy_kwargs,
         )
         assert self.last_policy_gate_ is not None
@@ -564,61 +587,79 @@ class AdaptiveRanker:
         expands to the training catalog.
         """
         with self._state_lock:
-            self._require_fitted()
-            assert self.recommender_ is not None
-            active_mode = self.config.mode if mode is None else mode
-            top_k = int(top_k)
-            if top_k <= 0 or candidate_item_ids is not None and not candidate_item_ids:
-                return []
-            candidates = list(candidate_item_ids) if candidate_item_ids is not None else []
-            if not candidates and item_query_text is not None and self.semantic_encoder_ is not None:
-                candidates = self.semantic_encoder_.similar_items(
-                    item_query_text,
-                    top_k=max(top_k, 50),
-                )
-            if not candidates and active_mode == "sketch":
-                if self.sketch_generator_ is None:
-                    raise RuntimeError("sketch mode requires an attached SketchCandidateGenerator")
-                candidates = self.sketch_generator_.candidates(
-                    user_id,
-                    concept_goal,
-                    item_query_vec=item_query_vec,
-                    top_m=max(top_k, 50),
-                )
-            if not candidates:
-                if candidate_item_ids is None and self.config.allow_catalog_fallback:
-                    candidates = list(self.recommender_.item_ids_)
-                else:
-                    return []
-            known_candidates = self.recommender_.registered_candidates(candidates)
-            cold_candidates = [item_id for item_id in candidates if item_id not in set(known_candidates)]
-            recs: list[AdaptiveLearningRecommendation] = []
-            if known_candidates:
-                recs.extend(self.recommender_.rank(user_id, known_candidates, top_k=max(top_k, len(known_candidates))))
-            recs.extend(
-                self._semantic_cold_start_recommendations(
-                    user_id,
-                    cold_candidates,
-                    query_text=item_query_text,
-                    top_k=max(top_k, len(cold_candidates)),
-                )
+            base_recs = self._base_recommendations(
+                user_id,
+                candidate_item_ids,
+                top_k=top_k,
+                mode=mode,
+                concept_goal=concept_goal,
+                item_query_vec=item_query_vec,
+                item_query_text=item_query_text,
             )
-            if self.offline_policy_ is not None and self._offline_policy_allowed():
-                ctx = context_hash or stable_context_hash(user_id, concept_goal)
-                q_scores = self.offline_policy_.score(ctx, [rec.item_id for rec in recs])
-                q_scores = self._serving_offline_scores(q_scores)
-                offline_weight = self._offline_policy_serving_weight()
-                recs = [
-                    replace(
-                        rec,
-                        score=float(rec.score + offline_weight * q_scores.get(rec.item_id, 0.0)),
-                    )
-                    for rec in recs
-                ]
-                recs = sorted(recs, key=lambda rec: (rec.score, str(rec.item_id)), reverse=True)
-            else:
-                recs = sorted(recs, key=lambda rec: (rec.score, str(rec.item_id)), reverse=True)
+            if not base_recs:
+                return []
+            context = context_hash or stable_context_hash(user_id, concept_goal)
+            recs = self._apply_offline_overlay(base_recs, context_hash=context)
             return recs[: min(int(top_k), len(recs))]
+
+    def _base_recommendations(
+        self,
+        user_id: Any,
+        candidate_item_ids: Optional[Sequence[Any]],
+        *,
+        top_k: int,
+        mode: Optional[str],
+        concept_goal: Optional[Any],
+        item_query_vec: Optional[Sequence[float]],
+        item_query_text: Optional[str],
+    ) -> list[AdaptiveLearningRecommendation]:
+        """Produce base adaptive scores before an optional CQL overlay.
+
+        The unblended scores are retained in decision logs.  They are the
+        historical component needed to evaluate the exact hybrid+CQL action
+        rule during a later policy promotion.
+        """
+        self._require_fitted()
+        assert self.recommender_ is not None
+        active_mode = self.config.mode if mode is None else mode
+        top_k = int(top_k)
+        if top_k <= 0 or (candidate_item_ids is not None and len(candidate_item_ids) == 0):
+            return []
+        candidates = list(candidate_item_ids) if candidate_item_ids is not None else []
+        if not candidates and item_query_text is not None and self.semantic_encoder_ is not None:
+            candidates = self.semantic_encoder_.similar_items(
+                item_query_text,
+                top_k=max(top_k, 50),
+            )
+        if not candidates and active_mode == "sketch":
+            if self.sketch_generator_ is None:
+                raise RuntimeError("sketch mode requires an attached SketchCandidateGenerator")
+            candidates = self.sketch_generator_.candidates(
+                user_id,
+                concept_goal,
+                item_query_vec=item_query_vec,
+                top_m=max(top_k, 50),
+            )
+        if not candidates:
+            if candidate_item_ids is None and self.config.allow_catalog_fallback:
+                candidates = list(self.recommender_.item_ids_)
+            else:
+                return []
+        known_candidates = self.recommender_.registered_candidates(candidates)
+        known_set = set(known_candidates)
+        cold_candidates = [item_id for item_id in candidates if item_id not in known_set]
+        recs: list[AdaptiveLearningRecommendation] = []
+        if known_candidates:
+            recs.extend(self.recommender_.rank(user_id, known_candidates, top_k=max(top_k, len(known_candidates))))
+        recs.extend(
+            self._semantic_cold_start_recommendations(
+                user_id,
+                cold_candidates,
+                query_text=item_query_text,
+                top_k=max(top_k, len(cold_candidates)),
+            )
+        )
+        return sorted(recs, key=lambda rec: (rec.score, str(rec.item_id)), reverse=True)
 
     def recommend_and_log(
         self,
@@ -634,6 +675,7 @@ class AdaptiveRanker:
         min_difficulty: Optional[float] = None,
         max_difficulty: Optional[float] = None,
         require_prerequisites: bool = True,
+        allow_unsupported_feedback: bool = False,
         policy_version: Optional[str] = None,
         context_hash: Optional[str] = None,
         concept_goal: Optional[Any] = None,
@@ -651,11 +693,12 @@ class AdaptiveRanker:
             raise ValueError("top_k must be >= 1")
         if not 0.0 <= float(exploration) <= 1.0:
             raise ValueError("exploration must be in [0, 1]")
-        min_item_support = (
-            self.config.exploration_min_item_support if float(exploration) > 0.0 else 0.0
-            if min_item_support is None
-            else float(min_item_support)
-        )
+        if min_item_support is None:
+            min_item_support = (
+                self.config.exploration_min_item_support if float(exploration) > 0.0 else 0.0
+            )
+        else:
+            min_item_support = float(min_item_support)
         min_outcome_probability = (
             self.config.exploration_min_outcome_probability
             if min_outcome_probability is None
@@ -676,23 +719,26 @@ class AdaptiveRanker:
             raise ValueError("max_difficulty must be in [0, 1]")
         if min_difficulty is not None and max_difficulty is not None and min_difficulty > max_difficulty:
             raise ValueError("min_difficulty must be <= max_difficulty")
-        resolved_policy_version = self._deployment_version if policy_version is None else str(policy_version)
-        if not resolved_policy_version:
-            raise ValueError("policy_version must be non-empty")
-
         candidates = list(dict.fromkeys(candidate_item_ids))
         if not candidates:
             raise ValueError("recommend_and_log requires an explicit non-empty candidate set")
         ctx = context_hash or stable_context_hash(user_id, concept_goal)
         with self._decision_lock:
             assert self.recommender_ is not None
-            ranked = self.recommend(
+            resolved_policy_version = self._deployment_version if policy_version is None else str(policy_version)
+            if not resolved_policy_version:
+                raise ValueError("policy_version must be non-empty")
+            base_ranked = self._base_recommendations(
                 user_id,
                 candidates,
                 top_k=len(candidates),
-                context_hash=ctx,
+                mode=None,
                 concept_goal=concept_goal,
+                item_query_vec=None,
+                item_query_text=None,
             )
+            base_scores = {rec.item_id: float(rec.score) for rec in base_ranked}
+            ranked = self._apply_offline_overlay(base_ranked, context_hash=ctx)
             safe = [
                 rec
                 for rec in ranked
@@ -708,6 +754,12 @@ class AdaptiveRanker:
             ]
             if not safe:
                 raise ValueError("no candidate satisfies the configured adaptive serving constraints")
+            unsupported = [rec.item_id for rec in safe if not rec.feedback_supported]
+            if unsupported and not allow_unsupported_feedback:
+                raise ValueError(
+                    "recommend_and_log refuses items without local feedback support; "
+                    "register the items or set allow_unsupported_feedback=True for an external feedback path"
+                )
 
             epsilon = float(exploration)
             probabilities = np.full(len(safe), epsilon / len(safe), dtype=float)
@@ -740,9 +792,9 @@ class AdaptiveRanker:
                     "min_difficulty": min_difficulty,
                     "max_difficulty": max_difficulty,
                     "require_prerequisites": bool(require_prerequisites),
-                    "feedback_supported": all(
-                        self.recommender_.feedback_supported(rec.item_id) for rec in safe
-                    ),
+                    "feedback_supported": all(rec.feedback_supported for rec in safe),
+                    "base_scores": tuple(base_scores[rec.item_id] for rec in safe),
+                    "external_feedback_required": bool(unsupported),
                 },
             )
             if decision.decision_id in self._decision_log:
@@ -1115,6 +1167,7 @@ class AdaptiveRanker:
                     item_support=0.0,
                     concept_support=0.0,
                     prerequisites_met=prerequisites_met,
+                    feedback_supported=self.recommender_.feedback_supported(item_id),
                 )
             )
         recs.sort(key=lambda rec: (rec.score, str(rec.item_id)), reverse=True)
@@ -1183,11 +1236,73 @@ class AdaptiveRanker:
             return {item_id: 0.0 for item_id in scores}
         return {item_id: (float(value) - lo) / (hi - lo) for item_id, value in scores.items()}
 
+    def _blended_scores(
+        self,
+        policy: CQLDiscretePolicy,
+        *,
+        context_hash: Any,
+        candidate_item_ids: Sequence[Any],
+        base_scores: Sequence[float],
+    ) -> dict[Any, float]:
+        """Score the exact adaptive-base plus CQL action rule used in serving."""
+        candidates = list(candidate_item_ids)
+        if len(base_scores) != len(candidates):
+            raise ValueError("base_scores length must match candidate_item_ids")
+        if len(candidates) != len(set(candidates)):
+            raise ValueError("candidate_item_ids must not contain duplicates")
+        q_scores = self._serving_offline_scores(policy.score(context_hash, candidates))
+        weight = self._offline_policy_serving_weight()
+        return {
+            item_id: float(float(base_score) + weight * q_scores.get(item_id, 0.0))
+            for item_id, base_score in zip(candidates, base_scores)
+        }
+
+    def _apply_offline_overlay(
+        self,
+        base_recommendations: Sequence[AdaptiveLearningRecommendation],
+        *,
+        context_hash: Any,
+    ) -> list[AdaptiveLearningRecommendation]:
+        """Apply the promoted CQL overlay through the same function used by OPE."""
+        recs = list(base_recommendations)
+        if self.offline_policy_ is None or not self._offline_policy_allowed() or not recs:
+            return sorted(recs, key=lambda rec: (rec.score, str(rec.item_id)), reverse=True)
+        scores = self._blended_scores(
+            self.offline_policy_,
+            context_hash=context_hash,
+            candidate_item_ids=[rec.item_id for rec in recs],
+            base_scores=[rec.score for rec in recs],
+        )
+        blended = [replace(rec, score=scores[rec.item_id]) for rec in recs]
+        return sorted(blended, key=lambda rec: (rec.score, str(rec.item_id)), reverse=True)
+
+    def _composite_recommend(
+        self,
+        policy: CQLDiscretePolicy,
+        *,
+        context_hash: Any,
+        candidate_item_ids: Sequence[Any],
+        base_scores: Sequence[float],
+    ) -> list[Any]:
+        """Return the deterministic action order of a prospective hybrid+CQL deployment."""
+        scores = self._blended_scores(
+            policy,
+            context_hash=context_hash,
+            candidate_item_ids=candidate_item_ids,
+            base_scores=base_scores,
+        )
+        return sorted(scores, key=lambda item_id: (scores[item_id], str(item_id)), reverse=True)
+
     def _target_probability(self, row: pd.Series) -> float:
         assert self.offline_policy_ is not None
         candidates = parse_candidate_list(row["candidate_item_ids"])
         chosen = row["chosen_item_id"]
-        selected = self.offline_policy_.recommend(row["context_hash"], candidates, top_k=1)
+        selected = self._composite_recommend(
+            self.offline_policy_,
+            context_hash=row["context_hash"],
+            candidate_item_ids=candidates,
+            base_scores=_base_scores_for_logged_row(row),
+        )[:1]
         return float(bool(selected and selected[0] == chosen))
 
     def _evaluate_candidate_policy(
@@ -1205,9 +1320,13 @@ class AdaptiveRanker:
         candidate_probability_col = "__orchid_candidate_probability__"
         baseline_probability_col = "__orchid_logging_probability__"
         def candidate_probability(row: pd.Series) -> float:
-            selected = candidate_policy.recommend(
-                row["context_hash"], parse_candidate_list(row["candidate_item_ids"]), top_k=1
-            )
+            candidates = parse_candidate_list(row["candidate_item_ids"])
+            selected = self._composite_recommend(
+                candidate_policy,
+                context_hash=row["context_hash"],
+                candidate_item_ids=candidates,
+                base_scores=_base_scores_for_logged_row(row),
+            )[:1]
             return float(bool(selected and selected[0] == row["chosen_item_id"]))
 
         work[candidate_probability_col] = [candidate_probability(row) for _, row in work.iterrows()]
@@ -1237,15 +1356,43 @@ class AdaptiveRanker:
         )
 
     def _resolved_policy_name(self) -> str:
-        if self.recommender_ is not None and self.recommender_.policy_name_ is not None:
-            return str(self.recommender_.policy_name_)
-        return str(self.config.policy)
+        base = (
+            str(self.recommender_.policy_name_)
+            if self.recommender_ is not None and self.recommender_.policy_name_ is not None
+            else str(self.config.policy)
+        )
+        return f"{base}+cql" if self.offline_policy_ is not None and self._offline_policy_allowed() else base
 
-    def _derive_deployment_version(self, events: pd.DataFrame) -> str:
-        """Create a stable model/configuration fingerprint for decision logs."""
+    def _derive_deployment_version(self) -> str:
+        """Create a deployment fingerprint from learned state, not input tables."""
         digest = hashlib.sha256()
         digest.update(repr(self.config).encode("utf-8"))
-        digest.update(events.to_json(orient="split", default_handler=str).encode("utf-8"))
+        digest.update(self._resolved_policy_name().encode("utf-8"))
+        if self.recommender_ is not None:
+            digest.update(repr(self.recommender_.config).encode("utf-8"))
+            digest.update(str(self.recommender_.policy_name_).encode("utf-8"))
+            _update_digest_with_mapping(
+                digest,
+                {
+                    "difficulty_by_item": self.recommender_.difficulty_by_item_,
+                    "concept_by_item": self.recommender_.concept_by_item_,
+                    "item_support": self.recommender_.item_support_,
+                    "item_correct": self.recommender_.item_correct_,
+                    "concept_support": self.recommender_.concept_support_,
+                    "concept_correct": self.recommender_.concept_correct_,
+                    "global_correct": self.recommender_.global_correct_,
+                },
+            )
+            model = getattr(self.recommender_.tracer_, "model", None)
+            if model is not None:
+                for name, tensor in sorted(model.state_dict().items()):
+                    values = tensor.detach().cpu().contiguous().numpy()
+                    digest.update(name.encode("utf-8"))
+                    digest.update(str(values.dtype).encode("utf-8"))
+                    digest.update(repr(values.shape).encode("utf-8"))
+                    digest.update(values.tobytes())
+        if self.offline_policy_ is not None:
+            digest.update(self.offline_policy_.state_fingerprint().encode("utf-8"))
         return f"orchid-{self._resolved_policy_name()}-{digest.hexdigest()[:12]}"
 
     def _require_fitted(self) -> None:
@@ -1272,16 +1419,92 @@ def _binary_outcome(value: Any) -> int:
 
 
 def _require_disjoint_policy_logs(training: pd.DataFrame, evaluation: pd.DataFrame) -> None:
-    """Reject any held-out policy-evaluation event that appears in training."""
+    """Reject repeated held-out events by ID and by their immutable event signature."""
     if "decision_id" in training.columns and "decision_id" in evaluation.columns:
-        training_keys = set(training["decision_id"].astype(str))
-        evaluation_keys = set(evaluation["decision_id"].astype(str))
-    else:
-        decision_key = ["user_id", "timestamp", "context_hash", "chosen_item_id"]
-        training_keys = set(training[decision_key].itertuples(index=False, name=None))
-        evaluation_keys = set(evaluation[decision_key].itertuples(index=False, name=None))
-    if training_keys.intersection(evaluation_keys):
+        training_ids = set(training["decision_id"].astype(str))
+        evaluation_ids = set(evaluation["decision_id"].astype(str))
+        if training_ids.intersection(evaluation_ids):
+            raise ValueError("evaluation_decisions must be disjoint from policy training")
+    training_signatures = {_policy_event_signature(row) for _, row in training.iterrows()}
+    evaluation_signatures = {_policy_event_signature(row) for _, row in evaluation.iterrows()}
+    if training_signatures.intersection(evaluation_signatures):
         raise ValueError("evaluation_decisions must be disjoint from policy training")
+
+
+def _policy_event_signature(row: pd.Series) -> str:
+    """Return a duplicate-resistant signature independent of mutable decision IDs."""
+    payload = {
+        "user_id": row["user_id"],
+        "timestamp": float(row["timestamp"]),
+        "context_hash": row["context_hash"],
+        "candidate_item_ids": parse_candidate_list(row["candidate_item_ids"]),
+        "chosen_item_id": row["chosen_item_id"],
+        "reward": float(row["reward"]),
+    }
+    return json.dumps(payload, sort_keys=True, default=str, separators=(",", ":"))
+
+
+def _base_scores_for_logged_row(row: pd.Series) -> list[float]:
+    """Read the base adaptive scores required to replay a hybrid+CQL action.
+
+    Current decision records store them in immutable policy metadata.  Older
+    pre-overlay records have only ``scores``; those are accepted because they
+    were necessarily the base action scores.  A record made by an older CQL
+    overlay without this field cannot be evaluated exactly and is rejected.
+    """
+    candidates = parse_candidate_list(row["candidate_item_ids"])
+    metadata_raw = row.get("policy_metadata")
+    metadata: Mapping[str, Any] = {}
+    if isinstance(metadata_raw, Mapping):
+        metadata = metadata_raw
+    elif isinstance(metadata_raw, str) and metadata_raw.strip():
+        try:
+            decoded = json.loads(metadata_raw)
+        except json.JSONDecodeError as exc:
+            raise ValueError("policy_metadata must be a JSON object when serialized") from exc
+        if not isinstance(decoded, dict):
+            raise ValueError("policy_metadata must decode to an object")
+        metadata = decoded
+    if "base_scores" in metadata:
+        values = [float(value) for value in parse_candidate_list(metadata["base_scores"])]
+        if len(values) != len(candidates) or not np.all(np.isfinite(values)):
+            raise ValueError("policy_metadata.base_scores must be finite and align with candidate_item_ids")
+        return values
+    if "+cql" in str(row.get("policy_name", "")):
+        raise ValueError(
+            "hybrid+CQL logs require policy_metadata.base_scores for exact offline-policy evaluation"
+        )
+    values = [float(value) for value in parse_candidate_list(row["scores"])]
+    if len(values) != len(candidates) or not np.all(np.isfinite(values)):
+        raise ValueError("scores must be finite and align with candidate_item_ids")
+    return values
+
+
+def _update_digest_with_mapping(digest: Any, value: Any) -> None:
+    """Hash structured learned state with stable ordering across mapping types."""
+    payload = json.dumps(_fingerprint_value(value), sort_keys=True, separators=(",", ":"), allow_nan=False)
+    digest.update(payload.encode("utf-8"))
+
+
+def _fingerprint_value(value: Any) -> Any:
+    if isinstance(value, Mapping):
+        return {
+            "mapping": [
+                (repr(key), _fingerprint_value(item))
+                for key, item in sorted(value.items(), key=lambda entry: repr(entry[0]))
+            ]
+        }
+    if isinstance(value, np.ndarray):
+        return {"array": value.tolist()}
+    if isinstance(value, (list, tuple)):
+        return [_fingerprint_value(item) for item in value]
+    if isinstance(value, (set, frozenset)):
+        return {"set": sorted((_fingerprint_value(item) for item in value), key=repr)}
+    if isinstance(value, np.generic):
+        return value.item()
+    if isinstance(value, (str, int, float, bool)) or value is None:
+        return value
+    return {"repr": repr(value)}
 
 
 def _optional_float(value: Any) -> Optional[float]:
