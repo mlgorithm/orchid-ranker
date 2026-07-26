@@ -8,6 +8,7 @@ from typing import Any, Dict, Optional, Sequence
 import numpy as np
 import pandas as pd
 
+from .adaptive_schema import normalize_timestamps
 from .kt import AKTTracer, SAKTTracer
 
 __all__ = [
@@ -103,6 +104,8 @@ def _ordered(
     timestamp_col: Optional[str],
 ) -> pd.DataFrame:
     work = frame.copy()
+    if timestamp_col is not None:
+        work[timestamp_col] = normalize_timestamps(work[timestamp_col], timestamp_col)
     work["__orchid_order__"] = np.arange(len(work))
     sort_cols = [user_col]
     if timestamp_col is not None:

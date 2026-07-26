@@ -98,9 +98,10 @@ def test_akt_has_rasch_difficulty_and_learned_decay():
     model = tracer.model
     assert model is not None
 
-    # Learned difficulty scalar per item, shape (num_items + 1, 1).
+    # Padding plus one reserved OOV embedding are included with learned item
+    # difficulties, so registered catalog items can receive live feedback.
     num_items = len(tracer.item_ids_)
-    assert model.difficulty.weight.shape == (num_items + 1, 1)
+    assert model.difficulty.weight.shape == (num_items + 2, 1)
     assert model.difficulty.weight.requires_grad
     # Learned per-head decay parameter.
     assert isinstance(model.gammas, torch.nn.Parameter)

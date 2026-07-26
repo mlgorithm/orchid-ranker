@@ -10,6 +10,7 @@ import pandas as pd
 from sklearn.ensemble import HistGradientBoostingRegressor
 from sklearn.isotonic import IsotonicRegression
 
+from .adaptive_schema import normalize_timestamps
 from .progression_reward import ProgressionRewardConfig, expected_progression_reward
 
 if TYPE_CHECKING:
@@ -586,6 +587,7 @@ def _observe_tracer_for_replay(
     *,
     timestamp: Any,
 ) -> Any:
+    params: Mapping[str, inspect.Parameter]
     try:
         params = inspect.signature(tracer.observe).parameters
     except (TypeError, ValueError):
@@ -711,7 +713,7 @@ def _example_weights(
     mean = float(np.mean(weights)) if weights.size else 0.0
     if mean <= 0.0:
         return np.ones(len(examples), dtype=float)
-    return weights / mean
+    return np.asarray(weights / mean, dtype=float)
 
 
 def _make_estimator(*, random_state: Optional[int]) -> HistGradientBoostingRegressor:
@@ -777,8 +779,8 @@ def _fit_isotonic_calibrator(
 def _apply_calibrator(predictions: np.ndarray, calibrator: Optional[IsotonicRegression]) -> np.ndarray:
     clipped = np.clip(np.asarray(predictions, dtype=float), 0.0, 1.0)
     if calibrator is None:
-        return clipped
-    return np.clip(calibrator.predict(clipped), 0.0, 1.0)
+        return np.asarray(clipped, dtype=float)
+    return np.asarray(np.clip(calibrator.predict(clipped), 0.0, 1.0), dtype=float)
 
 
 def _regression_ece(predictions: np.ndarray, labels: np.ndarray, *, n_bins: int = 10) -> float:
@@ -852,6 +854,8 @@ def make_delayed_gain_features(
 
 def _ordered(frame: pd.DataFrame, *, user_col: str, timestamp_col: Optional[str]) -> pd.DataFrame:
     work = frame.copy()
+    if timestamp_col is not None:
+        work[timestamp_col] = normalize_timestamps(work[timestamp_col], timestamp_col)
     work["__orchid_order__"] = np.arange(len(work))
     sort_cols = [user_col]
     if timestamp_col is not None:

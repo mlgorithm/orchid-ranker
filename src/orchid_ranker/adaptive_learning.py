@@ -12,6 +12,7 @@ from typing import Any, Dict, Mapping, Optional, Sequence
 import numpy as np
 import pandas as pd
 
+from .adaptive_schema import normalize_timestamps
 from .delayed_gain import DelayedGainRewardModel, fit_delayed_gain_reward_model
 from .kt_benchmark import KTHoldoutSplit
 from .learning_policy import (
@@ -92,6 +93,7 @@ class AdaptiveLearningRecommendation:
     concept_support: float = 0.0
     recent_repetition: int = 0
     prerequisites_met: bool = True
+    feedback_supported: bool = True
     reward_breakdown: Optional[Dict[str, Any]] = None
 
     def to_dict(self) -> Dict[str, Any]:
@@ -132,9 +134,12 @@ class AdaptiveLearningRecommender:
         self.concept_correct_: Dict[Any, float] = {}
         self.global_correct_: float = 0.5
         self.item_ids_: list[Any] = []
+        self._item_id_set: set[Any] = set()
         self.user_ids_: list[Any] = []
         self._training_concept_col: Optional[str] = None
         self._item_col: str = "item_id"
+        self._global_correct_total: float = 0.0
+        self._global_outcome_count: float = 0.0
 
     @property
     def is_fitted(self) -> bool:
@@ -173,6 +178,7 @@ class AdaptiveLearningRecommender:
         work = _ordered(interactions, user_col=user_col, timestamp_col=timestamp_col).reset_index(drop=True)
         self._item_col = item_col
         self.item_ids_ = sorted(work[item_col].drop_duplicates().tolist(), key=lambda value: str(value))
+        self._item_id_set = set(self.item_ids_)
         self.user_ids_ = sorted(work[user_col].drop_duplicates().tolist(), key=lambda value: str(value))
         self.difficulty_by_item_ = _difficulty_by_item(
             work,
@@ -205,6 +211,10 @@ class AdaptiveLearningRecommender:
             item_difficulty_col=item_difficulty_col,
             item_difficulty_map=item_difficulty_map,
         )
+        # Every bundled tracer reserves an OOV embedding at fit time. Enable it
+        # only through this catalog-registration-aware facade.
+        if hasattr(self.tracer_, "_allow_unknown_items"):
+            self.tracer_._allow_unknown_items = True
         split = KTHoldoutSplit(
             train=work,
             test=work.iloc[0:0].copy(),
@@ -230,6 +240,8 @@ class AdaptiveLearningRecommender:
             for concept, value in label_work.groupby(training_concept_col, dropna=False)["__orchid_label__"].sum().items()
         }
         self.global_correct_ = float(labels.mean()) if len(labels) else 0.5
+        self._global_correct_total = float(labels.sum())
+        self._global_outcome_count = float(len(labels))
         self.progression_config_ = ProgressionRewardConfig(target_correct=self.config.target_correct)
         has_concept_signal = concept_col is not None or concept_by_item is not None
         resolved_policy = self._resolve_policy(has_concept_signal=has_concept_signal)
@@ -347,6 +359,63 @@ class AdaptiveLearningRecommender:
         raw = self.policy_.rank(user_id, ranked_candidates, top_k=min(int(top_k), len(ranked_candidates)))
         return [self._normalize_recommendation(user_id, rec) for rec in raw]
 
+    def register_items(
+        self,
+        catalog: pd.DataFrame,
+        *,
+        item_col: str = "item_id",
+        category_col: Optional[str] = None,
+        difficulty_col: Optional[str] = None,
+    ) -> "AdaptiveLearningRecommender":
+        """Register catalog items for OOV serving and live feedback.
+
+        Registered items are assigned the tracer's learned OOV representation
+        until a future offline fit gives them item-specific parameters.
+        """
+        self._require_fitted()
+        if item_col not in catalog.columns:
+            raise ValueError(f"catalog missing item_col={item_col!r}")
+        if category_col is not None and category_col not in catalog.columns:
+            raise ValueError(f"catalog missing category_col={category_col!r}")
+        if difficulty_col is not None and difficulty_col not in catalog.columns:
+            raise ValueError(f"catalog missing difficulty_col={difficulty_col!r}")
+        for _, row in catalog.drop_duplicates(subset=[item_col], keep="last").iterrows():
+            item_id = row[item_col]
+            if pd.isna(item_id):
+                raise ValueError("catalog item_id values must not be missing")
+            if item_id in self._item_id_set:
+                continue
+            concept = item_id
+            if category_col is not None and not pd.isna(row[category_col]):
+                concept = row[category_col]
+            difficulty = 0.5
+            if difficulty_col is not None and not pd.isna(row[difficulty_col]):
+                difficulty = _clamp01(row[difficulty_col])
+            self._item_id_set.add(item_id)
+            self.item_ids_.append(item_id)
+            self.concept_by_item_[item_id] = concept
+            self.difficulty_by_item_[item_id] = difficulty
+            self.item_support_[item_id] = 0.0
+            self.item_correct_[item_id] = 0.0
+            self.concept_support_.setdefault(concept, 0.0)
+            self.concept_correct_.setdefault(concept, 0.0)
+            self._register_policy_item(item_id, concept, difficulty)
+        return self
+
+    def registered_candidates(self, candidate_item_ids: Sequence[Any]) -> list[Any]:
+        """Return deduplicated catalog items eligible for model feedback."""
+        candidates: list[Any] = []
+        seen: set[Any] = set()
+        for item_id in candidate_item_ids:
+            if item_id in self._item_id_set and item_id not in seen:
+                candidates.append(item_id)
+                seen.add(item_id)
+        return candidates
+
+    def feedback_supported(self, item_id: Any) -> bool:
+        """Whether an item can be passed to :meth:`observe` in this deployment."""
+        return item_id in self._item_id_set
+
     def observe(
         self,
         user_id: Any,
@@ -357,11 +426,20 @@ class AdaptiveLearningRecommender:
     ) -> Any:
         """Observe one live outcome and update user state."""
         self._require_fitted()
-        if item_id not in set(self.item_ids_):
+        if item_id not in self._item_id_set:
             raise KeyError(f"Unknown item_id={item_id!r}")
         result = self.policy_.observe(user_id, item_id, correct, timestamp=timestamp)
         if self._state_policy is not None and self._state_policy is not self.policy_:
             self._state_policy.record_outcome(user_id, item_id, correct)
+        label = float(float(correct) >= self.config.correct_threshold)
+        self.item_support_[item_id] = self.item_support_.get(item_id, 0.0) + 1.0
+        self.item_correct_[item_id] = self.item_correct_.get(item_id, 0.0) + label
+        concept = self.concept_by_item_.get(item_id, item_id)
+        self.concept_support_[concept] = self.concept_support_.get(concept, 0.0) + 1.0
+        self.concept_correct_[concept] = self.concept_correct_.get(concept, 0.0) + label
+        self._global_correct_total += label
+        self._global_outcome_count += 1.0
+        self.global_correct_ = self._global_correct_total / self._global_outcome_count
         return result
 
     def predict_correct(self, user_id: Any, item_id: Any) -> float:
@@ -634,14 +712,37 @@ class AdaptiveLearningRecommender:
         )
 
     def _known_candidates(self, candidate_item_ids: Sequence[Any]) -> list[Any]:
-        known = set(self.item_ids_)
         candidates = []
         seen = set()
         for item_id in candidate_item_ids:
-            if item_id in known and item_id not in seen:
+            if item_id in self._item_id_set and item_id not in seen:
                 candidates.append(item_id)
                 seen.add(item_id)
         return candidates
+
+    def _register_policy_item(self, item_id: Any, concept: Any, difficulty: float) -> None:
+        """Extend mutable policy metadata without changing learned weights."""
+        policies = [self.policy_, self._state_policy]
+        seen: set[int] = set()
+        for policy in policies:
+            if policy is None or id(policy) in seen:
+                continue
+            seen.add(id(policy))
+            for attribute, value in (
+                ("concept_by_item", concept),
+                ("difficulty_by_item", difficulty),
+            ):
+                mapping = getattr(policy, attribute, None)
+                if isinstance(mapping, dict):
+                    mapping[item_id] = value
+            for attribute in ("item_count", "item_correct", "item_support"):
+                mapping = getattr(policy, attribute, None)
+                if isinstance(mapping, dict):
+                    mapping.setdefault(item_id, 0.0)
+            for attribute in ("concept_count", "concept_correct", "concept_support"):
+                mapping = getattr(policy, attribute, None)
+                if isinstance(mapping, dict):
+                    mapping.setdefault(concept, 0.0)
 
     def _prerequisites_met(self, user_id: Any, item_id: Any) -> bool:
         concept = self.concept_by_item_.get(item_id, item_id)
@@ -675,6 +776,7 @@ class AdaptiveLearningRecommender:
             concept_support=float(getattr(rec, "concept_support", self.concept_support_.get(concept, 0.0))),
             recent_repetition=int(getattr(rec, "recent_repetition", 0)),
             prerequisites_met=self._prerequisites_met(user_id, item_id),
+            feedback_supported=item_id in self._item_id_set,
             reward_breakdown=reward_breakdown,
         )
 
@@ -712,6 +814,8 @@ def _validate_config(config: AdaptiveLearningConfig) -> None:
 
 def _ordered(frame: pd.DataFrame, *, user_col: str, timestamp_col: Optional[str]) -> pd.DataFrame:
     work = frame.copy()
+    if timestamp_col is not None:
+        work[timestamp_col] = normalize_timestamps(work[timestamp_col], timestamp_col)
     work["__orchid_order__"] = np.arange(len(work))
     sort_cols = [user_col]
     if timestamp_col is not None:

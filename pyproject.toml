@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "orchid-ranker"
-version = "0.6.0"
+version = "0.7.0.dev0"
 description = "Outcome-driven adaptive recommender that learns what to choose next."
 readme = "README.md"
 authors = [
@@ -51,6 +51,7 @@ docs = [
 ]
 dev = [
   "pytest>=7.0,<9",
+  "pytest-cov>=5.0,<7",
   "mypy>=1.4,<2",
   "ruff>=0.1.5,<1",
   "mkdocs>=1.5,<2",
@@ -91,13 +92,6 @@ python_version = "3.11"
 warn_return_any = true
 warn_unused_configs = true
 ignore_missing_imports = true
-
-[[tool.mypy.overrides]]
-module = [
-  "orchid_ranker.delayed_gain",
-  "orchid_ranker.learning_policy",
-]
-ignore_errors = true
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

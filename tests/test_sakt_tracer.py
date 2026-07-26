@@ -76,9 +76,29 @@ def test_build_sakt_examples_includes_temporal_features_when_timestamped():
     assert len(examples) == 1
     window = examples[0]
     assert window.item_ids == (10, 20, 30)
-    # elapsed[t] = gap from t-1 to t; lag[t] = gap from t to the last position.
+    # Both temporal inputs are causal gaps from t-1 to t. Future timestamps
+    # must not be available when predicting an earlier response.
     assert window.elapsed == (0.0, 5.0, 15.0)
-    assert window.lag == (20.0, 15.0, 0.0)
+    assert window.lag == (0.0, 5.0, 15.0)
+
+
+def test_saintplus_temporal_features_do_not_depend_on_future_timestamps():
+    base = pd.DataFrame(
+        {
+            "user_id": [7, 7, 7],
+            "item_id": [10, 20, 30],
+            "correct": [1, 0, 1],
+            "timestamp": [10, 15, 30],
+        }
+    )
+    changed_future = base.copy()
+    changed_future.loc[2, "timestamp"] = 9_999
+
+    original = build_sakt_examples(base, timestamp_col="timestamp", max_seq_len=3)[0]
+    changed = build_sakt_examples(changed_future, timestamp_col="timestamp", max_seq_len=3)[0]
+
+    assert original.elapsed[:2] == changed.elapsed[:2]
+    assert original.lag[:2] == changed.lag[:2]
 
 
 def test_sakt_tracer_fit_predict_and_state_vector_shape():

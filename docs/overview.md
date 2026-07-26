@@ -18,6 +18,9 @@ historical outcomes → fit → recommend → observe → recommend again
 | `recommend_and_log(...)` | Recommend and create a production decision record |
 | `observe_decision(...)` | Link a delayed outcome to that decision |
 
+The object serializes these operations, so a single serving instance does not
+expose partially updated learner state or a half-promoted policy.
+
 The default path has no model selector. Orchid chooses and composes the
 internal behavior needed for adaptive ranking.
 

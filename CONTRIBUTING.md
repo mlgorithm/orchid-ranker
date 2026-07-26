@@ -36,11 +36,13 @@ review:
 python -m ruff check .
 python -m mypy src/orchid_ranker
 python -m pytest tests -q
+python -m pytest tests -q --cov=orchid_ranker --cov-fail-under=75
 python -m mkdocs build --strict
 python -m build
 ```
 
-CI runs the same lint, type, test, documentation, and package-build checks.
+CI also smoke-tests the built wheel, checks lower-bound dependency resolution,
+runs the core suite on macOS and Windows, and audits resolved dependencies.
 
 ## Coding Standards
 

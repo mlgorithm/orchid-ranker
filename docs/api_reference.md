@@ -60,6 +60,10 @@ application use are:
 Scores are meaningful for ordering candidates from the same request; do not
 interpret them as globally calibrated business values.
 
+`candidate_item_ids=[]` returns `[]`. It is never interpreted as “all known
+items.” Omit candidates only when an explicitly configured catalog fallback or
+candidate generator is intended.
+
 ## `observe`
 
 ```python
@@ -72,7 +76,18 @@ ranker.observe(
 ```
 
 Updates the user's state from one completed interaction. Outcomes must be
-binary `0` or `1`.
+exactly binary `0` or `1`; fractional values are rejected. Timestamps are
+finite, non-negative numeric values in one application-defined unit.
+
+## `register_items`
+
+```python
+ranker.register_items(catalog)
+```
+
+Registers catalog items that were absent from fitting history. Registered items
+can be served and observed immediately with a conservative OOV representation;
+refit to learn item-specific parameters from their accumulated outcomes.
 
 ## `recommend_and_log`
 
@@ -88,7 +103,8 @@ recommendations, decision = ranker.recommend_and_log(
 
 Performs a recommendation and creates an immutable decision record containing
 the candidate set, chosen item, scores, probabilities, propensity, policy
-version, and context needed for later evaluation.
+version, and context needed for later evaluation. The default policy version is
+derived from the fitted model and configuration.
 
 When exploration is nonzero, persist this record before returning the
 recommendation.

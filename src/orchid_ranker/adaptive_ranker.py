@@ -1,6 +1,7 @@
 """The single public interface for outcome-driven adaptive recommendation."""
 from __future__ import annotations
 
+import hashlib
 import threading
 from dataclasses import asdict, dataclass, fields, replace
 from typing import Any, Optional, Sequence
@@ -16,6 +17,7 @@ from .adaptive_learning import (
 from .adaptive_schema import (
     DecisionOutcome,
     LoggedDecision,
+    normalize_timestamp,
     parse_candidate_list,
     stable_context_hash,
     validate_decision_outcomes,
@@ -25,9 +27,13 @@ from .adaptive_schema import (
 from .offline_policy import CQLDiscretePolicy, CQLTrainingReport
 from .ope import (
     BootstrapLoggedPolicyReport,
+    BootstrapPolicyComparisonReport,
     LoggedPolicyReport,
     OPERolloutGateReport,
+    PolicyComparisonReport,
+    bootstrap_compare_logged_policies,
     bootstrap_logged_policy,
+    compare_logged_policies,
     evaluate_logged_policy,
     evaluate_rollout_gate,
 )
@@ -81,12 +87,12 @@ class AdaptiveRankerConfig:
     offline_policy_weight: float = 1.0
     offline_policy_max_weight: float = 0.35
     offline_policy_normalize: bool = True
-    require_offline_policy_gate: bool = False
     offline_policy_min_effect: float = 0.0
     offline_policy_min_coverage: float = 0.05
     offline_policy_min_ess_fraction: float = 0.05
     offline_policy_max_clipped_fraction: float = 0.20
     semantic_cold_start_weight: float = 0.50
+    allow_catalog_fallback: bool = False
     exploration_min_item_support: float = 1.0
     exploration_min_outcome_probability: float = 0.20
     exploration_max_outcome_probability: float = 0.95
@@ -98,7 +104,7 @@ class RollingPolicyUpdateReport:
 
     training: CQLTrainingReport
     gate: OPERolloutGateReport
-    bootstrap_ope: Optional[BootstrapLoggedPolicyReport]
+    bootstrap_ope: Optional[BootstrapPolicyComparisonReport]
     train_events: int
     evaluation_events: int
     train_users: int
@@ -137,7 +143,7 @@ class ShadowDeploymentReport:
     reward_drift: Optional[float]
     calibration_drift: Optional[float]
     policy_versions: tuple[str, ...]
-    bootstrap_ope: Optional[BootstrapLoggedPolicyReport]
+    bootstrap_ope: Optional[BootstrapPolicyComparisonReport]
     rollout_gate: Optional[OPERolloutGateReport]
 
     def to_dict(self) -> dict[str, Any]:
@@ -164,7 +170,9 @@ class AdaptiveRanker:
         self.recommender_: Optional[AdaptiveLearningRecommender] = None
         self.offline_policy_: Optional[CQLDiscretePolicy] = None
         self.offline_policy_gate_: Optional[OPERolloutGateReport] = None
-        self.offline_policy_bootstrap_: Optional[BootstrapLoggedPolicyReport] = None
+        self.offline_policy_bootstrap_: Optional[BootstrapPolicyComparisonReport] = None
+        self.last_policy_gate_: Optional[OPERolloutGateReport] = None
+        self.last_policy_evidence_: Optional[PolicyComparisonReport | BootstrapPolicyComparisonReport] = None
         self.rolling_policy_report_: Optional[RollingPolicyUpdateReport] = None
         self.sketch_generator_: Optional[Any] = None
         self.semantic_encoder_: Optional[Any] = None
@@ -172,12 +180,18 @@ class AdaptiveRanker:
         self._fit_kwargs: dict[str, Any] = {}
         self._decision_log: dict[str, LoggedDecision] = {}
         self._outcome_log: dict[str, DecisionOutcome] = {}
-        self._decision_lock = threading.RLock()
+        # One ranker owns mutable learner state, decision records, and deployed
+        # policy references. Serializing public operations makes that contract
+        # explicit and prevents readers from observing a partially updated model.
+        self._state_lock = threading.RLock()
+        self._decision_lock = self._state_lock
         self._rng = np.random.default_rng(self.config.random_state)
+        self._deployment_version: Optional[str] = None
 
     @property
     def is_fitted(self) -> bool:
-        return self.recommender_ is not None and self.recommender_.is_fitted
+        with self._state_lock:
+            return self.recommender_ is not None and self.recommender_.is_fitted
 
     def fit(
         self,
@@ -200,37 +214,38 @@ class AdaptiveRanker:
         ranking when the application has meaningful item categories or an
         externally defined difficulty signal.
         """
-        for role, column in (
-            ("user", user_col),
-            ("item", item_col),
-            ("outcome", outcome_col),
-            ("timestamp", timestamp_col),
-        ):
-            if column not in events.columns:
-                raise ValueError(f"events must include {role} column {column!r}")
-        try:
-            outcomes = pd.to_numeric(events[outcome_col], errors="raise")
-        except (TypeError, ValueError) as exc:
-            raise ValueError("outcome values must be binary 0 or 1") from exc
-        if outcomes.isna().any() or not outcomes.isin([0, 1]).all():
-            raise ValueError("outcome values must be binary 0 or 1")
-        resolved_category_col = category_col
-        if resolved_category_col is None and "category_id" in events.columns:
-            resolved_category_col = "category_id"
-        if resolved_category_col is not None and resolved_category_col not in events.columns:
-            raise ValueError(f"events must include category column {resolved_category_col!r}")
-        if difficulty_col is not None and difficulty_col not in events.columns:
-            raise ValueError(f"events must include difficulty column {difficulty_col!r}")
-        return self._fit_events(
-            events,
-            user_col=user_col,
-            item_col=item_col,
-            outcome_col=outcome_col,
-            timestamp_col=timestamp_col,
-            category_col=resolved_category_col,
-            difficulty_col=difficulty_col,
-            **fit_kwargs,
-        )
+        with self._state_lock:
+            for role, column in (
+                ("user", user_col),
+                ("item", item_col),
+                ("outcome", outcome_col),
+                ("timestamp", timestamp_col),
+            ):
+                if column not in events.columns:
+                    raise ValueError(f"events must include {role} column {column!r}")
+            try:
+                outcomes = pd.to_numeric(events[outcome_col], errors="raise")
+            except (TypeError, ValueError) as exc:
+                raise ValueError("outcome values must be binary 0 or 1") from exc
+            if outcomes.isna().any() or not outcomes.isin([0, 1]).all():
+                raise ValueError("outcome values must be binary 0 or 1")
+            resolved_category_col = category_col
+            if resolved_category_col is None and "category_id" in events.columns:
+                resolved_category_col = "category_id"
+            if resolved_category_col is not None and resolved_category_col not in events.columns:
+                raise ValueError(f"events must include category column {resolved_category_col!r}")
+            if difficulty_col is not None and difficulty_col not in events.columns:
+                raise ValueError(f"events must include difficulty column {difficulty_col!r}")
+            return self._fit_events(
+                events,
+                user_col=user_col,
+                item_col=item_col,
+                outcome_col=outcome_col,
+                timestamp_col=timestamp_col,
+                category_col=resolved_category_col,
+                difficulty_col=difficulty_col,
+                **fit_kwargs,
+            )
 
     def _fit_events(
         self,
@@ -257,7 +272,7 @@ class AdaptiveRanker:
         )
         adaptive_config = self._adaptive_config(policy=self.config.policy)
         category_arg = category_col if category_col is not None and category_col in work.columns else None
-        self.recommender_ = AdaptiveLearningRecommender(adaptive_config).fit(
+        candidate_recommender = AdaptiveLearningRecommender(adaptive_config).fit(
             work,
             user_col=user_col,
             item_col=item_col,
@@ -267,6 +282,7 @@ class AdaptiveRanker:
             item_difficulty_col=difficulty_col,
             **fit_kwargs,
         )
+        self.recommender_ = candidate_recommender
         self._events = work.copy()
         self._fit_kwargs = {
             "user_col": user_col,
@@ -277,17 +293,27 @@ class AdaptiveRanker:
             "item_difficulty_col": difficulty_col,
             **fit_kwargs,
         }
+        self.offline_policy_ = None
+        self.offline_policy_gate_ = None
+        self.offline_policy_bootstrap_ = None
+        self.rolling_policy_report_ = None
+        self._deployment_version = self._derive_deployment_version(work)
         return self
 
     def fit_reward_model(self) -> "AdaptiveRanker":
         """Refit the adaptive stack with support-constrained delayed-gain modeling."""
-        if self._events is None:
-            raise RuntimeError("fit must be called before fit_reward_model")
-        if self._fit_kwargs.get("concept_col") is None:
-            raise ValueError("fit_reward_model requires category data")
-        adaptive_config = self._adaptive_config(policy="support_delayed_gain")
-        self.recommender_ = AdaptiveLearningRecommender(adaptive_config).fit(self._events, **self._fit_kwargs)
-        return self
+        with self._state_lock:
+            if self._events is None:
+                raise RuntimeError("fit must be called before fit_reward_model")
+            if self._fit_kwargs.get("concept_col") is None:
+                raise ValueError("fit_reward_model requires category data")
+            adaptive_config = self._adaptive_config(policy="support_delayed_gain")
+            self.recommender_ = AdaptiveLearningRecommender(adaptive_config).fit(self._events, **self._fit_kwargs)
+            self.offline_policy_ = None
+            self.offline_policy_gate_ = None
+            self.offline_policy_bootstrap_ = None
+            self._deployment_version = self._derive_deployment_version(self._events)
+            return self
 
     def fit_policy(
         self,
@@ -300,54 +326,52 @@ class AdaptiveRanker:
         cluster_col: str = "user_id",
         **policy_kwargs: Any,
     ) -> CQLTrainingReport:
-        """Fit a conservative offline policy and optionally gate on held-out logs.
+        """Fit, evaluate, and atomically promote a conservative offline policy.
 
-        ``evaluation_decisions`` must be disjoint from the policy-training
-        decisions. Without held-out evaluation data no rollout gate is created.
+        Promotion always requires chronologically held-out logs. The candidate
+        is compared with the explicit historical logging-policy baseline and
+        replaces the active policy only when the rollout gate passes.
         """
         normalized = algo.lower()
         if normalized not in {"cql", "conservative", "tabular_cql"}:
             raise NotImplementedError("Only the tabular CQL policy learner is implemented in this roadmap slice")
-        if evaluation_decisions is None and self.config.require_offline_policy_gate:
-            raise ValueError(
-                "require_offline_policy_gate=True requires held-out evaluation_decisions"
-            )
+        if evaluation_decisions is None:
+            raise ValueError("fit_policy requires held-out evaluation_decisions before a policy can be promoted")
         if cluster_bootstrap_samples < 0:
             raise ValueError("cluster_bootstrap_samples must be non-negative")
         training = validate_logged_decisions(logged_decisions, reward_col=reward_col)
-        self.offline_policy_ = CQLDiscretePolicy(
+        evaluation = validate_logged_decisions(evaluation_decisions, reward_col=reward_col)
+        _require_disjoint_policy_logs(training, evaluation)
+
+        candidate_policy = CQLDiscretePolicy(
             random_state=self.config.random_state,
             **policy_kwargs,
         ).fit(training, reward_col=reward_col)
-        self.offline_policy_gate_ = None
-        self.offline_policy_bootstrap_ = None
-        if evaluation_decisions is not None:
-            evaluation = validate_logged_decisions(evaluation_decisions, reward_col=reward_col)
-            decision_key = ["user_id", "timestamp", "context_hash", "chosen_item_id"]
-            training_keys = set(training[decision_key].itertuples(index=False, name=None))
-            evaluation_keys = set(evaluation[decision_key].itertuples(index=False, name=None))
-            if training_keys.intersection(evaluation_keys):
-                raise ValueError("evaluation_decisions must be disjoint from policy training")
-            gate_evidence: LoggedPolicyReport | BootstrapLoggedPolicyReport
-            if cluster_bootstrap_samples > 0:
-                self.offline_policy_bootstrap_ = self.bootstrap_ope_report(
-                    evaluation,
-                    reward_col=reward_col,
-                    n_bootstrap=cluster_bootstrap_samples,
-                    cluster_col=cluster_col,
+        evidence = self._evaluate_candidate_policy(
+            candidate_policy,
+            evaluation,
+            reward_col=reward_col,
+            cluster_bootstrap_samples=cluster_bootstrap_samples,
+            cluster_col=cluster_col,
+        )
+        gate = evaluate_rollout_gate(
+            evidence,
+            min_effect=self.config.offline_policy_min_effect,
+            min_ess_fraction=self.config.offline_policy_min_ess_fraction,
+            min_coverage=self.config.offline_policy_min_coverage,
+            max_clipped_fraction=self.config.offline_policy_max_clipped_fraction,
+        )
+        with self._state_lock:
+            self.last_policy_evidence_ = evidence
+            self.last_policy_gate_ = gate
+            if gate.allowed:
+                self.offline_policy_ = candidate_policy
+                self.offline_policy_gate_ = gate
+                self.offline_policy_bootstrap_ = (
+                    evidence if isinstance(evidence, BootstrapPolicyComparisonReport) else None
                 )
-                gate_evidence = self.offline_policy_bootstrap_
-            else:
-                gate_evidence = self.ope_report(evaluation, reward_col=reward_col)
-            self.offline_policy_gate_ = evaluate_rollout_gate(
-                gate_evidence,
-                min_effect=self.config.offline_policy_min_effect,
-                min_ess_fraction=self.config.offline_policy_min_ess_fraction,
-                min_coverage=self.config.offline_policy_min_coverage,
-                max_clipped_fraction=self.config.offline_policy_max_clipped_fraction,
-            )
-        assert self.offline_policy_.report_ is not None
-        return self.offline_policy_.report_
+        assert candidate_policy.report_ is not None
+        return candidate_policy.report_
 
     def fit_policy_rolling(
         self,
@@ -428,11 +452,15 @@ class AdaptiveRanker:
             cluster_col=cluster_col,
             **policy_kwargs,
         )
-        assert self.offline_policy_gate_ is not None
+        assert self.last_policy_gate_ is not None
         report = RollingPolicyUpdateReport(
             training=training_report,
-            gate=self.offline_policy_gate_,
-            bootstrap_ope=self.offline_policy_bootstrap_,
+            gate=self.last_policy_gate_,
+            bootstrap_ope=(
+                self.last_policy_evidence_
+                if isinstance(self.last_policy_evidence_, BootstrapPolicyComparisonReport)
+                else None
+            ),
             train_events=int(len(training)),
             evaluation_events=int(len(evaluation)),
             train_users=int(training[cluster_col].nunique()),
@@ -449,8 +477,9 @@ class AdaptiveRanker:
         """Attach a sketch-mode candidate generator with a ``candidates`` method."""
         if not hasattr(generator, "candidates"):
             raise TypeError("generator must expose a candidates(...) method")
-        self.sketch_generator_ = generator
-        return self
+        with self._state_lock:
+            self.sketch_generator_ = generator
+            return self
 
     def fit_semantic_items(
         self,
@@ -461,16 +490,50 @@ class AdaptiveRanker:
         metadata_cols: Optional[Sequence[str]] = None,
         **encoder_kwargs: Any,
     ) -> "AdaptiveRanker":
-        """Fit the lightweight semantic item encoder used for cold-start retrieval."""
+        """Fit semantic retrieval and register its catalog for live feedback.
+
+        Catalog items absent from fitting history use Orchid's OOV item embedding
+        until the next offline refit. They are nevertheless registered, so a
+        served item can be logged and observed safely in the same process.
+        """
         from .semantic import SemanticItemEncoder
 
-        self.semantic_encoder_ = SemanticItemEncoder(**encoder_kwargs).fit(
-            catalog,
-            item_col=item_col,
-            text_col=text_col,
-            metadata_cols=metadata_cols,
-        )
-        return self
+        with self._state_lock:
+            self._require_fitted()
+            self.semantic_encoder_ = SemanticItemEncoder(**encoder_kwargs).fit(
+                catalog,
+                item_col=item_col,
+                text_col=text_col,
+                metadata_cols=metadata_cols,
+            )
+            self.register_items(catalog, item_col=item_col)
+            return self
+
+    def register_items(
+        self,
+        catalog: pd.DataFrame,
+        *,
+        item_col: str = "item_id",
+        category_col: str = "category_id",
+        difficulty_col: str = "difficulty",
+    ) -> "AdaptiveRanker":
+        """Register catalog items that may be served and observed before refitting.
+
+        Newly registered items use the fitted tracer's OOV item representation;
+        this is deliberately conservative. Their feedback is retained in the
+        live learner state and incorporated as item-specific model parameters on
+        the next offline ``fit``.
+        """
+        with self._state_lock:
+            self._require_fitted()
+            assert self.recommender_ is not None
+            self.recommender_.register_items(
+                catalog,
+                item_col=item_col,
+                category_col=category_col if category_col in catalog.columns else None,
+                difficulty_col=difficulty_col if difficulty_col in catalog.columns else None,
+            )
+            return self
 
     def attach_semantic_encoder(self, encoder: Any) -> "AdaptiveRanker":
         """Attach a pre-fitted semantic encoder exposing ``similar_items``."""
@@ -478,8 +541,9 @@ class AdaptiveRanker:
             raise RuntimeError("semantic encoder must be fitted before attachment")
         if not hasattr(encoder, "similar_items"):
             raise TypeError("semantic encoder must expose similar_items(...)")
-        self.semantic_encoder_ = encoder
-        return self
+        with self._state_lock:
+            self.semantic_encoder_ = encoder
+            return self
 
     def recommend(
         self,
@@ -493,74 +557,75 @@ class AdaptiveRanker:
         item_query_vec: Optional[Sequence[float]] = None,
         item_query_text: Optional[str] = None,
     ) -> list[AdaptiveLearningRecommendation]:
-        """Recommend next items using exact or sketch-mode candidates."""
-        self._require_fitted()
-        assert self.recommender_ is not None
-        active_mode = self.config.mode if mode is None else mode
-        top_k = int(top_k)
-        if top_k <= 0:
-            return []
-        candidates = list(candidate_item_ids) if candidate_item_ids is not None else []
-        if not candidates and item_query_text is not None and self.semantic_encoder_ is not None:
-            candidates = self.semantic_encoder_.similar_items(
-                item_query_text,
-                top_k=max(top_k, 50),
-            )
-        if not candidates and active_mode == "sketch":
-            if self.sketch_generator_ is None:
-                raise RuntimeError("sketch mode requires an attached SketchCandidateGenerator")
-            candidates = self.sketch_generator_.candidates(
-                user_id,
-                concept_goal,
-                item_query_vec=item_query_vec,
-                top_m=max(top_k, 50),
-            )
-        if not candidates:
-            candidates = list(self.recommender_.item_ids_)
-        known_items = set(self.recommender_.item_ids_)
-        known_candidates = [item_id for item_id in candidates if item_id in known_items]
-        cold_candidates = [item_id for item_id in candidates if item_id not in known_items]
-        recs: list[AdaptiveLearningRecommendation] = []
-        if known_candidates:
-            recs.extend(self.recommender_.rank(user_id, known_candidates, top_k=max(top_k, len(known_candidates))))
-        recs.extend(
-            self._semantic_cold_start_recommendations(
-                user_id,
-                cold_candidates,
-                query_text=item_query_text,
-                top_k=max(top_k, len(cold_candidates)),
-            )
-        )
-        if self.offline_policy_ is not None and self._offline_policy_allowed():
-            ctx = context_hash or stable_context_hash(user_id, concept_goal)
-            q_scores = self.offline_policy_.score(ctx, [rec.item_id for rec in recs])
-            q_scores = self._serving_offline_scores(q_scores)
-            offline_weight = self._offline_policy_serving_weight()
-            recs = [
-                replace(
-                    rec,
-                    score=float(rec.score + offline_weight * q_scores.get(rec.item_id, 0.0)),
+        """Rank an exact eligible candidate set.
+
+        ``None`` permits configured candidate generation. An explicit empty
+        sequence is an empty eligible set and always returns ``[]``; it never
+        expands to the training catalog.
+        """
+        with self._state_lock:
+            self._require_fitted()
+            assert self.recommender_ is not None
+            active_mode = self.config.mode if mode is None else mode
+            top_k = int(top_k)
+            if top_k <= 0 or candidate_item_ids is not None and not candidate_item_ids:
+                return []
+            candidates = list(candidate_item_ids) if candidate_item_ids is not None else []
+            if not candidates and item_query_text is not None and self.semantic_encoder_ is not None:
+                candidates = self.semantic_encoder_.similar_items(
+                    item_query_text,
+                    top_k=max(top_k, 50),
                 )
-                for rec in recs
-            ]
-            recs = sorted(
-                recs,
-                key=lambda rec: (
-                    rec.score,
-                    str(rec.item_id),
-                ),
-                reverse=True,
+            if not candidates and active_mode == "sketch":
+                if self.sketch_generator_ is None:
+                    raise RuntimeError("sketch mode requires an attached SketchCandidateGenerator")
+                candidates = self.sketch_generator_.candidates(
+                    user_id,
+                    concept_goal,
+                    item_query_vec=item_query_vec,
+                    top_m=max(top_k, 50),
+                )
+            if not candidates:
+                if candidate_item_ids is None and self.config.allow_catalog_fallback:
+                    candidates = list(self.recommender_.item_ids_)
+                else:
+                    return []
+            known_candidates = self.recommender_.registered_candidates(candidates)
+            cold_candidates = [item_id for item_id in candidates if item_id not in set(known_candidates)]
+            recs: list[AdaptiveLearningRecommendation] = []
+            if known_candidates:
+                recs.extend(self.recommender_.rank(user_id, known_candidates, top_k=max(top_k, len(known_candidates))))
+            recs.extend(
+                self._semantic_cold_start_recommendations(
+                    user_id,
+                    cold_candidates,
+                    query_text=item_query_text,
+                    top_k=max(top_k, len(cold_candidates)),
+                )
             )
-        else:
-            recs = sorted(recs, key=lambda rec: (rec.score, str(rec.item_id)), reverse=True)
-        return recs[: min(int(top_k), len(recs))]
+            if self.offline_policy_ is not None and self._offline_policy_allowed():
+                ctx = context_hash or stable_context_hash(user_id, concept_goal)
+                q_scores = self.offline_policy_.score(ctx, [rec.item_id for rec in recs])
+                q_scores = self._serving_offline_scores(q_scores)
+                offline_weight = self._offline_policy_serving_weight()
+                recs = [
+                    replace(
+                        rec,
+                        score=float(rec.score + offline_weight * q_scores.get(rec.item_id, 0.0)),
+                    )
+                    for rec in recs
+                ]
+                recs = sorted(recs, key=lambda rec: (rec.score, str(rec.item_id)), reverse=True)
+            else:
+                recs = sorted(recs, key=lambda rec: (rec.score, str(rec.item_id)), reverse=True)
+            return recs[: min(int(top_k), len(recs))]
 
     def recommend_and_log(
         self,
         user_id: Any,
         candidate_item_ids: Sequence[Any],
         *,
-        timestamp: int,
+        timestamp: Any,
         top_k: int = 10,
         exploration: float = 0.0,
         min_item_support: Optional[float] = None,
@@ -569,7 +634,7 @@ class AdaptiveRanker:
         min_difficulty: Optional[float] = None,
         max_difficulty: Optional[float] = None,
         require_prerequisites: bool = True,
-        policy_version: str = "adaptive-ranker-v1",
+        policy_version: Optional[str] = None,
         context_hash: Optional[str] = None,
         concept_goal: Optional[Any] = None,
     ) -> tuple[list[AdaptiveLearningRecommendation], LoggedDecision]:
@@ -581,14 +646,13 @@ class AdaptiveRanker:
         safe decision-time candidate set.
         """
         self._require_fitted()
-        if int(timestamp) < 0:
-            raise ValueError("timestamp must be non-negative")
+        normalized_timestamp = normalize_timestamp(timestamp)
         if int(top_k) < 1:
             raise ValueError("top_k must be >= 1")
         if not 0.0 <= float(exploration) <= 1.0:
             raise ValueError("exploration must be in [0, 1]")
         min_item_support = (
-            self.config.exploration_min_item_support
+            self.config.exploration_min_item_support if float(exploration) > 0.0 else 0.0
             if min_item_support is None
             else float(min_item_support)
         )
@@ -612,7 +676,8 @@ class AdaptiveRanker:
             raise ValueError("max_difficulty must be in [0, 1]")
         if min_difficulty is not None and max_difficulty is not None and min_difficulty > max_difficulty:
             raise ValueError("min_difficulty must be <= max_difficulty")
-        if not str(policy_version):
+        resolved_policy_version = self._deployment_version if policy_version is None else str(policy_version)
+        if not resolved_policy_version:
             raise ValueError("policy_version must be non-empty")
 
         candidates = list(dict.fromkeys(candidate_item_ids))
@@ -620,6 +685,7 @@ class AdaptiveRanker:
             raise ValueError("recommend_and_log requires an explicit non-empty candidate set")
         ctx = context_hash or stable_context_hash(user_id, concept_goal)
         with self._decision_lock:
+            assert self.recommender_ is not None
             ranked = self.recommend(
                 user_id,
                 candidates,
@@ -646,29 +712,26 @@ class AdaptiveRanker:
             epsilon = float(exploration)
             probabilities = np.full(len(safe), epsilon / len(safe), dtype=float)
             probabilities[0] += 1.0 - epsilon
-            chosen_index = (
-                0
-                if epsilon == 0.0 or len(safe) == 1
-                else int(self._rng.choice(len(safe), p=probabilities))
-            )
+            was_exploration = bool(epsilon > 0.0 and len(safe) > 1 and self._rng.random() < epsilon)
+            chosen_index = int(self._rng.integers(len(safe))) if was_exploration else 0
             chosen = safe[chosen_index]
             served = [chosen, *(rec for idx, rec in enumerate(safe) if idx != chosen_index)]
             served = served[: min(int(top_k), len(served))]
             decision = LoggedDecision(
                 user_id=user_id,
-                timestamp=int(timestamp),
-                candidate_item_ids=[rec.item_id for rec in safe],
+                timestamp=normalized_timestamp,
+                candidate_item_ids=tuple(rec.item_id for rec in safe),
                 chosen_item_id=chosen.item_id,
                 propensity=float(probabilities[chosen_index]),
-                policy_name=str(self.config.policy),
-                policy_version=str(policy_version),
-                scores=[float(rec.score) for rec in safe],
+                policy_name=self._resolved_policy_name(),
+                policy_version=resolved_policy_version,
+                scores=tuple(float(rec.score) for rec in safe),
                 context_hash=ctx,
-                action_probabilities=probabilities.tolist(),
-                predicted_outcomes=[float(rec.outcome_probability) for rec in safe],
+                action_probabilities=tuple(float(value) for value in probabilities),
+                predicted_outcomes=tuple(float(rec.outcome_probability) for rec in safe),
                 exploration_rate=epsilon,
-                was_exploration=bool(chosen_index != 0),
-                exploration_bonus=[epsilon / len(safe)] * len(safe),
+                was_exploration=was_exploration,
+                exploration_bonus=tuple([epsilon / len(safe)] * len(safe)),
                 policy_metadata={
                     "concept_goal": concept_goal,
                     "min_item_support": float(min_item_support),
@@ -677,11 +740,14 @@ class AdaptiveRanker:
                     "min_difficulty": min_difficulty,
                     "max_difficulty": max_difficulty,
                     "require_prerequisites": bool(require_prerequisites),
+                    "feedback_supported": all(
+                        self.recommender_.feedback_supported(rec.item_id) for rec in safe
+                    ),
                 },
             )
             if decision.decision_id in self._decision_log:
                 raise RuntimeError("generated a duplicate decision_id")
-            self._decision_log[decision.decision_id] = decision
+            self._decision_log[decision.decision_id] = LoggedDecision(**decision.to_dict())
             return served, decision
 
     def observe(
@@ -689,32 +755,31 @@ class AdaptiveRanker:
         *,
         user_id: Any,
         item_id: Any,
-        outcome: int,
-        timestamp: int,
+        outcome: Any,
+        timestamp: Any,
         category_id: Optional[Any] = None,
     ) -> Any:
         """Observe one user outcome and update live state."""
-        self._require_fitted()
-        assert self.recommender_ is not None
-        if int(outcome) not in {0, 1}:
-            raise ValueError("outcome must be 0 or 1")
-        if int(timestamp) < 0:
-            raise ValueError("timestamp must be non-negative")
-        del category_id
-        return self.recommender_.observe(
-            user_id,
-            item_id,
-            int(outcome),
-            timestamp=int(timestamp),
-        )
+        with self._state_lock:
+            self._require_fitted()
+            assert self.recommender_ is not None
+            normalized_outcome = _binary_outcome(outcome)
+            normalized_timestamp = normalize_timestamp(timestamp)
+            del category_id
+            return self.recommender_.observe(
+                user_id,
+                item_id,
+                normalized_outcome,
+                timestamp=normalized_timestamp,
+            )
 
     def observe_decision(
         self,
         decision_id: str,
         *,
-        outcome: Optional[int] = None,
+        outcome: Optional[Any] = None,
         reward: Optional[float] = None,
-        timestamp: Optional[int] = None,
+        timestamp: Optional[Any] = None,
         category_id: Optional[Any] = None,
     ) -> DecisionOutcome:
         """Attach one delayed outcome to a logged decision and update learner state."""
@@ -726,20 +791,19 @@ class AdaptiveRanker:
                 raise ValueError(f"decision_id already has an outcome: {decision_id}")
             if outcome is None and reward is None:
                 raise ValueError("observe_decision requires outcome or reward")
-            if outcome is not None and int(outcome) not in {0, 1}:
-                raise ValueError("outcome must be 0, 1, or None")
+            normalized_outcome = None if outcome is None else _binary_outcome(outcome)
             if reward is not None and not np.isfinite(float(reward)):
                 raise ValueError("reward must be finite")
 
             decision = self._decision_log[decision_id]
-            outcome_timestamp = decision.timestamp if timestamp is None else int(timestamp)
+            outcome_timestamp = decision.timestamp if timestamp is None else normalize_timestamp(timestamp)
             if outcome_timestamp < decision.timestamp:
                 raise ValueError("timestamp must not precede the serving decision")
             if reward is not None:
                 resolved_reward = float(reward)
             else:
-                assert outcome is not None
-                resolved_reward = float(outcome)
+                assert normalized_outcome is not None
+                resolved_reward = float(normalized_outcome)
             resolved_category = category_id
             if resolved_category is None and self.recommender_ is not None:
                 resolved_category = self.recommender_.concept_by_item_.get(decision.chosen_item_id)
@@ -748,18 +812,18 @@ class AdaptiveRanker:
                 user_id=decision.user_id,
                 item_id=decision.chosen_item_id,
                 outcome_timestamp=outcome_timestamp,
-                outcome=None if outcome is None else int(outcome),
+                outcome=normalized_outcome,
                 reward=resolved_reward,
                 category_id=resolved_category,
             )
             validate_decision_outcomes(pd.DataFrame([linked_outcome.to_dict()]))
-            if outcome is not None:
+            if normalized_outcome is not None:
                 self.observe(
                     user_id=decision.user_id,
                     timestamp=outcome_timestamp,
                     item_id=decision.chosen_item_id,
                     category_id=resolved_category,
-                    outcome=int(outcome),
+                    outcome=normalized_outcome,
                 )
             self._outcome_log[decision_id] = linked_outcome
             return linked_outcome
@@ -886,15 +950,20 @@ class AdaptiveRanker:
         reward_drift = _half_window_shift(completed, "reward")
         calibration_drift = _half_window_calibration_shift(predicted, observed)
 
-        bootstrap: Optional[BootstrapLoggedPolicyReport] = None
+        bootstrap: Optional[BootstrapPolicyComparisonReport] = None
         gate: Optional[OPERolloutGateReport] = None
         if self.offline_policy_ is not None and not completed.empty and cluster_bootstrap_samples > 0:
-            bootstrap = self.bootstrap_ope_report(
+            evidence = self._evaluate_candidate_policy(
+                self.offline_policy_,
                 completed,
                 max_weight=max_weight,
-                n_bootstrap=cluster_bootstrap_samples,
+                reward_col="reward",
+                cluster_bootstrap_samples=cluster_bootstrap_samples,
                 cluster_col="user_id",
             )
+            if not isinstance(evidence, BootstrapPolicyComparisonReport):
+                raise RuntimeError("cluster bootstrap policy evaluation did not return bootstrap evidence")
+            bootstrap = evidence
             gate = evaluate_rollout_gate(
                 bootstrap,
                 min_effect=self.config.offline_policy_min_effect,
@@ -938,6 +1007,10 @@ class AdaptiveRanker:
             "offline_policy_gate": None if self.offline_policy_gate_ is None else self.offline_policy_gate_.to_dict(),
             "offline_policy_bootstrap": (
                 None if self.offline_policy_bootstrap_ is None else self.offline_policy_bootstrap_.to_dict()
+            ),
+            "last_policy_gate": None if self.last_policy_gate_ is None else self.last_policy_gate_.to_dict(),
+            "last_policy_evidence": (
+                None if self.last_policy_evidence_ is None else self.last_policy_evidence_.to_dict()
             ),
             "rolling_policy_update": (
                 None if self.rolling_policy_report_ is None else self.rolling_policy_report_.to_dict()
@@ -1093,8 +1166,6 @@ class AdaptiveRanker:
         )
 
     def _offline_policy_allowed(self) -> bool:
-        if not self.config.require_offline_policy_gate:
-            return True
         return bool(self.offline_policy_gate_ is not None and self.offline_policy_gate_.allowed)
 
     def _offline_policy_serving_weight(self) -> float:
@@ -1119,6 +1190,64 @@ class AdaptiveRanker:
         selected = self.offline_policy_.recommend(row["context_hash"], candidates, top_k=1)
         return float(bool(selected and selected[0] == chosen))
 
+    def _evaluate_candidate_policy(
+        self,
+        candidate_policy: CQLDiscretePolicy,
+        evaluation: pd.DataFrame,
+        *,
+        reward_col: str,
+        cluster_bootstrap_samples: int,
+        cluster_col: str,
+        max_weight: Optional[float] = None,
+    ) -> PolicyComparisonReport | BootstrapPolicyComparisonReport:
+        """Compare a local candidate with the explicit logging-policy baseline."""
+        work = evaluation.copy()
+        candidate_probability_col = "__orchid_candidate_probability__"
+        baseline_probability_col = "__orchid_logging_probability__"
+        def candidate_probability(row: pd.Series) -> float:
+            selected = candidate_policy.recommend(
+                row["context_hash"], parse_candidate_list(row["candidate_item_ids"]), top_k=1
+            )
+            return float(bool(selected and selected[0] == row["chosen_item_id"]))
+
+        work[candidate_probability_col] = [candidate_probability(row) for _, row in work.iterrows()]
+        # The logging-policy probability of the action actually taken is the
+        # recorded propensity. This supplies an explicit, evaluable incumbent
+        # baseline with value equal to the logged reward mean.
+        work[baseline_probability_col] = work["propensity"].astype(float)
+        if cluster_bootstrap_samples > 0:
+            return bootstrap_compare_logged_policies(
+                work,
+                reward_col=reward_col,
+                propensity_col="propensity",
+                target_probability_col=candidate_probability_col,
+                baseline_probability_col=baseline_probability_col,
+                max_weight=max_weight,
+                n_bootstrap=cluster_bootstrap_samples,
+                random_state=self.config.random_state,
+                cluster_col=cluster_col,
+            )
+        return compare_logged_policies(
+            work,
+            reward_col=reward_col,
+            propensity_col="propensity",
+            target_probability_col=candidate_probability_col,
+            baseline_probability_col=baseline_probability_col,
+            max_weight=max_weight,
+        )
+
+    def _resolved_policy_name(self) -> str:
+        if self.recommender_ is not None and self.recommender_.policy_name_ is not None:
+            return str(self.recommender_.policy_name_)
+        return str(self.config.policy)
+
+    def _derive_deployment_version(self, events: pd.DataFrame) -> str:
+        """Create a stable model/configuration fingerprint for decision logs."""
+        digest = hashlib.sha256()
+        digest.update(repr(self.config).encode("utf-8"))
+        digest.update(events.to_json(orient="split", default_handler=str).encode("utf-8"))
+        return f"orchid-{self._resolved_policy_name()}-{digest.hexdigest()[:12]}"
+
     def _require_fitted(self) -> None:
         if not self.is_fitted:
             raise RuntimeError("AdaptiveRanker.fit must be called before serving")
@@ -1129,6 +1258,30 @@ def _first_metadata_value(metadata: dict[str, Any], keys: Sequence[str]) -> Any:
         if key in metadata:
             return metadata[key]
     return None
+
+
+def _binary_outcome(value: Any) -> int:
+    """Validate one live binary outcome without integer truncation."""
+    try:
+        numeric = float(value)
+    except (TypeError, ValueError) as exc:
+        raise ValueError("outcome must be exactly 0 or 1") from exc
+    if not np.isfinite(numeric) or numeric not in {0.0, 1.0}:
+        raise ValueError("outcome must be exactly 0 or 1")
+    return int(numeric)
+
+
+def _require_disjoint_policy_logs(training: pd.DataFrame, evaluation: pd.DataFrame) -> None:
+    """Reject any held-out policy-evaluation event that appears in training."""
+    if "decision_id" in training.columns and "decision_id" in evaluation.columns:
+        training_keys = set(training["decision_id"].astype(str))
+        evaluation_keys = set(evaluation["decision_id"].astype(str))
+    else:
+        decision_key = ["user_id", "timestamp", "context_hash", "chosen_item_id"]
+        training_keys = set(training[decision_key].itertuples(index=False, name=None))
+        evaluation_keys = set(evaluation[decision_key].itertuples(index=False, name=None))
+    if training_keys.intersection(evaluation_keys):
+        raise ValueError("evaluation_decisions must be disjoint from policy training")
 
 
 def _optional_float(value: Any) -> Optional[float]:

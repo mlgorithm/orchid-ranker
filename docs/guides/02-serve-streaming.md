@@ -20,9 +20,9 @@ ranked, decision = ranker.recommend_and_log(
 )
 ```
 
-The chosen item is first in `ranked`. The decision records the exact candidate
-set, scores, action probabilities, chosen propensity, context, and policy
-version.
+The chosen item is first in `ranked`. The decision is deeply immutable and
+records the exact candidate set, scores, action probabilities, chosen
+propensity, resolved policy, and deployment-specific policy version.
 
 Persist the decision in an append-only store before returning the response.
 Without that record, randomized traffic cannot be evaluated reliably.
@@ -71,6 +71,32 @@ ranked = ranker.recommend(user.id, [item.id for item in eligible])
 Do not expect a statistical ranking score to enforce legal, safety, inventory,
 or access-control rules.
 
+An empty eligible list is a safe no-op: `recommend(user.id, [])` returns `[]`.
+It never falls back to the training catalog. Passing `None` also returns no
+items unless you explicitly enable `allow_catalog_fallback=True` or attach a
+candidate generator.
+
+## Timestamps and outcomes
+
+Use one consistent numeric time unit (for example, Unix seconds or a monotonic
+event sequence). Orchid preserves fractional timestamps and rejects negative,
+non-finite, or non-numeric values. Outcomes are exactly `0` or `1`; values such
+as `0.9` are rejected rather than silently rounded.
+
+## New catalog items
+
+Register items before serving them if they were not present in fitting history:
+
+```python
+ranker.register_items(catalog)
+```
+
+`fit_semantic_items(catalog)` registers the same catalog automatically. New
+items use a conservative OOV representation until the next offline refit, but
+they can be recommended, logged, observed, and included in that refit. Check
+`recommendation.feedback_supported` before serving an item produced by a custom
+candidate source.
+
 ## Exploration
 
 Start with `exploration=0.0`. Introduce a small nonzero rate only after:
@@ -101,6 +127,14 @@ policy, but they do not replace a controlled live rollout.
 - Monitor missing and delayed outcomes.
 - Refit on chronological windows rather than random row splits.
 - Treat user identifiers and outcome histories as sensitive data.
+
+## Concurrency
+
+One `AdaptiveRanker` serializes its fit, recommendation, observation, decision
+logging, and policy-promotion operations. This is safe for a modest serving
+process and guarantees a request never sees a partially updated model. For
+high-throughput systems, use one fitted ranker per worker and promote a freshly
+fitted process or snapshot atomically at the application boundary.
 
 The same `AdaptiveRanker` object is used from first fit through production
 feedback; there is no separate serving model to configure.

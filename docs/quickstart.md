@@ -109,7 +109,8 @@ contract.
 
 ## Common issues
 
-- No recommendations: make sure candidates appear in the fitted history.
-- An outcome is rejected: values must be binary `0` or `1`.
+- No recommendations: an empty eligible list returns `[]`; make sure the list
+  contains fitted or registered catalog items.
+- An outcome is rejected: values must be exactly binary `0` or `1`.
 - Results do not adapt: call `observe` after completed interactions.
-- Timestamp errors: use non-negative values in chronological order.
+- Timestamp errors: use finite, non-negative numeric values in chronological order.

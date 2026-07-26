@@ -2,8 +2,11 @@
 
 ## Before the release
 
-1. Choose the next semantic version.
-2. Update `pyproject.toml`, `src/orchid_ranker/__init__.py`, and `CHANGELOG.md`.
+1. Start from the next development version on `main` (currently
+   `0.7.0.dev0`). Choose the final release version only for a reviewed release
+   candidate.
+2. Update `pyproject.toml`, `src/orchid_ranker/__init__.py`, and `CHANGELOG.md`
+   together; all three identifiers must match for a tagged release.
 3. Run the complete local gate:
 
    ```bash
@@ -18,7 +21,9 @@
    ```
 
 5. Confirm the wheel contains only the intended package files and that the
-   source archive contains the current documentation and examples.
+   source archive contains the current documentation and examples. Install the
+   built wheel into a clean environment and run the package smoke test before
+   publication.
 
 ## Publish
 

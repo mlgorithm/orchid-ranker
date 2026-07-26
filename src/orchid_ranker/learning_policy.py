@@ -6,6 +6,7 @@ import math
 from dataclasses import dataclass
 from typing import Any, Dict, Mapping, Optional, Sequence
 
+from .adaptive_schema import normalize_timestamps
 from .delayed_gain import make_delayed_gain_features
 from .progression_reward import (
     ProgressionRewardBreakdown,
@@ -194,6 +195,8 @@ class ProgressionValuePolicy:
             self._recent_concepts_by_user = {}
 
         work = interactions.copy()
+        if timestamp_col is not None:
+            work[timestamp_col] = normalize_timestamps(work[timestamp_col], timestamp_col)
         work["__orchid_order__"] = range(len(work))
         sort_cols = [user_col]
         if timestamp_col is not None:
@@ -210,7 +213,7 @@ class ProgressionValuePolicy:
         candidate_item_ids: Sequence[Any],
         *,
         top_k: int = 5,
-    ) -> list[ProgressionPolicyRecommendation]:
+    ) -> list[Any]:
         """Rank candidate items by expected progression reward."""
         if top_k <= 0 or not candidate_item_ids:
             return []
@@ -442,6 +445,8 @@ class HybridAdaptivePolicy(ProgressionValuePolicy):
         self.concept_correct = {concept: float(value) for concept, value in dict(concept_correct or {}).items()}
         self.concept_count = {concept: float(value) for concept, value in dict(concept_count or {}).items()}
         self.global_correct = _clamp01(global_correct)
+        self._global_correct_total = float(sum(self.item_correct.values()))
+        self._global_outcome_count = float(sum(self.item_count.values()))
         self.prior_smoothing = float(prior_smoothing)
         self.concept_smoothing = float(concept_smoothing)
         self.min_item_support = float(min_item_support)
@@ -476,6 +481,8 @@ class HybridAdaptivePolicy(ProgressionValuePolicy):
 
         update_priors = not self.item_count and not self.concept_count
         work = interactions.copy()
+        if timestamp_col is not None:
+            work[timestamp_col] = normalize_timestamps(work[timestamp_col], timestamp_col)
         work["__orchid_order__"] = range(len(work))
         sort_cols = [user_col]
         if timestamp_col is not None:
@@ -574,10 +581,10 @@ class HybridAdaptivePolicy(ProgressionValuePolicy):
         self.item_count[item_id] = self.item_count.get(item_id, 0.0) + 1.0
         self.concept_correct[concept] = self.concept_correct.get(concept, 0.0) + label
         self.concept_count[concept] = self.concept_count.get(concept, 0.0) + 1.0
-        total = sum(self.item_correct.values())
-        count = sum(self.item_count.values())
-        if count > 0.0:
-            self.global_correct = _clamp01(total / count)
+        self._global_correct_total += label
+        self._global_outcome_count += 1.0
+        if self._global_outcome_count > 0.0:
+            self.global_correct = _clamp01(self._global_correct_total / self._global_outcome_count)
 
     def _item_prior(self, item_id: Any) -> float:
         total = self.item_correct.get(item_id, 0.0)
@@ -918,6 +925,7 @@ def _observe_tracer(
     timestamp: Optional[Any] = None,
 ) -> Any:
     """Forward timestamps to time-aware tracers without requiring every tracer to accept them."""
+    params: Mapping[str, inspect.Parameter]
     if timestamp is not None:
         try:
             params = inspect.signature(tracer.observe).parameters

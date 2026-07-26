@@ -2,6 +2,22 @@
 
 ## Unreleased
 
+### Serving safety
+
+- Moved `main` to the development version `0.7.0.dev0`; the consolidated API
+  is not mislabeled as the released `0.6.0` package.
+- Made explicit empty candidate sets return no recommendations. Catalog fallback
+  is opt-in, so an empty eligibility filter cannot bypass application controls.
+- Made decision records deeply immutable, normalized timestamps at every event
+  and decision boundary, and reject duplicate logged candidates.
+- Require exact binary live outcomes and validate timestamps before conversion.
+- Made offline-policy fitting transactional: held-out comparison against the
+  logging-policy baseline and a passing rollout gate are required for promotion.
+- Added catalog registration with a reserved OOV representation, allowing a
+  semantic catalog item to complete serve, log, observe, and refit safely.
+- Made SAINT+ time features causal and serialized ranker state operations for
+  a clear single-object serving concurrency contract.
+
 ### Product consolidation
 
 - Reduced the package to one public product: `AdaptiveRanker`.

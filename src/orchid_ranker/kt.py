@@ -21,6 +21,8 @@ import pandas as pd
 import torch
 import torch.nn as nn
 
+from .adaptive_schema import normalize_timestamps
+
 __all__ = [
     "AKTTracer",
     "DKTTracer",
@@ -114,9 +116,9 @@ def build_sakt_examples(
     no-leakage contract -- see :class:`SAKTTrainingExample`).
 
     The per-window ``elapsed``/``lag`` temporal features are aligned to each
-    window position: ``elapsed[t]`` is the gap from ``t-1`` to ``t`` and
-    ``lag[t]`` is the gap from ``t`` to the LAST position of the window (the most
-    recent query). Windows with a single interaction are still emitted -- a
+    window position: both are causal gaps from ``t-1`` to ``t``. Keeping the
+    legacy ``lag`` feature causal prevents future event times from leaking into
+    predictions for earlier positions. Windows with a single interaction are still emitted -- a
     full-sequence model trains on position 0 with an empty (all-padded) causal
     context, which is the cold-start prediction.
     """
@@ -131,6 +133,8 @@ def build_sakt_examples(
         raise ValueError(f"interactions missing required columns: {sorted(missing)}")
 
     work = interactions.copy()
+    if timestamp_col is not None:
+        work[timestamp_col] = normalize_timestamps(work[timestamp_col], timestamp_col)
     work["__orchid_order__"] = np.arange(len(work))
     sort_cols = [user_col]
     if timestamp_col is not None:
@@ -157,8 +161,7 @@ def build_sakt_examples(
             if timestamp_col is not None:
                 win_times = times[start : start + max_seq_len]
                 win_elapsed = tuple(_elapsed_history(win_times))
-                query_time = float(win_times[-1])
-                win_lag = tuple(max(0.0, query_time - t) for t in win_times)
+                win_lag = tuple(win_elapsed)
             else:
                 win_elapsed = ()
                 win_lag = ()
@@ -902,6 +905,9 @@ class SAKTTracer:
         self.result_: Dict[str, float] = {}
         self._item2idx: Dict[Any, int] = {}
         self._idx2item: Dict[int, Any] = {}
+        self._unknown_item_idx: int = 0
+        self._model_num_items: int = 0
+        self._allow_unknown_items: bool = False
         self._histories: Dict[Any, List[Tuple[int, int]]] = {}
         self._history_times: Dict[Any, List[float]] = {}
         # Records whether ``fit`` was given a ``timestamp_col``. Used by
@@ -948,6 +954,11 @@ class SAKTTracer:
         item_ids = sorted(interactions[item_col].drop_duplicates().tolist(), key=lambda value: str(value))
         self._item2idx = {item_id: idx + 1 for idx, item_id in enumerate(item_ids)}
         self._idx2item = {idx: item_id for item_id, idx in self._item2idx.items()}
+        # Reserve one non-padding embedding for catalog items registered after
+        # fitting. The adaptive facade enables it explicitly; direct tracer use
+        # keeps rejecting unknown IDs by default.
+        self._unknown_item_idx = len(self._item2idx) + 1
+        self._model_num_items = self._unknown_item_idx
         self.training_examples_ = examples
         self._after_item_mapping(interactions, item_col=item_col)
         self._histories = self._build_histories(
@@ -998,7 +1009,7 @@ class SAKTTracer:
 
     def _make_model(self) -> nn.Module:
         return _SAKTModel(
-            num_items=len(self._item2idx),
+            num_items=self._model_num_items,
             max_seq_len=self.max_seq_len,
             d_model=self.d_model,
             n_heads=self.n_heads,
@@ -1083,6 +1094,8 @@ class SAKTTracer:
         try:
             return self._item2idx[item_id]
         except KeyError as exc:
+            if self._allow_unknown_items:
+                return self._unknown_item_idx
             raise KeyError(f"Unknown item_id={item_id!r}") from exc
 
     def _build_histories(
@@ -1095,6 +1108,8 @@ class SAKTTracer:
         timestamp_col: Optional[str],
     ) -> Dict[Any, List[Tuple[int, int]]]:
         work = interactions.copy()
+        if timestamp_col is not None:
+            work[timestamp_col] = normalize_timestamps(work[timestamp_col], timestamp_col)
         work["__orchid_order__"] = np.arange(len(work))
         sort_cols = [user_col]
         if timestamp_col is not None:
@@ -1261,7 +1276,7 @@ class SAINTTracer(SAKTTracer):
 
     def _make_model(self) -> nn.Module:
         return _SAINTModel(
-            num_items=len(self._item2idx),
+            num_items=self._model_num_items,
             max_seq_len=self.max_seq_len,
             d_model=self.d_model,
             n_heads=self.n_heads,
@@ -1274,8 +1289,8 @@ class SAINTPlusTracer(SAINTTracer):
     """SAINT-style tracer with elapsed-time and lag-time history features.
 
     When ``timestamp_col`` is supplied, training examples include two temporal
-    signals inspired by SAINT+: elapsed time between historical attempts and lag
-    time from each historical attempt to the queried attempt. Without timestamps
+    signals inspired by SAINT+: elapsed time between historical attempts and a
+    second causal gap encoding. Without timestamps
     the tracer still fits, but temporal embeddings are zero and it behaves like
     :class:`SAINTTracer`.
     """
@@ -1357,7 +1372,7 @@ class SAINTPlusTracer(SAINTTracer):
 
     def _make_model(self) -> nn.Module:
         return _SAINTPlusModel(
-            num_items=len(self._item2idx),
+            num_items=self._model_num_items,
             max_seq_len=self.max_seq_len,
             d_model=self.d_model,
             n_heads=self.n_heads,
@@ -1432,8 +1447,7 @@ class SAINTPlusTracer(SAINTTracer):
         items[:, n] = list(internal_items)
         if times and len(times) == n and n > 0:
             elapsed_values = _bucket_time_values(_elapsed_history(times), self.num_time_buckets)
-            query_time = float(times[-1])
-            lag_values = _bucket_time_values([max(0.0, query_time - t) for t in times], self.num_time_buckets)
+            lag_values = _bucket_time_values(_elapsed_history(times), self.num_time_buckets)
             elapsed[:, :n] = elapsed_values[:n]
             lag[:, :n] = lag_values[:n]
 
@@ -1460,7 +1474,7 @@ class DKTTracer(SAKTTracer):
 
     def _make_model(self) -> nn.Module:
         return _DKTModel(
-            num_items=len(self._item2idx),
+            num_items=self._model_num_items,
             d_model=self.d_model,
             dropout=self.dropout,
         )
@@ -1505,7 +1519,7 @@ class DKVMNTracer(SAKTTracer):
 
     def _make_model(self) -> nn.Module:
         return _DKVMNModel(
-            num_items=len(self._item2idx),
+            num_items=self._model_num_items,
             d_model=self.d_model,
             dropout=self.dropout,
         )
@@ -1588,12 +1602,13 @@ class AKTTracer(SAKTTracer):
             difficulty.update({item_id: float(value) for item_id, value in means.items()})
         difficulty.update(self._fit_item_difficulty_map or {})
 
-        values = np.zeros((len(self._item2idx) + 1,), dtype=np.float32)
+        values = np.zeros((self._model_num_items + 1,), dtype=np.float32)
         for external_id, internal_id in self._item2idx.items():
             raw_value = float(difficulty.get(external_id, 0.5))
             if not np.isfinite(raw_value) or not 0.0 <= raw_value <= 1.0:
                 raise ValueError(f"difficulty for item_id={external_id!r} must be finite and in [0, 1]")
             values[internal_id] = raw_value
+        values[self._unknown_item_idx] = 0.5
         self.item_difficulty_ = {item_id: float(difficulty.get(item_id, 0.5)) for item_id in self._item2idx}
         self._item_difficulty_tensor = torch.as_tensor(values, dtype=torch.float32)
 
@@ -1603,7 +1618,7 @@ class AKTTracer(SAKTTracer):
         # The difficulty tensor (per-item prior in [0, 1]) WARM-STARTS the learned
         # Rasch difficulty embedding ``mu_q``; it then trains freely.
         return _AKTModel(
-            num_items=len(self._item2idx),
+            num_items=self._model_num_items,
             max_seq_len=self.max_seq_len,
             d_model=self.d_model,
             n_heads=self.n_heads,
