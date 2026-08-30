@@ -161,5 +161,7 @@ jobs:
       - name: Deploy versioned docs
         run: |
           git fetch origin gh-pages --depth=1 || true
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           VERSION=${GITHUB_REF_NAME#v}
           mike deploy --push --update-aliases $VERSION latest
