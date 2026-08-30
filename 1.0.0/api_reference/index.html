@@ -1,0 +1,2151 @@
+
+<!doctype html>
+<html lang="en" class="no-js">
+  <head>
+    
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width,initial-scale=1">
+      
+        <meta name="description" content="Adaptive-practice engine for learning products with one fit, recommend, and observe workflow.">
+      
+      
+      
+        <link rel="canonical" href="https://mlgorithm.github.io/orchid-ranker/1.0.0/api_reference/">
+      
+      
+        <link rel="prev" href="../examples/">
+      
+      
+        <link rel="next" href="../api-support-policy/">
+      
+      
+        
+      
+      
+      <link rel="icon" href="../assets/images/favicon.png">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.7.7">
+    
+    
+      
+        <title>API - Orchid Ranker</title>
+      
+    
+    
+      <link rel="stylesheet" href="../assets/stylesheets/main.ec1eaa64.min.css">
+      
+        
+        <link rel="stylesheet" href="../assets/stylesheets/palette.ab4e12ef.min.css">
+      
+      
+
+
+    
+    
+      
+    
+    
+      
+        
+        
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+        <link rel="stylesheet" href="https://fonts.googleapis.com/css?family=Roboto:300,300i,400,400i,700,700i%7CRoboto+Mono:400,400i,700,700i&display=fallback">
+        <style>:root{--md-text-font:"Roboto";--md-code-font:"Roboto Mono"}</style>
+      
+    
+    
+      <link rel="stylesheet" href="../assets/_mkdocstrings.css">
+    
+    <script>__md_scope=new URL("..",location),__md_hash=e=>[...e].reduce(((e,_)=>(e<<5)-e+_.charCodeAt(0)),0),__md_get=(e,_=localStorage,t=__md_scope)=>JSON.parse(_.getItem(t.pathname+"."+e)),__md_set=(e,_,t=localStorage,a=__md_scope)=>{try{t.setItem(a.pathname+"."+e,JSON.stringify(_))}catch(e){}}</script>
+    
+      
+
+    
+    
+  </head>
+  
+  
+    
+    
+      
+    
+    
+    
+    
+    <body dir="ltr" data-md-color-scheme="default" data-md-color-primary="deep-purple" data-md-color-accent="teal">
+  
+    
+    <input class="md-toggle" data-md-toggle="drawer" type="checkbox" id="__drawer" autocomplete="off">
+    <input class="md-toggle" data-md-toggle="search" type="checkbox" id="__search" autocomplete="off">
+    <label class="md-overlay" for="__drawer"></label>
+    <div data-md-component="skip">
+      
+        
+        <a href="#api-reference" class="md-skip">
+          Skip to content
+        </a>
+      
+    </div>
+    <div data-md-component="announce">
+      
+    </div>
+    
+      <div data-md-color-scheme="default" data-md-component="outdated" hidden>
+        
+      </div>
+    
+    
+      
+
+<header class="md-header" data-md-component="header">
+  <nav class="md-header__inner md-grid" aria-label="Header">
+    <a href=".." title="Orchid Ranker" class="md-header__button md-logo" aria-label="Orchid Ranker" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    <label class="md-header__button md-icon" for="__drawer">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M3 6h18v2H3zm0 5h18v2H3zm0 5h18v2H3z"/></svg>
+    </label>
+    <div class="md-header__title" data-md-component="header-title">
+      <div class="md-header__ellipsis">
+        <div class="md-header__topic">
+          <span class="md-ellipsis">
+            Orchid Ranker
+          </span>
+        </div>
+        <div class="md-header__topic" data-md-component="header-topic">
+          <span class="md-ellipsis">
+            
+              API
+            
+          </span>
+        </div>
+      </div>
+    </div>
+    
+      
+        <form class="md-header__option" data-md-component="palette">
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="(prefers-color-scheme: light)" data-md-color-scheme="default" data-md-color-primary="deep-purple" data-md-color-accent="teal"  aria-label="Switch to dark mode"  type="radio" name="__palette" id="__palette_0">
+    
+      <label class="md-header__button md-icon" title="Switch to dark mode" for="__palette_1" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a4 4 0 0 0-4 4 4 4 0 0 0 4 4 4 4 0 0 0 4-4 4 4 0 0 0-4-4m0 10a6 6 0 0 1-6-6 6 6 0 0 1 6-6 6 6 0 0 1 6 6 6 6 0 0 1-6 6m8-9.31V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12z"/></svg>
+      </label>
+    
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="(prefers-color-scheme: dark)" data-md-color-scheme="slate" data-md-color-primary="deep-purple" data-md-color-accent="teal"  aria-label="Switch to light mode"  type="radio" name="__palette" id="__palette_1">
+    
+      <label class="md-header__button md-icon" title="Switch to light mode" for="__palette_0" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 18c-.89 0-1.74-.2-2.5-.55C11.56 16.5 13 14.42 13 12s-1.44-4.5-3.5-5.45C10.26 6.2 11.11 6 12 6a6 6 0 0 1 6 6 6 6 0 0 1-6 6m8-9.31V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12z"/></svg>
+      </label>
+    
+  
+</form>
+      
+    
+    
+      <script>var palette=__md_get("__palette");if(palette&&palette.color){if("(prefers-color-scheme)"===palette.color.media){var media=matchMedia("(prefers-color-scheme: light)"),input=document.querySelector(media.matches?"[data-md-color-media='(prefers-color-scheme: light)']":"[data-md-color-media='(prefers-color-scheme: dark)']");palette.color.media=input.getAttribute("data-md-color-media"),palette.color.scheme=input.getAttribute("data-md-color-scheme"),palette.color.primary=input.getAttribute("data-md-color-primary"),palette.color.accent=input.getAttribute("data-md-color-accent")}for(var[key,value]of Object.entries(palette.color))document.body.setAttribute("data-md-color-"+key,value)}</script>
+    
+    
+    
+      
+      
+        <label class="md-header__button md-icon" for="__search">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        </label>
+        <div class="md-search" data-md-component="search" role="dialog">
+  <label class="md-search__overlay" for="__search"></label>
+  <div class="md-search__inner" role="search">
+    <form class="md-search__form" name="search">
+      <input type="text" class="md-search__input" name="query" aria-label="Search" placeholder="Search" autocapitalize="off" autocorrect="off" autocomplete="off" spellcheck="false" data-md-component="search-query" required>
+      <label class="md-search__icon md-icon" for="__search">
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11z"/></svg>
+      </label>
+      <nav class="md-search__options" aria-label="Search">
+        
+        <button type="reset" class="md-search__icon md-icon" title="Clear" aria-label="Clear" tabindex="-1">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M19 6.41 17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+        </button>
+      </nav>
+      
+        <div class="md-search__suggest" data-md-component="search-suggest"></div>
+      
+    </form>
+    <div class="md-search__output">
+      <div class="md-search__scrollwrap" tabindex="0" data-md-scrollfix>
+        <div class="md-search-result" data-md-component="search-result">
+          <div class="md-search-result__meta">
+            Initializing search
+          </div>
+          <ol class="md-search-result__list" role="presentation"></ol>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+      
+    
+    
+      <div class="md-header__source">
+        <a href="https://github.com/mlgorithm/orchid-ranker" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"/></svg>
+  </div>
+  <div class="md-source__repository">
+    mlgorithm/orchid-ranker
+  </div>
+</a>
+      </div>
+    
+  </nav>
+  
+</header>
+    
+    <div class="md-container" data-md-component="container">
+      
+      
+        
+          
+            
+<nav class="md-tabs" aria-label="Tabs" data-md-component="tabs">
+  <div class="md-grid">
+    <ul class="md-tabs__list">
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href=".." class="md-tabs__link">
+        
+  
+  
+    
+  
+  Home
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../quickstart/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Quickstart
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../overview/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  How Orchid works
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../guides/00-adaptive-practice/" class="md-tabs__link">
+          
+  
+  
+  Guides
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+  
+    
+  
+  
+    <li class="md-tabs__item md-tabs__item--active">
+      <a href="./" class="md-tabs__link">
+        
+  
+  
+    
+  
+  API
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../api-support-policy/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  API support policy
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../benchmarks/credibility/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Validate a rollout
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../design-partner-council/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Design-partner council
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../roadmap/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Product roadmap
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../contributing/" class="md-tabs__link">
+          
+  
+  
+  Contributing
+
+        </a>
+      </li>
+    
+  
+
+      
+    </ul>
+  </div>
+</nav>
+          
+        
+      
+      <main class="md-main" data-md-component="main">
+        <div class="md-main__inner md-grid">
+          
+            
+              
+              <div class="md-sidebar md-sidebar--primary" data-md-component="sidebar" data-md-type="navigation" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+
+  
+
+
+<nav class="md-nav md-nav--primary md-nav--lifted" aria-label="Navigation" data-md-level="0">
+  <label class="md-nav__title" for="__drawer">
+    <a href=".." title="Orchid Ranker" class="md-nav__button md-logo" aria-label="Orchid Ranker" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    Orchid Ranker
+  </label>
+  
+    <div class="md-nav__source">
+      <a href="https://github.com/mlgorithm/orchid-ranker" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"/></svg>
+  </div>
+  <div class="md-source__repository">
+    mlgorithm/orchid-ranker
+  </div>
+</a>
+    </div>
+  
+  <ul class="md-nav__list" data-md-scrollfix>
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href=".." class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Home
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../quickstart/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Quickstart
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../overview/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    How Orchid works
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+          
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_4" >
+        
+          
+          <label class="md-nav__link" for="__nav_4" id="__nav_4_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Guides
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_4_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_4">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Guides
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../guides/00-adaptive-practice/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Adaptive-practice data readiness
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../guides/01-fit-offline/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Fit historical outcomes
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../guides/02-serve-streaming/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Production serving
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../guides/03-learning-pilot/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Run a learning-efficacy pilot
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../guides/04-pilot-integration/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Pilot integration contract
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../guides/05-pilot-workflow/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    End-to-end reference-pilot workflow
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../examples/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Reference pilots
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+    
+  
+  
+  
+    <li class="md-nav__item md-nav__item--active">
+      
+      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
+      
+      
+        
+      
+      
+        <label class="md-nav__link md-nav__link--active" for="__toc">
+          
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    API
+  
+
+    
+  </span>
+  
+  
+
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
+      <a href="./" class="md-nav__link md-nav__link--active">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    API
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+      
+        
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#at-a-glance" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        At a glance
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#adaptiveranker" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        AdaptiveRanker
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="AdaptiveRanker">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#construct-and-fit" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Construct and fit
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#recommend" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        recommend
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#observe-and-register_items" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        observe and register_items
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#durable-decisions-and-delayed-outcomes" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Durable decisions and delayed outcomes
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Durable decisions and delayed outcomes">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#recommend_and_log" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        recommend_and_log
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#observe_decision-persistence-and-recovery" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        observe_decision, persistence, and recovery
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#catalog-validation" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Catalog validation
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#controlled-pilot-api" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Controlled pilot API
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Controlled pilot API">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#build-a-frozen-pilot" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Build a frozen pilot
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#serve-an-lms-request" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Serve an LMS request
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#modes-and-operation-events" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Modes and operation events
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#record-actual-delivery-and-score-it" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Record actual delivery and score it
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#import-delayed-assessments-and-export-evidence" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Import delayed assessments and export evidence
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#offline-policy-and-evaluation-apis" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Offline policy and evaluation APIs
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../api-support-policy/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    API support policy
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../benchmarks/credibility/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Validate a rollout
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../design-partner-council/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Design-partner council
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../roadmap/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Product roadmap
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+          
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_10" >
+        
+          
+          <label class="md-nav__link" for="__nav_10" id="__nav_10_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Contributing
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_10_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_10">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Contributing
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../contributing/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Contribution guide
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../coding-standards/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Coding standards
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+  </ul>
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+            
+              
+              <div class="md-sidebar md-sidebar--secondary" data-md-component="sidebar" data-md-type="toc" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#at-a-glance" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        At a glance
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#adaptiveranker" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        AdaptiveRanker
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="AdaptiveRanker">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#construct-and-fit" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Construct and fit
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#recommend" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        recommend
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#observe-and-register_items" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        observe and register_items
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#durable-decisions-and-delayed-outcomes" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Durable decisions and delayed outcomes
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Durable decisions and delayed outcomes">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#recommend_and_log" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        recommend_and_log
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#observe_decision-persistence-and-recovery" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        observe_decision, persistence, and recovery
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#catalog-validation" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Catalog validation
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#controlled-pilot-api" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Controlled pilot API
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Controlled pilot API">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#build-a-frozen-pilot" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Build a frozen pilot
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#serve-an-lms-request" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Serve an LMS request
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#modes-and-operation-events" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Modes and operation events
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#record-actual-delivery-and-score-it" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Record actual delivery and score it
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#import-delayed-assessments-and-export-evidence" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Import delayed assessments and export evidence
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#offline-policy-and-evaluation-apis" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Offline policy and evaluation APIs
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+          
+          
+            <div class="md-content" data-md-component="content">
+              
+              <article class="md-content__inner md-typeset">
+                
+                  
+
+
+  
+  
+
+
+<h1 id="api-reference">API reference<a class="headerlink" href="#api-reference" title="Permanent link">&para;</a></h1>
+<p><code>AdaptiveRanker</code> is the package-root API. It fits from completed learning
+attempts, ranks an application-approved candidate set, and accepts feedback.
+Supporting modules add durable audit records, catalog validation, and a
+reference controlled-pilot adapter.</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="kn">from</span><span class="w"> </span><span class="nn">orchid_ranker</span><span class="w"> </span><span class="kn">import</span> <span class="n">AdaptiveRanker</span>
+</code></pre></div>
+<p>Use the <a href="../guides/02-serve-streaming/">production-serving guide</a> for the
+ordinary request loop and the <a href="../guides/04-pilot-integration/">pilot integration contract</a>
+when a next-item choice is part of an efficacy study.</p>
+<h2 id="at-a-glance">At a glance<a class="headerlink" href="#at-a-glance" title="Permanent link">&para;</a></h2>
+<table>
+<thead>
+<tr>
+<th>Need</th>
+<th>API</th>
+<th>Result</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Fit a learning policy</td>
+<td><code>AdaptiveRanker().fit(events, ...)</code></td>
+<td>The fitted ranker</td>
+</tr>
+<tr>
+<td>Rank safe exercises</td>
+<td><code>ranker.recommend(user_id, ids)</code></td>
+<td><code>AdaptiveLearningRecommendation</code> values</td>
+</tr>
+<tr>
+<td>Adapt after an attempt</td>
+<td><code>ranker.observe(...)</code></td>
+<td>Updates the learner state</td>
+</tr>
+<tr>
+<td>Keep a reproducible serving record</td>
+<td><code>ranker.recommend_and_log(...)</code></td>
+<td>Ranked items and immutable <code>LoggedDecision</code></td>
+</tr>
+<tr>
+<td>Attach a delayed score safely</td>
+<td><code>ranker.observe_decision(...)</code></td>
+<td>Durable <code>DecisionOutcome</code> and normally a learner update</td>
+</tr>
+<tr>
+<td>Validate authoring data</td>
+<td><code>validate_learning_catalog(frame)</code></td>
+<td>Normalized exercises and all diagnostics</td>
+</tr>
+<tr>
+<td>Run a reference experiment adapter</td>
+<td><code>AdaptivePracticePilot</code></td>
+<td>Assignment, decisions, lifecycle evidence, analysis frames</td>
+</tr>
+</tbody>
+</table>
+<p>All timestamps must be finite, non-negative numeric values in one consistent
+application-defined unit. Outcomes are binary <code>0</code> or <code>1</code>; do not turn missing,
+abandoned, or unscored work into <code>0</code>.</p>
+<h2 id="adaptiveranker">AdaptiveRanker<a class="headerlink" href="#adaptiveranker" title="Permanent link">&para;</a></h2>
+<h3 id="construct-and-fit">Construct and fit<a class="headerlink" href="#construct-and-fit" title="Permanent link">&para;</a></h3>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a><span class="n">ranker</span> <span class="o">=</span> <span class="n">AdaptiveRanker</span><span class="p">(</span>
+<a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a>    <span class="n">kt_backbone</span><span class="o">=</span><span class="s2">"empirical"</span><span class="p">,</span>  <span class="c1"># optional AdaptiveRankerConfig override</span>
+<a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a>    <span class="n">decision_store</span><span class="o">=</span><span class="n">store</span><span class="p">,</span>     <span class="c1"># optional durable store</span>
+<a id="__codelineno-1-4" name="__codelineno-1-4" href="#__codelineno-1-4"></a><span class="p">)</span>
+<a id="__codelineno-1-5" name="__codelineno-1-5" href="#__codelineno-1-5"></a>
+<a id="__codelineno-1-6" name="__codelineno-1-6" href="#__codelineno-1-6"></a><span class="n">ranker</span><span class="o">.</span><span class="n">fit</span><span class="p">(</span>
+<a id="__codelineno-1-7" name="__codelineno-1-7" href="#__codelineno-1-7"></a>    <span class="n">events</span><span class="p">,</span>
+<a id="__codelineno-1-8" name="__codelineno-1-8" href="#__codelineno-1-8"></a>    <span class="n">user_col</span><span class="o">=</span><span class="s2">"user_id"</span><span class="p">,</span>
+<a id="__codelineno-1-9" name="__codelineno-1-9" href="#__codelineno-1-9"></a>    <span class="n">item_col</span><span class="o">=</span><span class="s2">"item_id"</span><span class="p">,</span>
+<a id="__codelineno-1-10" name="__codelineno-1-10" href="#__codelineno-1-10"></a>    <span class="n">outcome_col</span><span class="o">=</span><span class="s2">"outcome"</span><span class="p">,</span>
+<a id="__codelineno-1-11" name="__codelineno-1-11" href="#__codelineno-1-11"></a>    <span class="n">timestamp_col</span><span class="o">=</span><span class="s2">"timestamp"</span><span class="p">,</span>
+<a id="__codelineno-1-12" name="__codelineno-1-12" href="#__codelineno-1-12"></a>    <span class="n">category_col</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span>
+<a id="__codelineno-1-13" name="__codelineno-1-13" href="#__codelineno-1-13"></a>    <span class="n">difficulty_col</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span>
+<a id="__codelineno-1-14" name="__codelineno-1-14" href="#__codelineno-1-14"></a>    <span class="n">catalog</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span>
+<a id="__codelineno-1-15" name="__codelineno-1-15" href="#__codelineno-1-15"></a>    <span class="n">catalog_item_col</span><span class="o">=</span><span class="s2">"item_id"</span><span class="p">,</span>
+<a id="__codelineno-1-16" name="__codelineno-1-16" href="#__codelineno-1-16"></a>    <span class="n">catalog_category_col</span><span class="o">=</span><span class="s2">"category_id"</span><span class="p">,</span>
+<a id="__codelineno-1-17" name="__codelineno-1-17" href="#__codelineno-1-17"></a>    <span class="n">catalog_difficulty_col</span><span class="o">=</span><span class="s2">"difficulty"</span><span class="p">,</span>
+<a id="__codelineno-1-18" name="__codelineno-1-18" href="#__codelineno-1-18"></a>    <span class="n">prerequisite_by_concept</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span>
+<a id="__codelineno-1-19" name="__codelineno-1-19" href="#__codelineno-1-19"></a><span class="p">)</span>
+</code></pre></div>
+<p>Pass either an <code>AdaptiveRankerConfig</code> as the first argument or its fields as
+keyword overrides; unknown names raise <code>TypeError</code>. <code>fit</code> returns the same
+ranker and expects a pandas DataFrame of completed attempts with learner, item,
+binary outcome, and timestamp columns.</p>
+<p>A canonical catalog is the preferred source of item category and difficulty. It
+validates historical coverage and registers catalog-only items for future
+serving. Its default columns are <code>item_id</code>, <code>category_id</code>, and <code>difficulty</code>;
+use the three <code>catalog_*_col</code> arguments for a different source schema.
+<code>prerequisite_by_concept</code> constrains ranking, but it does not replace the
+application's item-level eligibility.</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a><span class="n">ranker</span> <span class="o">=</span> <span class="n">AdaptiveRanker</span><span class="p">()</span><span class="o">.</span><span class="n">fit</span><span class="p">(</span>
+<a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a>    <span class="n">completed_attempts</span><span class="p">,</span>
+<a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a>    <span class="n">catalog</span><span class="o">=</span><span class="n">exercise_catalog</span><span class="p">,</span>
+<a id="__codelineno-2-4" name="__codelineno-2-4" href="#__codelineno-2-4"></a>    <span class="n">prerequisite_by_concept</span><span class="o">=</span><span class="p">{</span><span class="s2">"advanced"</span><span class="p">:</span> <span class="p">[</span><span class="s2">"fundamentals"</span><span class="p">]},</span>
+<a id="__codelineno-2-5" name="__codelineno-2-5" href="#__codelineno-2-5"></a><span class="p">)</span>
+</code></pre></div>
+<p>Use <code>ranker.is_fitted</code> after a successful fit. <code>ranker.learning_readiness()</code>
+returns data support, outcome balance, metadata coverage, selected tracer, and
+recommended next steps; it is rollout evidence, not a model-quality guarantee.
+<code>ranker.diagnostics()</code> additionally reports adaptive, policy, semantic, and
+decision-store state.</p>
+<p>Sparse learning data automatically uses Orchid's empirical learner. For a first
+frozen pilot, explicitly set <code>kt_backbone="empirical"</code>.</p>
+<h3 id="recommend"><code>recommend</code><a class="headerlink" href="#recommend" title="Permanent link">&para;</a></h3>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a><span class="n">recommendations</span> <span class="o">=</span> <span class="n">ranker</span><span class="o">.</span><span class="n">recommend</span><span class="p">(</span>
+<a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a>    <span class="n">user_id</span><span class="p">,</span>
+<a id="__codelineno-3-3" name="__codelineno-3-3" href="#__codelineno-3-3"></a>    <span class="n">candidate_item_ids</span><span class="p">,</span>
+<a id="__codelineno-3-4" name="__codelineno-3-4" href="#__codelineno-3-4"></a>    <span class="n">top_k</span><span class="o">=</span><span class="mi">3</span><span class="p">,</span>
+<a id="__codelineno-3-5" name="__codelineno-3-5" href="#__codelineno-3-5"></a>    <span class="n">concept_goal</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span>
+<a id="__codelineno-3-6" name="__codelineno-3-6" href="#__codelineno-3-6"></a>    <span class="n">context_hash</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span>
+<a id="__codelineno-3-7" name="__codelineno-3-7" href="#__codelineno-3-7"></a><span class="p">)</span>
+</code></pre></div>
+<p>Ranks the supplied candidate set, returning
+<code>AdaptiveLearningRecommendation</code> values in descending order.</p>
+<table>
+<thead>
+<tr>
+<th>Field</th>
+<th>Meaning</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>item_id</code></td>
+<td>Candidate in ranking order</td>
+</tr>
+<tr>
+<td><code>score</code></td>
+<td>Relative score within this request</td>
+</tr>
+<tr>
+<td><code>outcome_probability</code></td>
+<td>Estimated probability of a positive next attempt</td>
+</tr>
+<tr>
+<td><code>difficulty</code>, <code>category_id</code>, <code>competence</code></td>
+<td>Available learning context</td>
+</tr>
+<tr>
+<td><code>item_support</code>, <code>concept_support</code>, <code>feedback_supported</code></td>
+<td>Evidence/support indicators</td>
+</tr>
+<tr>
+<td><code>prerequisites_met</code>, <code>recent_repetition</code></td>
+<td>Constraint and sequencing signals</td>
+</tr>
+</tbody>
+</table>
+<p>Scores are for ranking the current candidates, not globally calibrated learning
+values. <code>outcome_probability</code> estimates the next practice result, not retained
+mastery. An explicit empty sequence returns <code>[]</code> and never means “all known
+items.” <code>candidate_item_ids=None</code> only permits a configured candidate generator
+or explicit catalog fallback.</p>
+<p>The application owns eligibility: remove unavailable, completed,
+accommodation-inappropriate, prerequisite-blocked, and assessment-only items
+before calling <code>recommend</code>. <code>PilotCatalog</code> enforces a published version of
+these controls for the reference pilot.</p>
+<h3 id="observe-and-register_items"><code>observe</code> and <code>register_items</code><a class="headerlink" href="#observe-and-register_items" title="Permanent link">&para;</a></h3>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a><span class="n">ranker</span><span class="o">.</span><span class="n">observe</span><span class="p">(</span>
+<a id="__codelineno-4-2" name="__codelineno-4-2" href="#__codelineno-4-2"></a>    <span class="n">user_id</span><span class="o">=</span><span class="n">learner_id</span><span class="p">,</span>
+<a id="__codelineno-4-3" name="__codelineno-4-3" href="#__codelineno-4-3"></a>    <span class="n">item_id</span><span class="o">=</span><span class="n">exercise_id</span><span class="p">,</span>
+<a id="__codelineno-4-4" name="__codelineno-4-4" href="#__codelineno-4-4"></a>    <span class="n">outcome</span><span class="o">=</span><span class="mi">1</span><span class="p">,</span>
+<a id="__codelineno-4-5" name="__codelineno-4-5" href="#__codelineno-4-5"></a>    <span class="n">timestamp</span><span class="o">=</span><span class="n">attempt_time</span><span class="p">,</span>
+<a id="__codelineno-4-6" name="__codelineno-4-6" href="#__codelineno-4-6"></a>    <span class="n">update_global</span><span class="o">=</span><span class="kc">True</span><span class="p">,</span>
+<a id="__codelineno-4-7" name="__codelineno-4-7" href="#__codelineno-4-7"></a><span class="p">)</span>
+<a id="__codelineno-4-8" name="__codelineno-4-8" href="#__codelineno-4-8"></a>
+<a id="__codelineno-4-9" name="__codelineno-4-9" href="#__codelineno-4-9"></a><span class="n">ranker</span><span class="o">.</span><span class="n">register_items</span><span class="p">(</span><span class="n">catalog</span><span class="p">)</span>
+</code></pre></div>
+<p><code>observe</code> advances the live learner state from a completed attempt. Set
+<code>update_global=False</code> only where a learner may adapt while shared aggregate
+statistics must remain frozen, such as treatment traffic in a controlled pilot.</p>
+<p><code>register_items</code> adds catalog items absent from fitting history with an OOV
+prior, making them available for recommendation and feedback immediately.
+Refit later to learn item-specific parameters from their accumulated outcomes.</p>
+<h2 id="durable-decisions-and-delayed-outcomes">Durable decisions and delayed outcomes<a class="headerlink" href="#durable-decisions-and-delayed-outcomes" title="Permanent link">&para;</a></h2>
+<p>Use a decision store whenever a served exercise must be reproducible or
+evaluated later.</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a><span class="kn">from</span><span class="w"> </span><span class="nn">orchid_ranker.decision_store</span><span class="w"> </span><span class="kn">import</span> <span class="n">SQLiteDecisionStore</span>
+<a id="__codelineno-5-2" name="__codelineno-5-2" href="#__codelineno-5-2"></a>
+<a id="__codelineno-5-3" name="__codelineno-5-3" href="#__codelineno-5-3"></a><span class="n">store</span> <span class="o">=</span> <span class="n">SQLiteDecisionStore</span><span class="p">(</span><span class="s2">"orchid.sqlite"</span><span class="p">)</span>
+<a id="__codelineno-5-4" name="__codelineno-5-4" href="#__codelineno-5-4"></a><span class="n">ranker</span> <span class="o">=</span> <span class="n">AdaptiveRanker</span><span class="p">(</span><span class="n">decision_store</span><span class="o">=</span><span class="n">store</span><span class="p">)</span><span class="o">.</span><span class="n">fit</span><span class="p">(</span><span class="n">completed_attempts</span><span class="p">)</span>
+</code></pre></div>
+<p><code>LoggedDecision</code> records the full candidate list, chosen item, score/probability
+evidence, policy identity, and immutable application metadata.
+<code>DecisionOutcome</code> links one later result to one decision. Its <code>apply_state</code>
+flag says whether that event may change adaptive state; <code>update_global</code> says
+whether a permitted update may change shared aggregate statistics.</p>
+<h3 id="recommend_and_log"><code>recommend_and_log</code><a class="headerlink" href="#recommend_and_log" title="Permanent link">&para;</a></h3>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-6-1" name="__codelineno-6-1" href="#__codelineno-6-1"></a><span class="n">ranked</span><span class="p">,</span> <span class="n">decision</span> <span class="o">=</span> <span class="n">ranker</span><span class="o">.</span><span class="n">recommend_and_log</span><span class="p">(</span>
+<a id="__codelineno-6-2" name="__codelineno-6-2" href="#__codelineno-6-2"></a>    <span class="n">user_id</span><span class="o">=</span><span class="n">learner_id</span><span class="p">,</span>
+<a id="__codelineno-6-3" name="__codelineno-6-3" href="#__codelineno-6-3"></a>    <span class="n">candidate_item_ids</span><span class="o">=</span><span class="n">eligible_ids</span><span class="p">,</span>
+<a id="__codelineno-6-4" name="__codelineno-6-4" href="#__codelineno-6-4"></a>    <span class="n">timestamp</span><span class="o">=</span><span class="n">request_time</span><span class="p">,</span>
+<a id="__codelineno-6-5" name="__codelineno-6-5" href="#__codelineno-6-5"></a>    <span class="n">top_k</span><span class="o">=</span><span class="mi">1</span><span class="p">,</span>
+<a id="__codelineno-6-6" name="__codelineno-6-6" href="#__codelineno-6-6"></a>    <span class="n">exploration</span><span class="o">=</span><span class="mf">0.0</span><span class="p">,</span>
+<a id="__codelineno-6-7" name="__codelineno-6-7" href="#__codelineno-6-7"></a>    <span class="n">decision_id</span><span class="o">=</span><span class="n">request_id</span><span class="p">,</span>
+<a id="__codelineno-6-8" name="__codelineno-6-8" href="#__codelineno-6-8"></a>    <span class="n">policy_version</span><span class="o">=</span><span class="s2">"course-2026.1"</span><span class="p">,</span>
+<a id="__codelineno-6-9" name="__codelineno-6-9" href="#__codelineno-6-9"></a>    <span class="n">decision_metadata</span><span class="o">=</span><span class="p">{</span><span class="s2">"catalog_version"</span><span class="p">:</span> <span class="s2">"2026.1"</span><span class="p">},</span>
+<a id="__codelineno-6-10" name="__codelineno-6-10" href="#__codelineno-6-10"></a><span class="p">)</span>
+</code></pre></div>
+<p>This is the serving method for auditable decisions. It requires a non-empty
+explicit candidate set and returns the selected item first plus an immutable
+<code>LoggedDecision</code>.</p>
+<table>
+<thead>
+<tr>
+<th>Parameter</th>
+<th>Operational meaning</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>decision_id</code></td>
+<td>Stable application request ID. An exact retry returns the saved choice; reuse with different inputs raises <code>ValueError</code>.</td>
+</tr>
+<tr>
+<td><code>exploration</code></td>
+<td>Epsilon-uniform sampling among candidates that survive configured serving constraints. Start pilots at <code>0.0</code>.</td>
+</tr>
+<tr>
+<td><code>decision_metadata</code></td>
+<td>JSON-compatible application context retained immutably and included in idempotency checks.</td>
+</tr>
+<tr>
+<td><code>allow_unsupported_feedback</code></td>
+<td>Use only if an external system supplies the complete feedback path for an unsupported item.</td>
+</tr>
+<tr>
+<td><code>min_*</code>, <code>max_*</code>, <code>require_prerequisites</code></td>
+<td>Support, predicted-outcome, difficulty, and prerequisite guards applied before sampling.</td>
+</tr>
+</tbody>
+</table>
+<p>Persist the decision before rendering the item. Do not change the candidate
+list, model/catalog identity, or metadata on a delivery retry.</p>
+<h3 id="observe_decision-persistence-and-recovery"><code>observe_decision</code>, persistence, and recovery<a class="headerlink" href="#observe_decision-persistence-and-recovery" title="Permanent link">&para;</a></h3>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-7-1" name="__codelineno-7-1" href="#__codelineno-7-1"></a><span class="n">linked</span> <span class="o">=</span> <span class="n">ranker</span><span class="o">.</span><span class="n">observe_decision</span><span class="p">(</span>
+<a id="__codelineno-7-2" name="__codelineno-7-2" href="#__codelineno-7-2"></a>    <span class="n">decision</span><span class="o">.</span><span class="n">decision_id</span><span class="p">,</span>
+<a id="__codelineno-7-3" name="__codelineno-7-3" href="#__codelineno-7-3"></a>    <span class="n">outcome</span><span class="o">=</span><span class="n">correct</span><span class="p">,</span>
+<a id="__codelineno-7-4" name="__codelineno-7-4" href="#__codelineno-7-4"></a>    <span class="n">timestamp</span><span class="o">=</span><span class="n">scored_at</span><span class="p">,</span>
+<a id="__codelineno-7-5" name="__codelineno-7-5" href="#__codelineno-7-5"></a>    <span class="n">outcome_event_id</span><span class="o">=</span><span class="n">lms_score_event_id</span><span class="p">,</span>
+<a id="__codelineno-7-6" name="__codelineno-7-6" href="#__codelineno-7-6"></a><span class="p">)</span>
+</code></pre></div>
+<p><code>observe_decision</code> first durably attaches the outcome, then applies it to the
+live learner state. A decision accepts one immutable outcome. Repeating the
+same payload is safe; a conflicting payload raises <code>ValueError</code>. Pass an
+LMS-global <code>outcome_event_id</code> whenever it exists: Orchid enforces uniqueness
+across decisions, not merely within one decision.</p>
+<p><code>persist_decision_outcome(...)</code> accepts the same outcome, reward, timestamp,
+category, event ID, <code>apply_state</code>, and <code>update_global</code> arguments but does not
+change state. Use it when a lifecycle adapter must persist score evidence
+before projecting it into a learner model.</p>
+<table>
+<thead>
+<tr>
+<th>Method</th>
+<th>Use</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>ranker.replay_pending_outcomes()</code></td>
+<td>Continue from the same restored model baseline. Applies durable, uncheckpointed outcomes in learner-time order.</td>
+</tr>
+<tr>
+<td><code>ranker.replay_all_outcomes_from_baseline()</code></td>
+<td>Rebuild a newly fitted/restored baseline. Do not call it on a live projection or outcomes will be applied twice.</td>
+</tr>
+<tr>
+<td><code>ranker.decision_log_frame(completed_only=False)</code></td>
+<td>Export decisions joined with outcomes, event IDs, and state-update flags.</td>
+</tr>
+</tbody>
+</table>
+<p><code>InMemoryDecisionStore</code> is thread-safe but process-local.
+<code>SQLiteDecisionStore</code> is transactional, uses WAL mode, and is appropriate for
+a single-host service; close it explicitly or use it as a context manager.
+Both implement <code>DecisionOutcomeStore</code>; a custom backend must support immutable,
+idempotent decision/outcome creation plus outcome-application checkpoints.</p>
+<h2 id="catalog-validation">Catalog validation<a class="headerlink" href="#catalog-validation" title="Permanent link">&para;</a></h2>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-8-1" name="__codelineno-8-1" href="#__codelineno-8-1"></a><span class="kn">from</span><span class="w"> </span><span class="nn">orchid_ranker.learning_catalog</span><span class="w"> </span><span class="kn">import</span> <span class="p">(</span>
+<a id="__codelineno-8-2" name="__codelineno-8-2" href="#__codelineno-8-2"></a>    <span class="n">LearningCatalogSchema</span><span class="p">,</span>
+<a id="__codelineno-8-3" name="__codelineno-8-3" href="#__codelineno-8-3"></a>    <span class="n">validate_learning_catalog</span><span class="p">,</span>
+<a id="__codelineno-8-4" name="__codelineno-8-4" href="#__codelineno-8-4"></a><span class="p">)</span>
+<a id="__codelineno-8-5" name="__codelineno-8-5" href="#__codelineno-8-5"></a>
+<a id="__codelineno-8-6" name="__codelineno-8-6" href="#__codelineno-8-6"></a><span class="n">validation</span> <span class="o">=</span> <span class="n">validate_learning_catalog</span><span class="p">(</span>
+<a id="__codelineno-8-7" name="__codelineno-8-7" href="#__codelineno-8-7"></a>    <span class="n">authoring_catalog</span><span class="p">,</span>
+<a id="__codelineno-8-8" name="__codelineno-8-8" href="#__codelineno-8-8"></a>    <span class="n">schema</span><span class="o">=</span><span class="n">LearningCatalogSchema</span><span class="p">(),</span>
+<a id="__codelineno-8-9" name="__codelineno-8-9" href="#__codelineno-8-9"></a>    <span class="n">require_complete_metadata</span><span class="o">=</span><span class="kc">True</span><span class="p">,</span>
+<a id="__codelineno-8-10" name="__codelineno-8-10" href="#__codelineno-8-10"></a><span class="p">)</span>
+<a id="__codelineno-8-11" name="__codelineno-8-11" href="#__codelineno-8-11"></a><span class="n">validation</span><span class="o">.</span><span class="n">raise_for_errors</span><span class="p">()</span>
+</code></pre></div>
+<p><code>validate_learning_catalog</code> never mutates the DataFrame and returns all
+findings rather than failing at the first one. It validates canonical exercise
+identities (<code>item_id</code>, optionally <code>content_version</code>), metadata,
+duplicate/conflicting versions, prerequisites, dangling references, and cycles.</p>
+<table>
+<thead>
+<tr>
+<th>Input/result</th>
+<th>Use</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>LearningCatalogSchema</code></td>
+<td>Maps source columns. <code>item_id_col</code> is required; set an optional column to <code>None</code> only where it does not exist upstream.</td>
+</tr>
+<tr>
+<td><code>require_complete_metadata=True</code></td>
+<td>Makes absent curriculum, skill/category, difficulty, assessment, and prerequisite metadata blocking errors. Use for a pilot import gate.</td>
+</tr>
+<tr>
+<td><code>allow_external_prerequisites=True</code></td>
+<td>Permits prerequisite IDs owned by another catalog; otherwise dangling IDs are errors.</td>
+</tr>
+<tr>
+<td><code>LearningCatalogValidation.exercises</code></td>
+<td>Normalized immutable <code>CanonicalExercise</code> values.</td>
+</tr>
+<tr>
+<td><code>.diagnostics</code>, <code>.errors</code>, <code>.warnings</code></td>
+<td>Actionable findings, including source row indices.</td>
+</tr>
+<tr>
+<td><code>.is_valid</code>, <code>.raise_for_errors()</code></td>
+<td>Boolean gate or concise exception after inspection.</td>
+</tr>
+</tbody>
+</table>
+<p>This is an import-quality gate, not a serving eligibility engine. Use
+<code>PilotCatalog</code> when delivery must be checked against a frozen catalog.</p>
+<h2 id="controlled-pilot-api">Controlled pilot API<a class="headerlink" href="#controlled-pilot-api" title="Permanent link">&para;</a></h2>
+<p><code>orchid_ranker.pilot</code> is a reference <strong>single-host</strong> LMS adapter. It creates an
+immutable experiment manifest, deterministic sticky assignment, append-only
+delivery evidence, and analysis exports. It is not an LMS connector and does
+not replace a study design, power calculation, or governance process.</p>
+<h3 id="build-a-frozen-pilot">Build a frozen pilot<a class="headerlink" href="#build-a-frozen-pilot" title="Permanent link">&para;</a></h3>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-9-1" name="__codelineno-9-1" href="#__codelineno-9-1"></a><span class="kn">from</span><span class="w"> </span><span class="nn">orchid_ranker.pilot</span><span class="w"> </span><span class="kn">import</span> <span class="p">(</span>
+<a id="__codelineno-9-2" name="__codelineno-9-2" href="#__codelineno-9-2"></a>    <span class="n">AdaptivePracticePilot</span><span class="p">,</span>
+<a id="__codelineno-9-3" name="__codelineno-9-3" href="#__codelineno-9-3"></a>    <span class="n">PilotCatalog</span><span class="p">,</span>
+<a id="__codelineno-9-4" name="__codelineno-9-4" href="#__codelineno-9-4"></a>    <span class="n">PilotRequest</span><span class="p">,</span>
+<a id="__codelineno-9-5" name="__codelineno-9-5" href="#__codelineno-9-5"></a>    <span class="n">SQLiteExperimentAssignmentStore</span><span class="p">,</span>
+<a id="__codelineno-9-6" name="__codelineno-9-6" href="#__codelineno-9-6"></a>    <span class="n">SQLitePilotLifecycleStore</span><span class="p">,</span>
+<a id="__codelineno-9-7" name="__codelineno-9-7" href="#__codelineno-9-7"></a><span class="p">)</span>
+<a id="__codelineno-9-8" name="__codelineno-9-8" href="#__codelineno-9-8"></a>
+<a id="__codelineno-9-9" name="__codelineno-9-9" href="#__codelineno-9-9"></a><span class="n">catalog</span> <span class="o">=</span> <span class="n">PilotCatalog</span><span class="o">.</span><span class="n">from_frame</span><span class="p">(</span>
+<a id="__codelineno-9-10" name="__codelineno-9-10" href="#__codelineno-9-10"></a>    <span class="n">authoring_catalog</span><span class="p">,</span>
+<a id="__codelineno-9-11" name="__codelineno-9-11" href="#__codelineno-9-11"></a>    <span class="n">catalog_version</span><span class="o">=</span><span class="s2">"networking-2026.1"</span><span class="p">,</span>
+<a id="__codelineno-9-12" name="__codelineno-9-12" href="#__codelineno-9-12"></a><span class="p">)</span>
+<a id="__codelineno-9-13" name="__codelineno-9-13" href="#__codelineno-9-13"></a><span class="n">database</span> <span class="o">=</span> <span class="s2">"networking-pilot.sqlite"</span>
+<a id="__codelineno-9-14" name="__codelineno-9-14" href="#__codelineno-9-14"></a><span class="n">pilot</span> <span class="o">=</span> <span class="n">AdaptivePracticePilot</span><span class="p">(</span>
+<a id="__codelineno-9-15" name="__codelineno-9-15" href="#__codelineno-9-15"></a>    <span class="n">ranker</span><span class="p">,</span>
+<a id="__codelineno-9-16" name="__codelineno-9-16" href="#__codelineno-9-16"></a>    <span class="n">catalog</span><span class="p">,</span>
+<a id="__codelineno-9-17" name="__codelineno-9-17" href="#__codelineno-9-17"></a>    <span class="n">experiment_id</span><span class="o">=</span><span class="s2">"networking-routing"</span><span class="p">,</span>
+<a id="__codelineno-9-18" name="__codelineno-9-18" href="#__codelineno-9-18"></a>    <span class="n">model_artifact_id</span><span class="o">=</span><span class="s2">"empirical-2026-08-30"</span><span class="p">,</span>
+<a id="__codelineno-9-19" name="__codelineno-9-19" href="#__codelineno-9-19"></a>    <span class="n">authored_policy_version</span><span class="o">=</span><span class="s2">"routing-static-v1"</span><span class="p">,</span>
+<a id="__codelineno-9-20" name="__codelineno-9-20" href="#__codelineno-9-20"></a>    <span class="n">eligibility_rule_version</span><span class="o">=</span><span class="s2">"v1"</span><span class="p">,</span>
+<a id="__codelineno-9-21" name="__codelineno-9-21" href="#__codelineno-9-21"></a>    <span class="n">treatment_fraction</span><span class="o">=</span><span class="mf">0.5</span><span class="p">,</span>
+<a id="__codelineno-9-22" name="__codelineno-9-22" href="#__codelineno-9-22"></a>    <span class="n">randomization_salt</span><span class="o">=</span><span class="s2">"deployment-secret"</span><span class="p">,</span>
+<a id="__codelineno-9-23" name="__codelineno-9-23" href="#__codelineno-9-23"></a>    <span class="n">assignment_store</span><span class="o">=</span><span class="n">SQLiteExperimentAssignmentStore</span><span class="p">(</span><span class="n">database</span><span class="p">),</span>
+<a id="__codelineno-9-24" name="__codelineno-9-24" href="#__codelineno-9-24"></a>    <span class="n">lifecycle_store</span><span class="o">=</span><span class="n">SQLitePilotLifecycleStore</span><span class="p">(</span><span class="n">database</span><span class="p">),</span>
+<a id="__codelineno-9-25" name="__codelineno-9-25" href="#__codelineno-9-25"></a>    <span class="n">initial_mode</span><span class="o">=</span><span class="s2">"aa"</span><span class="p">,</span>
+<a id="__codelineno-9-26" name="__codelineno-9-26" href="#__codelineno-9-26"></a><span class="p">)</span>
+</code></pre></div>
+<p><code>PilotCatalog.from_frame</code> requires one active content version per <code>item_id</code>.
+It validates <code>content_version</code>, course/module, a skill or category, difficulty,
+assessment flag, prerequisites, availability, required flag, and unique
+authored sequence position. <code>eligible_items(...)</code> rejects—not silently
+drops—an LMS candidate that is outside scope, unavailable, completed,
+assessment-only, prerequisite-blocked, or inconsistent with a required item.</p>
+<p><code>AdaptivePracticePilot</code> requires a fitted empirical baseline without a CQL
+overlay. It persists an <code>ExperimentManifest</code> with catalog digest/version, model
+artifact/config identity, authored policy, eligibility version, and allocation
+configuration. Reusing an experiment ID with a changed artifact or catalog
+fails rather than mixing evidence.</p>
+<p>For durable use, put <code>SQLiteDecisionStore</code>,
+<code>SQLiteExperimentAssignmentStore</code>, and <code>SQLitePilotLifecycleStore</code> on the same
+database path. The in-memory variants are for tests and one-process prototypes.</p>
+<h3 id="serve-an-lms-request">Serve an LMS request<a class="headerlink" href="#serve-an-lms-request" title="Permanent link">&para;</a></h3>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-10-1" name="__codelineno-10-1" href="#__codelineno-10-1"></a><span class="n">served</span> <span class="o">=</span> <span class="n">pilot</span><span class="o">.</span><span class="n">serve</span><span class="p">(</span><span class="n">PilotRequest</span><span class="p">(</span>
+<a id="__codelineno-10-2" name="__codelineno-10-2" href="#__codelineno-10-2"></a>    <span class="n">request_id</span><span class="o">=</span><span class="n">lms_request_id</span><span class="p">,</span>
+<a id="__codelineno-10-3" name="__codelineno-10-3" href="#__codelineno-10-3"></a>    <span class="n">user_id</span><span class="o">=</span><span class="n">learner_id</span><span class="p">,</span>
+<a id="__codelineno-10-4" name="__codelineno-10-4" href="#__codelineno-10-4"></a>    <span class="n">course_id</span><span class="o">=</span><span class="s2">"networking"</span><span class="p">,</span>
+<a id="__codelineno-10-5" name="__codelineno-10-5" href="#__codelineno-10-5"></a>    <span class="n">module_id</span><span class="o">=</span><span class="s2">"routing"</span><span class="p">,</span>
+<a id="__codelineno-10-6" name="__codelineno-10-6" href="#__codelineno-10-6"></a>    <span class="n">course_run_id</span><span class="o">=</span><span class="n">cohort_id</span><span class="p">,</span>
+<a id="__codelineno-10-7" name="__codelineno-10-7" href="#__codelineno-10-7"></a>    <span class="n">timestamp</span><span class="o">=</span><span class="n">request_time</span><span class="p">,</span>
+<a id="__codelineno-10-8" name="__codelineno-10-8" href="#__codelineno-10-8"></a>    <span class="n">completed_item_ids</span><span class="o">=</span><span class="nb">tuple</span><span class="p">(</span><span class="n">completed_ids</span><span class="p">),</span>
+<a id="__codelineno-10-9" name="__codelineno-10-9" href="#__codelineno-10-9"></a>    <span class="n">candidate_item_ids</span><span class="o">=</span><span class="nb">tuple</span><span class="p">(</span><span class="n">exact_lms_eligible_ids</span><span class="p">),</span>
+<a id="__codelineno-10-10" name="__codelineno-10-10" href="#__codelineno-10-10"></a>    <span class="n">stratum</span><span class="o">=</span><span class="n">baseline_band</span><span class="p">,</span>
+<a id="__codelineno-10-11" name="__codelineno-10-11" href="#__codelineno-10-11"></a><span class="p">))</span>
+</code></pre></div>
+<p><code>candidate_item_ids</code> is required and must be the exact non-null LMS-approved
+set. <code>request_id</code> is namespaced by experiment and course run, preventing
+cross-experiment collisions. Assignment is stable per learner and stratified
+by the supplied <code>stratum</code>.</p>
+<p><code>serve</code> returns a <code>PilotDecision</code>:</p>
+<table>
+<thead>
+<tr>
+<th>Field</th>
+<th>Meaning</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>decision</code></td>
+<td>Immutable <code>LoggedDecision</code>; render <code>decision.chosen_item_id</code>.</td>
+</tr>
+<tr>
+<td><code>arm</code></td>
+<td>Sticky randomized assignment (<code>control</code> or <code>treatment</code>).</td>
+</tr>
+<tr>
+<td><code>effective_arm</code></td>
+<td>Actually delivered arm after applying the current mode.</td>
+</tr>
+<tr>
+<td><code>mode</code></td>
+<td>Mode recorded on this decision.</td>
+</tr>
+<tr>
+<td><code>chosen_content_version</code></td>
+<td>Exact revision the LMS must render.</td>
+</tr>
+<tr>
+<td><code>reason_code</code>, <code>eligible_item_ids</code></td>
+<td>Why it was chosen and the exact candidates.</td>
+</tr>
+</tbody>
+</table>
+<p>Every decision automatically records an immutable explanation snapshot. Shadow
+decisions also record the Orchid proposal; halted decisions record a kill-switch
+fallback event.</p>
+<h3 id="modes-and-operation-events">Modes and operation events<a class="headerlink" href="#modes-and-operation-events" title="Permanent link">&para;</a></h3>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-11-1" name="__codelineno-11-1" href="#__codelineno-11-1"></a><span class="n">pilot</span><span class="o">.</span><span class="n">set_mode</span><span class="p">(</span>
+<a id="__codelineno-11-2" name="__codelineno-11-2" href="#__codelineno-11-2"></a>    <span class="s2">"shadow"</span><span class="p">,</span>
+<a id="__codelineno-11-3" name="__codelineno-11-3" href="#__codelineno-11-3"></a>    <span class="n">event_id</span><span class="o">=</span><span class="n">change_ticket_id</span><span class="p">,</span>
+<a id="__codelineno-11-4" name="__codelineno-11-4" href="#__codelineno-11-4"></a>    <span class="n">timestamp</span><span class="o">=</span><span class="n">changed_at</span><span class="p">,</span>
+<a id="__codelineno-11-5" name="__codelineno-11-5" href="#__codelineno-11-5"></a>    <span class="n">reason</span><span class="o">=</span><span class="s2">"validated A/A delivery joins"</span><span class="p">,</span>
+<a id="__codelineno-11-6" name="__codelineno-11-6" href="#__codelineno-11-6"></a><span class="p">)</span>
+</code></pre></div>
+<table>
+<thead>
+<tr>
+<th>Mode</th>
+<th>Actual delivery</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>"aa"</code></td>
+<td>Authored control for both assignments; assignments and lifecycle evidence are still audited.</td>
+</tr>
+<tr>
+<td><code>"shadow"</code></td>
+<td>Authored control; Orchid proposal is computed and recorded but not rendered.</td>
+</tr>
+<tr>
+<td><code>"active"</code></td>
+<td>Frozen Orchid treatment only for assigned treatment learners; assigned controls remain authored.</td>
+</tr>
+<tr>
+<td><code>"halted"</code></td>
+<td>All future requests use authored control with <code>KILL_SWITCH</code> evidence. A halted experiment cannot be re-enabled.</td>
+</tr>
+</tbody>
+</table>
+<p><code>set_mode</code> is idempotent for the same event payload and records an operation
+event. A transition cannot move backward in time; use a new <code>experiment_id</code> to
+restart after a halt.</p>
+<h3 id="record-actual-delivery-and-score-it">Record actual delivery and score it<a class="headerlink" href="#record-actual-delivery-and-score-it" title="Permanent link">&para;</a></h3>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-12-1" name="__codelineno-12-1" href="#__codelineno-12-1"></a><span class="n">pilot</span><span class="o">.</span><span class="n">record_rendered</span><span class="p">(</span>
+<a id="__codelineno-12-2" name="__codelineno-12-2" href="#__codelineno-12-2"></a>    <span class="n">served</span><span class="o">.</span><span class="n">decision</span><span class="o">.</span><span class="n">decision_id</span><span class="p">,</span>
+<a id="__codelineno-12-3" name="__codelineno-12-3" href="#__codelineno-12-3"></a>    <span class="n">event_id</span><span class="o">=</span><span class="n">lms_render_event_id</span><span class="p">,</span>
+<a id="__codelineno-12-4" name="__codelineno-12-4" href="#__codelineno-12-4"></a>    <span class="n">item_id</span><span class="o">=</span><span class="n">served</span><span class="o">.</span><span class="n">decision</span><span class="o">.</span><span class="n">chosen_item_id</span><span class="p">,</span>
+<a id="__codelineno-12-5" name="__codelineno-12-5" href="#__codelineno-12-5"></a>    <span class="n">content_version</span><span class="o">=</span><span class="n">served</span><span class="o">.</span><span class="n">chosen_content_version</span><span class="p">,</span>
+<a id="__codelineno-12-6" name="__codelineno-12-6" href="#__codelineno-12-6"></a>    <span class="n">timestamp</span><span class="o">=</span><span class="n">rendered_at</span><span class="p">,</span>
+<a id="__codelineno-12-7" name="__codelineno-12-7" href="#__codelineno-12-7"></a><span class="p">)</span>
+<a id="__codelineno-12-8" name="__codelineno-12-8" href="#__codelineno-12-8"></a><span class="n">pilot</span><span class="o">.</span><span class="n">record_submitted</span><span class="p">(</span>
+<a id="__codelineno-12-9" name="__codelineno-12-9" href="#__codelineno-12-9"></a>    <span class="n">served</span><span class="o">.</span><span class="n">decision</span><span class="o">.</span><span class="n">decision_id</span><span class="p">,</span>
+<a id="__codelineno-12-10" name="__codelineno-12-10" href="#__codelineno-12-10"></a>    <span class="n">event_id</span><span class="o">=</span><span class="n">lms_submission_event_id</span><span class="p">,</span>
+<a id="__codelineno-12-11" name="__codelineno-12-11" href="#__codelineno-12-11"></a>    <span class="n">item_id</span><span class="o">=</span><span class="n">served</span><span class="o">.</span><span class="n">decision</span><span class="o">.</span><span class="n">chosen_item_id</span><span class="p">,</span>
+<a id="__codelineno-12-12" name="__codelineno-12-12" href="#__codelineno-12-12"></a>    <span class="n">content_version</span><span class="o">=</span><span class="n">served</span><span class="o">.</span><span class="n">chosen_content_version</span><span class="p">,</span>
+<a id="__codelineno-12-13" name="__codelineno-12-13" href="#__codelineno-12-13"></a>    <span class="n">timestamp</span><span class="o">=</span><span class="n">submitted_at</span><span class="p">,</span>
+<a id="__codelineno-12-14" name="__codelineno-12-14" href="#__codelineno-12-14"></a><span class="p">)</span>
+<a id="__codelineno-12-15" name="__codelineno-12-15" href="#__codelineno-12-15"></a><span class="n">outcome</span> <span class="o">=</span> <span class="n">pilot</span><span class="o">.</span><span class="n">record_scored</span><span class="p">(</span>
+<a id="__codelineno-12-16" name="__codelineno-12-16" href="#__codelineno-12-16"></a>    <span class="n">served</span><span class="o">.</span><span class="n">decision</span><span class="o">.</span><span class="n">decision_id</span><span class="p">,</span>
+<a id="__codelineno-12-17" name="__codelineno-12-17" href="#__codelineno-12-17"></a>    <span class="n">outcome_event_id</span><span class="o">=</span><span class="n">lms_score_event_id</span><span class="p">,</span>
+<a id="__codelineno-12-18" name="__codelineno-12-18" href="#__codelineno-12-18"></a>    <span class="n">item_id</span><span class="o">=</span><span class="n">served</span><span class="o">.</span><span class="n">decision</span><span class="o">.</span><span class="n">chosen_item_id</span><span class="p">,</span>
+<a id="__codelineno-12-19" name="__codelineno-12-19" href="#__codelineno-12-19"></a>    <span class="n">content_version</span><span class="o">=</span><span class="n">served</span><span class="o">.</span><span class="n">chosen_content_version</span><span class="p">,</span>
+<a id="__codelineno-12-20" name="__codelineno-12-20" href="#__codelineno-12-20"></a>    <span class="n">outcome</span><span class="o">=</span><span class="n">correct</span><span class="p">,</span>
+<a id="__codelineno-12-21" name="__codelineno-12-21" href="#__codelineno-12-21"></a>    <span class="n">timestamp</span><span class="o">=</span><span class="n">scored_at</span><span class="p">,</span>
+<a id="__codelineno-12-22" name="__codelineno-12-22" href="#__codelineno-12-22"></a><span class="p">)</span>
+</code></pre></div>
+<p>These calls are append-only and idempotent for the same event ID/payload. The
+adapter enforces <strong>decision → rendered → submitted → scored</strong>, the selected
+item/version, and nondecreasing timestamps. <code>record_scored</code> first stores its
+score event, then persists/uses its outcome. It requires an LMS-global
+<code>outcome_event_id</code>.</p>
+<p>Only active effective-treatment scores update learner-local state, and those
+updates leave aggregate empirical statistics frozen. Control, A/A, shadow, and
+halted scores remain durable audit evidence with <code>apply_state=False</code>.</p>
+<table>
+<thead>
+<tr>
+<th>Recovery method</th>
+<th>Purpose</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>pilot.recover_scored_events()</code></td>
+<td>Finish the outcome projection after a crash between score-event persistence and application.</td>
+</tr>
+<tr>
+<td><code>pilot.rebuild_state_from_baseline()</code></td>
+<td>Persist score evidence and rebuild treatment learner state from a freshly restored/fitted ranker baseline. Do not call on a live projection.</td>
+</tr>
+<tr>
+<td><code>pilot.observe_decision(...)</code></td>
+<td>Compatibility method for a score that already has a submission event. New integrations should call <code>record_scored</code>.</td>
+</tr>
+</tbody>
+</table>
+<h3 id="import-delayed-assessments-and-export-evidence">Import delayed assessments and export evidence<a class="headerlink" href="#import-delayed-assessments-and-export-evidence" title="Permanent link">&para;</a></h3>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-13-1" name="__codelineno-13-1" href="#__codelineno-13-1"></a><span class="n">assessments</span> <span class="o">=</span> <span class="n">pilot</span><span class="o">.</span><span class="n">import_delayed_assessments</span><span class="p">(</span><span class="n">assessment_frame</span><span class="p">)</span>
+<a id="__codelineno-13-2" name="__codelineno-13-2" href="#__codelineno-13-2"></a><span class="n">analysis</span> <span class="o">=</span> <span class="n">pilot</span><span class="o">.</span><span class="n">analysis_frame</span><span class="p">()</span>
+</code></pre></div>
+<p><code>import_delayed_assessments</code> requires a pandas DataFrame with
+<code>assessment_event_id</code>, <code>user_id</code>, <code>course_run_id</code>, <code>assessment_form_version</code>,
+<code>timestamp</code>, <code>score</code>, and <code>independent</code>. <code>independent</code> must be literal <code>True</code>;
+the method rejects an assessment for a learner/course run without pilot
+participation and never feeds it into adaptive state.</p>
+<p>Use <code>assessment_frame()</code> for imported assessments,
+<code>decision_frame(completed_only=False)</code> for joined delivery decisions/outcomes,
+and <code>analysis_frame()</code> for decisions plus rendered/submitted/scored IDs and
+timestamps, fallback/shadow/explanation evidence, and matching assessments.</p>
+<h2 id="offline-policy-and-evaluation-apis">Offline policy and evaluation APIs<a class="headerlink" href="#offline-policy-and-evaluation-apis" title="Permanent link">&para;</a></h2>
+<p>The base adaptive policy is the recommended first deployment. Offline CQL is an
+opt-in promotion path, not a shortcut around a controlled learning study.</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-14-1" name="__codelineno-14-1" href="#__codelineno-14-1"></a><span class="n">report</span> <span class="o">=</span> <span class="n">ranker</span><span class="o">.</span><span class="n">fit_policy</span><span class="p">(</span>
+<a id="__codelineno-14-2" name="__codelineno-14-2" href="#__codelineno-14-2"></a>    <span class="n">earlier_completed_decisions</span><span class="p">,</span>
+<a id="__codelineno-14-3" name="__codelineno-14-3" href="#__codelineno-14-3"></a>    <span class="n">evaluation_decisions</span><span class="o">=</span><span class="n">later_completed_decisions</span><span class="p">,</span>
+<a id="__codelineno-14-4" name="__codelineno-14-4" href="#__codelineno-14-4"></a><span class="p">)</span>
+</code></pre></div>
+<p><code>fit_policy</code> trains tabular CQL from a training decision log and promotes it
+only if a strictly later, disjoint evaluation log passes the
+user-cluster-bootstrap rollout gate. By default it requires at least 30
+evaluation events and 30 users. <code>fit_policy_rolling(...)</code> creates the same
+strict chronological split from a trailing source window.</p>
+<p>Use <code>ope_report(...)</code> or <code>bootstrap_ope_report(...)</code> for logged-policy
+evaluation and <code>shadow_report()</code> to summarize traffic, outcome coverage,
+calibration/drift, and, when applicable, policy evidence. These reports require
+complete candidate lists, propensities, and linked outcomes; they do not prove
+a causal learning benefit on their own.</p>
+
+
+
+
+
+
+
+
+
+
+
+
+                
+              </article>
+            </div>
+          
+          
+<script>var target=document.getElementById(location.hash.slice(1));target&&target.name&&(target.checked=target.name.startsWith("__tabbed_"))</script>
+        </div>
+        
+      </main>
+      
+        <footer class="md-footer">
+  
+  <div class="md-footer-meta md-typeset">
+    <div class="md-footer-meta__inner md-grid">
+      <div class="md-copyright">
+  
+  
+    Made with
+    <a href="https://squidfunk.github.io/mkdocs-material/" target="_blank" rel="noopener">
+      Material for MkDocs
+    </a>
+  
+</div>
+      
+    </div>
+  </div>
+</footer>
+      
+    </div>
+    <div class="md-dialog" data-md-component="dialog">
+      <div class="md-dialog__inner md-typeset"></div>
+    </div>
+    
+    
+    
+      
+      
+      <script id="__config" type="application/json">{"annotate": null, "base": "..", "features": ["navigation.instant", "navigation.tracking", "navigation.tabs", "navigation.sections", "navigation.expand", "content.code.copy", "content.code.annotate", "search.suggest", "search.highlight"], "search": "../assets/javascripts/workers/search.2c215733.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": {"provider": "mike"}}</script>
+    
+    
+      <script src="../assets/javascripts/bundle.d7400e89.min.js"></script>
+      
+    
+  </body>
+</html>
