@@ -4,6 +4,7 @@ from __future__ import annotations
 from dataclasses import replace
 from pathlib import Path
 
+import numpy as np
 import pandas as pd
 import pytest
 
@@ -15,6 +16,7 @@ from orchid_ranker.pilot import (
     PilotRequest,
     SQLiteExperimentAssignmentStore,
     SQLitePilotLifecycleStore,
+    _analysis_grouping_key,
 )
 
 
@@ -584,6 +586,12 @@ def test_shadow_and_halt_keep_assignments_but_force_authored_delivery() -> None:
     shadow_row = analysis.loc[analysis["decision_id"] == shadow.decision.decision_id].iloc[0]
     assert shadow_row["independent_assessments"][0]["score"] == 0.8
     assert shadow_row["shadow_proposal"]["kind"] == "adaptive"
+
+
+def test_analysis_grouping_key_normalizes_pandas_missing_values() -> None:
+    assert _analysis_grouping_key(None) == "null"
+    assert _analysis_grouping_key(pd.NA) == "null"
+    assert _analysis_grouping_key(np.nan) == "null"
 
 
 def test_sqlite_lifecycle_and_operating_mode_survive_restart(tmp_path: Path) -> None:

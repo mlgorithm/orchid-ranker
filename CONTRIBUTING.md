@@ -34,7 +34,7 @@ review:
 
 ```bash
 python -m ruff check .
-python -m mypy src/orchid_ranker
+python -m mypy --python-version 3.12 src/orchid_ranker
 python -m pytest tests -q
 python -m pytest tests -q --cov=orchid_ranker --cov-fail-under=75
 python -m mkdocs build --strict

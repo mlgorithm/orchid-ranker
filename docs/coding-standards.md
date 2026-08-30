@@ -63,7 +63,7 @@ Local gates:
 
 ```bash
 python -m ruff check .
-python -m mypy src/orchid_ranker
+python -m mypy --python-version 3.12 src/orchid_ranker
 python -m pytest tests -q
 python -m mkdocs build --strict
 python -m build

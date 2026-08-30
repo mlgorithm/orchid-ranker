@@ -91,7 +91,7 @@ select = ["E", "F", "W", "I"]
 ignore = ["E501", "E402", "E701", "E702", "E741"]
 
 [tool.mypy]
-python_version = "3.11"
+python_version = "3.12"
 warn_return_any = true
 warn_unused_configs = true
 ignore_missing_imports = true

@@ -1488,13 +1488,13 @@ class AdaptivePracticePilot:
         assessment_records: dict[tuple[str, str], list[dict[str, Any]]] = {}
         for _, assessment in assessments.iterrows():
             key = (
-                _canonical_json(assessment["user_id"]),
-                _canonical_json(assessment["course_run_id"]),
+                _analysis_grouping_key(assessment["user_id"]),
+                _analysis_grouping_key(assessment["course_run_id"]),
             )
             assessment_records.setdefault(key, []).append(assessment.to_dict())
         exported["independent_assessments"] = [
             assessment_records.get(
-                (_canonical_json(user_id), _canonical_json(course_run_id)),
+                (_analysis_grouping_key(user_id), _analysis_grouping_key(course_run_id)),
                 [],
             )
             for user_id, course_run_id in zip(exported["user_id"], exported["course_run_id"])
@@ -1821,6 +1821,15 @@ def _identifier_key(value: Any) -> str:
 
 def _canonical_json(value: Any) -> str:
     return json.dumps(value, sort_keys=True, separators=(",", ":"), default=str, allow_nan=False)
+
+
+def _analysis_grouping_key(value: Any) -> str:
+    """Serialize a DataFrame grouping value, treating its missing sentinel as null."""
+    if value is None or value is pd.NA:
+        return _canonical_json(None)
+    if isinstance(value, (float, np.floating)) and math.isnan(float(value)):
+        return _canonical_json(None)
+    return _canonical_json(value)
 
 
 def _fingerprint(value: Any) -> str:
