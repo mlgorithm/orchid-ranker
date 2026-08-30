@@ -42,9 +42,9 @@ study.
 2. Shadow Orchid beside the authored path. Inspect its logged proposal,
    challenge probabilities,
    support, prerequisite decisions, and learner-designer explanations.
-3. Randomize treatment and control. Start the treatment with the default
-   hybrid/empirical path—do not make CQL or delayed-gain policy learning the
-   pilot intervention.
+3. Randomize treatment and control. Start the reference pilot with its fixed
+   empirical path (`kt_backbone="empirical"`); do not make CQL, delayed-gain
+   policy learning, or exploration the pilot intervention.
 4. Retain the static control for the whole experiment. Do not replace it after
    observing early favorable results.
 5. Introduce small exploration only after logging is trustworthy, and only
@@ -74,6 +74,7 @@ ranker.observe_decision(
     decision.decision_id,
     outcome=correct,
     timestamp=scored_at,
+    outcome_event_id=lms_score_event_id,
 )
 ```
 

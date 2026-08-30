@@ -5,10 +5,10 @@ on:
     tags: ["v*"]
 
 permissions:
-  contents: write
+  contents: read
 
 jobs:
-  build:
+  release-preflight:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -28,6 +28,8 @@ jobs:
           import tomllib
           from pathlib import Path
 
+          from packaging.version import Version
+
           import orchid_ranker
 
           tag_version = "${{ github.ref_name }}".removeprefix("v")
@@ -40,20 +42,62 @@ jobs:
                   f"tag={tag_version}, pyproject={project_version}, "
                   f"metadata={package_version}, __version__={orchid_ranker.__version__}"
               )
+          version = Version(project_version)
+          if version.is_prerelease or version.is_devrelease or version.local:
+              raise SystemExit(
+                  "tagged releases must use a final public version; "
+                  f"got {project_version!r}"
+              )
           PY
           python -m pytest tests/test_publish_readiness.py -q
+
+  full-validation:
+    name: Full release validation
+    needs: release-preflight
+    uses: ./.github/workflows/ci.yaml
+
+  build:
+    needs: full-validation
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install build tools
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install ".[dev]"
 
       - name: Build sdist and wheel
         run: python -m build
 
       - name: Check distributions
-        run: twine check dist/*
+        run: python -m twine check dist/*
+
+      - name: Smoke-test a clean wheel install
+        run: |
+          python -m venv /tmp/orchid-wheel
+          /tmp/orchid-wheel/bin/python -m pip install --upgrade pip
+          /tmp/orchid-wheel/bin/python -m pip install dist/*.whl
+          cd /tmp
+          /tmp/orchid-wheel/bin/python -c "import importlib.metadata as md; import orchid_ranker; from orchid_ranker import AdaptiveRanker; assert orchid_ranker.__version__ == md.version('orchid-ranker'); assert AdaptiveRanker"
+
+      - name: Smoke-test a clean source install
+        run: |
+          python -m venv /tmp/orchid-sdist
+          /tmp/orchid-sdist/bin/python -m pip install --upgrade pip
+          /tmp/orchid-sdist/bin/python -m pip install dist/*.tar.gz
+          cd /tmp
+          /tmp/orchid-sdist/bin/python -c "import importlib.metadata as md; import orchid_ranker; from orchid_ranker import AdaptiveRanker; assert orchid_ranker.__version__ == md.version('orchid-ranker'); assert AdaptiveRanker"
 
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
         with:
           name: dist
           path: dist/
+          if-no-files-found: error
 
   github-release:
     needs: build

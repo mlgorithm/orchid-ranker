@@ -1,83 +1,37 @@
 # Changelog
 
-## Unreleased
+## 1.0.0 - 2026-08-30
 
-### Adaptive-practice foundation
+### Stable adaptive-practice API
 
-- Repositioned Orchid around adaptive practice for assessed learning rather
-  than generic recommendation. The primary product outcome is retained mastery,
-  not click-through or next-attempt correctness.
-- Added an adaptive-learning readiness report with learner, exercise, sequence,
-  outcome-balance, and curriculum-metadata diagnostics.
-- Added a transparent empirical tracer for sparse pilots. By default, Orchid
-  selects it until configurable basic support checks justify evaluating the
-  configured knowledge tracer.
-- Added a catalog-aware learning fit path. Canonical exercise metadata now
-  supplies category/difficulty during training and registers unseen catalog
-  exercises for safe serving.
-- Added a versioned learning-catalog validator for authoring imports. It
-  diagnoses metadata gaps, conflicting exercise versions, invalid/dangling
-  prerequisites, and prerequisite cycles before a catalog reaches serving.
-- Added idempotent immutable decision/outcome stores, including a transactional
-  SQLite implementation for single-host pilots. `recommend_and_log()` accepts
-  an application decision ID so retries return the original action; exact
-  outcome retries are no-ops while conflicts remain errors.
-- Added a reference adaptive-practice pilot adapter with catalog eligibility,
-  assessment holdouts, required authored items, sticky learner-level arm
-  assignment, static-control routing, and immutable experiment metadata.
-- Added an adaptive-practice integration guide, a learning-efficacy pilot
-  guide, and a product roadmap covering curriculum metadata, durable state,
-  authored baselines, and controlled evaluation.
+- Established `AdaptiveRanker` as the supported public interface for choosing,
+  logging, observing, and refitting next-exercise recommendations from the
+  domain-neutral `user_id`, `item_id`, `outcome`, and `timestamp` schema.
+- Added learning-readiness diagnostics and a transparent empirical fallback for
+  sparse pilots; a configured knowledge tracer is evaluated only after basic
+  support checks pass.
+- Added catalog-aware fitting and a versioned learning-catalog validator for
+  exercise metadata, prerequisite integrity, and safe serving of catalog items.
 
-### Serving safety
+### Durable, evidence-oriented pilots
 
-- Made offline-policy promotion evaluate the exact adaptive-base+CQL action
-  rule used in serving. Promotion now requires a strictly future,
-  duplicate-resistant holdout, minimum evaluation events and users, and a
-  user-cluster bootstrap by default. Promoted decisions use a distinct
-  `hybrid+cql` learned-state deployment identity.
-- Fixed explicit exploration support overrides and reject semantic items that
-  lack local feedback support from `recommend_and_log()` unless the caller
-  explicitly owns an external feedback path.
-- Initialize reserved OOV embedding rows from learned known-item means rather
-  than leaving cold catalog items with untrained random vectors.
-- Isolated the wheel smoke test from system site packages.
-- Moved `main` to the development version `0.7.0.dev0`; the consolidated API
-  is not mislabeled as the released `0.6.0` package.
-- Made explicit empty candidate sets return no recommendations. Catalog fallback
-  is opt-in, so an empty eligibility filter cannot bypass application controls.
-- Made decision records deeply immutable, normalized timestamps at every event
-  and decision boundary, and reject duplicate logged candidates.
-- Require exact binary live outcomes and validate timestamps before conversion.
-- Made offline-policy fitting transactional: held-out comparison against the
-  logging-policy baseline and a passing rollout gate are required for promotion.
-- Added catalog registration with a reserved OOV representation, allowing a
-  semantic catalog item to complete serve, log, observe, and refit safely.
-- Made SAINT+ time features causal and serialized ranker state operations for
-  a clear single-object serving concurrency contract.
+- Added immutable, idempotent decision/outcome stores, including a transactional
+  SQLite store for single-host pilots.
+- Added a reference pilot adapter with catalog eligibility, assessment holdouts,
+  required authored items, sticky learner-level arms, static control routing,
+  and immutable experiment metadata.
+- Added chronological logged-policy validation with candidate sets,
+  propensities, user-cluster uncertainty, and explicit inconclusive outcomes
+  when available evidence is insufficient.
 
-### Product consolidation
+### Serving safeguards and documentation
 
-- Reduced the package to one public product: `AdaptiveRanker`.
-- Removed compatibility aliases, education-specific public schema names,
-  standalone model APIs, agentic tooling, connectors, streaming, service CLI,
-  and deployment scaffolding.
-- The supported schema is now `user_id`, `item_id`, `outcome`, and `timestamp`.
-- A normal `pip install orchid-ranker` includes the full supported workflow.
-
-### Credible rollout evidence
-
-- Added one reproducible logged-policy validation command with chronological
-  splitting, real candidate sets and propensities, user-cluster uncertainty,
-  and an explicit inconclusive outcome when evidence is weak.
-- Replaced the obsolete aggregate benchmark entry point with this validation
-  workflow and clear claim boundaries.
-
-### Reference pilots
-
-- Added runnable B2B onboarding, compliance-training, and content-discovery
-  templates with eligibility filtering, decision logging, delayed outcomes, and
-  validation-ready JSON Lines exports.
+- Hardened serving around explicit eligibility, duplicate-resistant immutable
+  decision records, validated binary outcomes/timestamps, catalog registration,
+  and gated offline-policy promotion.
+- Consolidated the package around one supported product and documented the
+  adaptive-practice data contract, pilot integration, end-to-end workflow, and
+  rollout claim boundaries.
 
 ## 0.6.0 - 2026-07-03
 

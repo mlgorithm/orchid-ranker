@@ -57,8 +57,10 @@ nav:
     - Production serving: guides/02-serve-streaming.md
     - Run a learning-efficacy pilot: guides/03-learning-pilot.md
     - Pilot integration contract: guides/04-pilot-integration.md
+    - End-to-end reference-pilot workflow: guides/05-pilot-workflow.md
     - Reference pilots: examples.md
   - API: api_reference.md
+  - API support policy: api-support-policy.md
   - Validate a rollout: benchmarks/credibility.md
   - Design-partner council: design-partner-council.md
   - Product roadmap: roadmap.md

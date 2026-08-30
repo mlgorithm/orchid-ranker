@@ -77,6 +77,8 @@ other hard curriculum rules; Orchid only orders that set.
 - [Production serving and decision logging](docs/guides/02-serve-streaming.md)
 - [Run a learning-efficacy pilot](docs/guides/03-learning-pilot.md)
 - [Pilot integration contract](docs/guides/04-pilot-integration.md)
+- [End-to-end reference-pilot workflow](docs/guides/05-pilot-workflow.md)
+- [1.x API support policy](docs/api-support-policy.md)
 - [Validate an adaptive rollout](docs/benchmarks/credibility.md)
 
 ## Development
@@ -90,6 +92,13 @@ See [CONTRIBUTING.md](CONTRIBUTING.md),
 [docs/coding-standards.md](docs/coding-standards.md), and
 [RELEASING.md](RELEASING.md).
 
+## Community and support
+
+Use [SUPPORT.md](SUPPORT.md) for usage and contribution guidance,
+[CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md) for participation expectations, and
+[SECURITY.md](SECURITY.md) for private vulnerability reporting. The canonical
+software-citation metadata is in [CITATION.cff](CITATION.cff).
+
 ## License
 
 Apache 2.0. See [LICENSE](LICENSE).
@@ -100,7 +109,8 @@ Apache 2.0. See [LICENSE](LICENSE).
 @software{orchid_ranker,
   title={Orchid Ranker: Outcome-Driven Adaptive Recommendation},
   author={Sam Urmian},
-  year={2024},
+  version={1.0.0},
+  year={2026},
   url={https://github.com/mlgorithm/orchid-ranker}
 }
 ```

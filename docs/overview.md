@@ -6,7 +6,7 @@ Orchid is an adaptive-practice engine. It exposes one learning loop:
 completed practice attempts → fit → recommend → observe → recommend again
 ```
 
-## One public object
+## Core learner loop
 
 `AdaptiveRanker` owns the fitted state and live updates.
 
@@ -86,7 +86,9 @@ ranker.observe(
 The next `recommend` call sees that update. Periodic offline refits can still be
 used to incorporate larger batches of new history.
 
-Orchid has one supported entry point: `AdaptiveRanker`. See
-[Adaptive-practice data readiness](guides/00-adaptive-practice.md) before a
-pilot and [learning-efficacy pilots](guides/03-learning-pilot.md) before making
-an outcome claim.
+`AdaptiveRanker` is the package-root entry point for this learner loop. The
+optional `orchid_ranker.pilot` module adds a deliberately explicit reference
+adapter for a controlled study; it is not needed for a local recommendation
+prototype. See [Adaptive-practice data readiness](guides/00-adaptive-practice.md)
+before a pilot and [learning-efficacy pilots](guides/03-learning-pilot.md)
+before making an outcome claim.

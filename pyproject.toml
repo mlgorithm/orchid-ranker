@@ -4,8 +4,8 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "orchid-ranker"
-version = "0.7.0.dev0"
-description = "Outcome-driven adaptive recommender that learns what to choose next."
+version = "1.0.0"
+description = "Outcome-driven adaptive-practice engine for assessed learning."
 readme = "README.md"
 authors = [
   {name = "Sam Urmian", email = "sam.urmian@gmail.com"}
@@ -21,7 +21,10 @@ dependencies = [
   "torch>=2.0,<3",
 ]
 keywords = [
+  "adaptive-learning",
   "adaptive-recommendation",
+  "educational-technology",
+  "knowledge-tracing",
   "sequential-recommendation",
   "online-learning",
   "personalization",
@@ -29,7 +32,7 @@ keywords = [
   "feedback-loops",
 ]
 classifiers = [
-  "Development Status :: 4 - Beta",
+  "Development Status :: 5 - Production/Stable",
   "Programming Language :: Python :: 3",
   "Programming Language :: Python :: 3.11",
   "Programming Language :: Python :: 3.12",

@@ -1,5 +1,12 @@
 # Reference pilots
 
+These small API scenarios are retained as implementation examples, not as
+Orchid's product positioning or a template for a learning-efficacy study. For
+assessed learning, start with the [quickstart](quickstart.md), then follow the
+[end-to-end reference-pilot workflow](guides/05-pilot-workflow.md). In
+particular, generic onboarding and content-discovery examples below do not
+establish that Orchid is a feed or product recommender.
+
 These are compact, product-shaped templates—not extra Orchid models. Each one
 uses the same `AdaptiveRanker` loop and makes the application responsible for
 hard eligibility rules.

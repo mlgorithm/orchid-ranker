@@ -23,8 +23,10 @@ and research, but they are not separate product surfaces.
 - Treat lower-level modules as implementation details, not alternate products.
 - Keep the normal install complete: `pip install orchid-ranker` must run the
   supported workflow without an extra.
-- Do not add compatibility shims or deprecated aliases. Make breaking changes
-  explicitly and update the supported documentation in the same change.
+- Do not add compatibility aliases. For a stable documented API, follow the
+  [API support policy](api-support-policy.md): announce a deprecation before
+  removal, then make breaking changes only in a major release unless a
+  data-integrity or safety defect requires an immediate correction.
 
 ## Python Style
 

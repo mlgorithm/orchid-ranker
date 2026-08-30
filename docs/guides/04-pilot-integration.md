@@ -181,7 +181,7 @@ Use `pilot.import_delayed_assessments(...)` only for explicitly independent
 assessment events, then use `pilot.analysis_frame()` as the joined delivery
 export. The adapter does not calculate a causal effect or replace a
 pre-registered analysis plan.
-4. **Replication:** Re-run the fixed protocol in a second course before making
+5. **Replication:** Re-run the fixed protocol in a second course before making
    a broad product claim.
 
 Keep a one-action kill switch that routes all future treatment requests to the
