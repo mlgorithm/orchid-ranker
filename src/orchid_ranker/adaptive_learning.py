@@ -6,6 +6,7 @@ priors, support-aware direct reward modeling, and prerequisite gating.
 """
 from __future__ import annotations
 
+import math
 from dataclasses import asdict, dataclass, fields, replace
 from typing import Any, Dict, Mapping, Optional, Sequence
 
@@ -27,6 +28,7 @@ from .progression_reward import ProgressionRewardConfig
 
 __all__ = [
     "AdaptiveLearningConfig",
+    "AdaptiveLearningReadinessReport",
     "AdaptiveLearningRecommendation",
     "AdaptiveLearningRecommender",
 ]
@@ -67,8 +69,41 @@ class AdaptiveLearningConfig:
     mastery_threshold: float = 0.80
     enforce_prerequisites: bool = True
     allow_prerequisite_fallback: bool = False
+    fallback_to_empirical: bool = True
+    min_kt_events: int = 500
+    min_kt_users: int = 50
+    min_kt_items: int = 10
+    min_kt_median_events_per_user: float = 3.0
     device: Optional[str] = None
     random_state: Optional[int] = 42
+
+
+@dataclass(frozen=True)
+class AdaptiveLearningReadinessReport:
+    """Whether observed learning data supports a sequence-model deployment.
+
+    The report never blocks fitting. It allows a pilot to begin with a
+    transparent empirical tracer and makes the conditions for graduating to
+    knowledge tracing explicit.
+    """
+
+    n_events: int
+    n_users: int
+    n_items: int
+    n_categories: int
+    median_events_per_user: float
+    median_events_per_item: float
+    outcome_rate: float
+    outcome_entropy: float
+    has_categories: bool
+    has_difficulty: bool
+    knowledge_tracing_ready: bool
+    active_tracer: str
+    reasons: tuple[str, ...]
+    recommendations: tuple[str, ...]
+
+    def to_dict(self) -> Dict[str, Any]:
+        return asdict(self)
 
 
 @dataclass(frozen=True)
@@ -140,6 +175,7 @@ class AdaptiveLearningRecommender:
         self._item_col: str = "item_id"
         self._global_correct_total: float = 0.0
         self._global_outcome_count: float = 0.0
+        self.readiness_report_: Optional[AdaptiveLearningReadinessReport] = None
 
     @property
     def is_fitted(self) -> bool:
@@ -201,6 +237,17 @@ class AdaptiveLearningRecommender:
             concept: set(prerequisites)
             for concept, prerequisites in dict(prerequisite_by_concept or {}).items()
         }
+        readiness = _assess_learning_readiness(
+            work,
+            user_col=user_col,
+            item_col=item_col,
+            correct_col=correct_col,
+            category_col=concept_col,
+            difficulty_col=item_difficulty_col,
+            config=self.config,
+        )
+        active_tracer = self._resolve_active_tracer(readiness)
+        self.readiness_report_ = replace(readiness, active_tracer=active_tracer)
 
         self.tracer_ = self._fit_tracer(
             work,
@@ -210,6 +257,7 @@ class AdaptiveLearningRecommender:
             timestamp_col=timestamp_col,
             item_difficulty_col=item_difficulty_col,
             item_difficulty_map=item_difficulty_map,
+            tracer_model=active_tracer,
         )
         # Every bundled tracer reserves an OOV embedding at fit time. Enable it
         # only through this catalog-registration-aware facade.
@@ -467,6 +515,7 @@ class AdaptiveLearningRecommender:
         self._require_fitted()
         return {
             "tracer_model": self.config.tracer_model,
+            "active_tracer": None if self.readiness_report_ is None else self.readiness_report_.active_tracer,
             "requested_policy": self.config.policy,
             "policy": self.policy_name_,
             "n_users": len(self.user_ids_),
@@ -485,7 +534,14 @@ class AdaptiveLearningRecommender:
             "delayed_gain_reward_model": None
             if self.delayed_gain_reward_model_ is None
             else self.delayed_gain_reward_model_.to_dict(),
+            "readiness": None if self.readiness_report_ is None else self.readiness_report_.to_dict(),
         }
+
+    def readiness_report(self) -> AdaptiveLearningReadinessReport:
+        """Return the pilot-data assessment used to select the active tracer."""
+        self._require_fitted()
+        assert self.readiness_report_ is not None
+        return self.readiness_report_
 
     def _fit_tracer(
         self,
@@ -497,8 +553,19 @@ class AdaptiveLearningRecommender:
         timestamp_col: Optional[str],
         item_difficulty_col: Optional[str],
         item_difficulty_map: Optional[Mapping[Any, float]],
+        tracer_model: Optional[str] = None,
     ) -> Any:
-        normalized = self.config.tracer_model.lower().replace("_", "-")
+        normalized = (tracer_model or self.config.tracer_model).lower().replace("_", "-")
+        if normalized in {"empirical", "baseline"}:
+            from .empirical import EmpiricalTracer
+
+            return EmpiricalTracer(correct_threshold=self.config.correct_threshold).fit(
+                interactions,
+                user_col=user_col,
+                item_col=item_col,
+                correct_col=correct_col,
+                timestamp_col=timestamp_col,
+            )
         if normalized == "sakt":
             from .kt import SAKTTracer
 
@@ -627,7 +694,16 @@ class AdaptiveLearningRecommender:
                 correct_col=correct_col,
                 timestamp_col=timestamp_col,
             )
-        raise ValueError("tracer_model must be one of 'akt', 'sakt', 'dkt', 'dkvmn', 'saint', or 'saint+'")
+        raise ValueError("tracer_model must be one of 'empirical', 'akt', 'sakt', 'dkt', 'dkvmn', 'saint', or 'saint+'")
+
+    def _resolve_active_tracer(self, readiness: AdaptiveLearningReadinessReport) -> str:
+        """Select the transparent pilot baseline unless KT has adequate support."""
+        requested = self.config.tracer_model.lower().replace("_", "-")
+        if requested in {"empirical", "baseline"}:
+            return "empirical"
+        if self.config.fallback_to_empirical and not readiness.knowledge_tracing_ready:
+            return "empirical"
+        return requested
 
     def _resolve_policy(self, *, has_concept_signal: bool) -> str:
         policy = self.config.policy.lower()
@@ -810,6 +886,95 @@ def _validate_config(config: AdaptiveLearningConfig) -> None:
         raise ValueError("hybrid support thresholds must be positive")
     if config.delayed_gain_window < 1:
         raise ValueError("delayed_gain_window must be >= 1")
+    if config.min_kt_events < 1 or config.min_kt_users < 1 or config.min_kt_items < 1:
+        raise ValueError("knowledge-tracing readiness minimums must be positive")
+    if not np.isfinite(float(config.min_kt_median_events_per_user)) or config.min_kt_median_events_per_user < 1.0:
+        raise ValueError("min_kt_median_events_per_user must be a finite value >= 1")
+
+
+def _assess_learning_readiness(
+    frame: pd.DataFrame,
+    *,
+    user_col: str,
+    item_col: str,
+    correct_col: str,
+    category_col: Optional[str],
+    difficulty_col: Optional[str],
+    config: AdaptiveLearningConfig,
+) -> AdaptiveLearningReadinessReport:
+    """Assess support for sequence modeling without inventing a quality claim.
+
+    These are deliberately conservative *starting checks*, not universal data
+    requirements. A team should validate its chosen tracer against an authored
+    baseline on a chronological holdout before treating the result as ready for
+    a live learning pilot.
+    """
+    labels = (frame[correct_col].astype(float) >= config.correct_threshold).astype(float)
+    n_events = int(len(frame))
+    n_users = int(frame[user_col].nunique())
+    n_items = int(frame[item_col].nunique())
+    per_user = frame.groupby(user_col, dropna=False).size()
+    per_item = frame.groupby(item_col, dropna=False).size()
+    outcome_rate = float(labels.mean())
+    outcome_entropy = 0.0
+    if 0.0 < outcome_rate < 1.0:
+        outcome_entropy = float(
+            -outcome_rate * math.log2(outcome_rate) - (1.0 - outcome_rate) * math.log2(1.0 - outcome_rate)
+        )
+    has_categories = category_col is not None
+    n_categories = int(frame[category_col].nunique()) if category_col is not None else 0
+    has_difficulty = difficulty_col is not None
+    median_per_user = float(per_user.median()) if not per_user.empty else 0.0
+    median_per_item = float(per_item.median()) if not per_item.empty else 0.0
+    reasons: list[str] = []
+    if n_events < config.min_kt_events:
+        reasons.append(f"only {n_events} completed interactions; configured KT starting check is {config.min_kt_events}")
+    if n_users < config.min_kt_users:
+        reasons.append(f"only {n_users} learners; configured KT starting check is {config.min_kt_users}")
+    if n_items < config.min_kt_items:
+        reasons.append(f"only {n_items} exercises; configured KT starting check is {config.min_kt_items}")
+    if median_per_user < config.min_kt_median_events_per_user:
+        reasons.append(
+            "median learner history is "
+            f"{median_per_user:.1f}; configured KT starting check is {config.min_kt_median_events_per_user:.1f}"
+        )
+    if outcome_rate <= 0.02 or outcome_rate >= 0.98:
+        reasons.append("outcomes are almost one-sided, limiting correctness-model discrimination")
+    recommendations: list[str] = []
+    if reasons:
+        recommendations.append(
+            "Use the empirical pilot baseline, continue collecting completed learner attempts, and compare future KT "
+            "against an authored sequence on a chronological holdout."
+        )
+    else:
+        recommendations.append(
+            "Knowledge tracing has enough basic support to evaluate, but it still needs a chronological calibration "
+            "comparison against an authored or empirical baseline before live use."
+        )
+    if not has_categories:
+        recommendations.append(
+            "Add a stable skill/category mapping before claiming skill-level mastery or using prerequisite rules."
+        )
+    if not has_difficulty:
+        recommendations.append(
+            "Add author-reviewed difficulty when available; inferred difficulty is only an outcome-rate proxy."
+        )
+    return AdaptiveLearningReadinessReport(
+        n_events=n_events,
+        n_users=n_users,
+        n_items=n_items,
+        n_categories=n_categories,
+        median_events_per_user=median_per_user,
+        median_events_per_item=median_per_item,
+        outcome_rate=outcome_rate,
+        outcome_entropy=outcome_entropy,
+        has_categories=has_categories,
+        has_difficulty=has_difficulty,
+        knowledge_tracing_ready=not reasons,
+        active_tracer="unresolved",
+        reasons=tuple(reasons),
+        recommendations=tuple(recommendations),
+    )
 
 
 def _ordered(frame: pd.DataFrame, *, user_col: str, timestamp_col: Optional[str]) -> pd.DataFrame:

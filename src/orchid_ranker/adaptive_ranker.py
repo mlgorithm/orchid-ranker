@@ -4,6 +4,7 @@ from __future__ import annotations
 import hashlib
 import json
 import threading
+import uuid
 from dataclasses import asdict, dataclass, fields, replace
 from typing import Any, Mapping, Optional, Sequence
 
@@ -25,6 +26,7 @@ from .adaptive_schema import (
     validate_logged_decisions,
     validate_user_events,
 )
+from .decision_store import DecisionOutcomeStore, InMemoryDecisionStore
 from .offline_policy import CQLDiscretePolicy, CQLTrainingReport
 from .ope import (
     BootstrapLoggedPolicyReport,
@@ -83,6 +85,11 @@ class AdaptiveRankerConfig:
     mastery_threshold: float = 0.80
     enforce_prerequisites: bool = True
     allow_prerequisite_fallback: bool = False
+    fallback_to_empirical: bool = True
+    min_kt_events: int = 500
+    min_kt_users: int = 50
+    min_kt_items: int = 10
+    min_kt_median_events_per_user: float = 3.0
     device: Optional[str] = None
     random_state: Optional[int] = 42
     offline_policy_weight: float = 1.0
@@ -162,7 +169,13 @@ class AdaptiveRanker:
     need to choose a model.
     """
 
-    def __init__(self, config: Optional[AdaptiveRankerConfig] = None, **overrides: Any) -> None:
+    def __init__(
+        self,
+        config: Optional[AdaptiveRankerConfig] = None,
+        *,
+        decision_store: Optional[DecisionOutcomeStore] = None,
+        **overrides: Any,
+    ) -> None:
         valid = {field.name for field in fields(AdaptiveRankerConfig)}
         unknown = sorted(set(overrides) - valid)
         if unknown:
@@ -179,8 +192,9 @@ class AdaptiveRanker:
         self.semantic_encoder_: Optional[Any] = None
         self._events: Optional[pd.DataFrame] = None
         self._fit_kwargs: dict[str, Any] = {}
-        self._decision_log: dict[str, LoggedDecision] = {}
-        self._outcome_log: dict[str, DecisionOutcome] = {}
+        self._catalog_registration: Optional[tuple[pd.DataFrame, str, Optional[str], Optional[str]]] = None
+        self.decision_store: DecisionOutcomeStore = decision_store or InMemoryDecisionStore()
+        _require_decision_store(self.decision_store)
         # One ranker owns mutable learner state, decision records, and deployed
         # policy references. Serializing public operations makes that contract
         # explicit and prevents readers from observing a partially updated model.
@@ -204,6 +218,11 @@ class AdaptiveRanker:
         timestamp_col: str = "timestamp",
         category_col: Optional[str] = None,
         difficulty_col: Optional[str] = None,
+        catalog: Optional[pd.DataFrame] = None,
+        catalog_item_col: str = "item_id",
+        catalog_category_col: str = "category_id",
+        catalog_difficulty_col: str = "difficulty",
+        prerequisite_by_concept: Optional[Mapping[Any, Sequence[Any]]] = None,
         **fit_kwargs: Any,
     ) -> "AdaptiveRanker":
         """Fit from a chronological table of user outcomes.
@@ -213,7 +232,9 @@ class AdaptiveRanker:
 
         ``category_col`` and ``difficulty_col`` are optional. They can improve
         ranking when the application has meaningful item categories or an
-        externally defined difficulty signal.
+        externally defined difficulty signal. A separate exercise ``catalog``
+        is the preferred learning-product path: it supplies category and
+        difficulty metadata for both historical and newly registered exercises.
         """
         with self._state_lock:
             for role, column in (
@@ -237,14 +258,32 @@ class AdaptiveRanker:
                 raise ValueError(f"events must include category column {resolved_category_col!r}")
             if difficulty_col is not None and difficulty_col not in events.columns:
                 raise ValueError(f"events must include difficulty column {difficulty_col!r}")
-            return self._fit_events(
+            if prerequisite_by_concept is not None:
+                if "prerequisite_by_concept" in fit_kwargs:
+                    raise TypeError("pass prerequisite_by_concept only once")
+                fit_kwargs["prerequisite_by_concept"] = prerequisite_by_concept
+            prepared_events, resolved_category_col, resolved_difficulty_col, prepared_catalog = _prepare_learning_catalog(
                 events,
+                item_col=item_col,
+                category_col=resolved_category_col,
+                difficulty_col=difficulty_col,
+                catalog=catalog,
+                catalog_item_col=catalog_item_col,
+                catalog_category_col=catalog_category_col,
+                catalog_difficulty_col=catalog_difficulty_col,
+            )
+            return self._fit_events(
+                prepared_events,
                 user_col=user_col,
                 item_col=item_col,
                 outcome_col=outcome_col,
                 timestamp_col=timestamp_col,
                 category_col=resolved_category_col,
-                difficulty_col=difficulty_col,
+                difficulty_col=resolved_difficulty_col,
+                catalog=prepared_catalog,
+                catalog_item_col=catalog_item_col,
+                catalog_category_col=catalog_category_col,
+                catalog_difficulty_col=catalog_difficulty_col,
                 **fit_kwargs,
             )
 
@@ -258,12 +297,28 @@ class AdaptiveRanker:
         timestamp_col: str,
         category_col: Optional[str],
         difficulty_col: Optional[str],
+        catalog: Optional[pd.DataFrame] = None,
+        catalog_item_col: str = "item_id",
+        catalog_category_col: str = "category_id",
+        catalog_difficulty_col: str = "difficulty",
         **fit_kwargs: Any,
     ) -> "AdaptiveRanker":
         """Fit the internal outcome-tracing and ranking stack."""
         backbone = self.config.kt_backbone.lower().replace("_", "-")
-        if backbone not in {"akt", "sakt", "akt-inspired", "dkt", "dkvmn", "dkvmn-style", "saint", "saint+", "saint-plus"}:
-            raise ValueError("kt_backbone must be one of 'akt', 'sakt', 'dkt', 'dkvmn', 'saint', or 'saint+'")
+        if backbone not in {
+            "empirical",
+            "baseline",
+            "akt",
+            "sakt",
+            "akt-inspired",
+            "dkt",
+            "dkvmn",
+            "dkvmn-style",
+            "saint",
+            "saint+",
+            "saint-plus",
+        }:
+            raise ValueError("kt_backbone must be one of 'empirical', 'akt', 'sakt', 'dkt', 'dkvmn', 'saint', or 'saint+'")
         work = validate_user_events(
             events,
             user_col=user_col,
@@ -283,6 +338,21 @@ class AdaptiveRanker:
             item_difficulty_col=difficulty_col,
             **fit_kwargs,
         )
+        if catalog is not None:
+            candidate_recommender.register_items(
+                catalog,
+                item_col=catalog_item_col,
+                category_col=catalog_category_col if catalog_category_col in catalog.columns else None,
+                difficulty_col=catalog_difficulty_col if catalog_difficulty_col in catalog.columns else None,
+            )
+            self._catalog_registration = (
+                catalog.copy(),
+                catalog_item_col,
+                catalog_category_col if catalog_category_col in catalog.columns else None,
+                catalog_difficulty_col if catalog_difficulty_col in catalog.columns else None,
+            )
+        else:
+            self._catalog_registration = None
         self.recommender_ = candidate_recommender
         self._events = work.copy()
         self._fit_kwargs = {
@@ -310,6 +380,14 @@ class AdaptiveRanker:
                 raise ValueError("fit_reward_model requires category data")
             adaptive_config = self._adaptive_config(policy="support_delayed_gain")
             self.recommender_ = AdaptiveLearningRecommender(adaptive_config).fit(self._events, **self._fit_kwargs)
+            if self._catalog_registration is not None:
+                catalog, item_col, category_col, difficulty_col = self._catalog_registration
+                self.recommender_.register_items(
+                    catalog,
+                    item_col=item_col,
+                    category_col=category_col,
+                    difficulty_col=difficulty_col,
+                )
             self.offline_policy_ = None
             self.offline_policy_gate_ = None
             self.offline_policy_bootstrap_ = None
@@ -612,6 +690,7 @@ class AdaptiveRanker:
         concept_goal: Optional[Any],
         item_query_vec: Optional[Sequence[float]],
         item_query_text: Optional[str],
+        enforce_prerequisites: Optional[bool] = None,
     ) -> list[AdaptiveLearningRecommendation]:
         """Produce base adaptive scores before an optional CQL overlay.
 
@@ -650,7 +729,14 @@ class AdaptiveRanker:
         cold_candidates = [item_id for item_id in candidates if item_id not in known_set]
         recs: list[AdaptiveLearningRecommendation] = []
         if known_candidates:
-            recs.extend(self.recommender_.rank(user_id, known_candidates, top_k=max(top_k, len(known_candidates))))
+            recs.extend(
+                self.recommender_.rank(
+                    user_id,
+                    known_candidates,
+                    top_k=max(top_k, len(known_candidates)),
+                    enforce_prerequisites=enforce_prerequisites,
+                )
+            )
         recs.extend(
             self._semantic_cold_start_recommendations(
                 user_id,
@@ -679,13 +765,19 @@ class AdaptiveRanker:
         policy_version: Optional[str] = None,
         context_hash: Optional[str] = None,
         concept_goal: Optional[Any] = None,
+        decision_id: Optional[str] = None,
+        decision_metadata: Optional[Mapping[str, Any]] = None,
     ) -> tuple[list[AdaptiveLearningRecommendation], LoggedDecision]:
         """Choose, return, and register one decision with exact action probabilities.
 
         Exploration is epsilon-uniform over the candidates that survive
         prerequisite, support, correctness, and optional difficulty constraints.
         The chosen item is returned first; the immutable log contains the entire
-        safe decision-time candidate set.
+        safe decision-time candidate set.  Supplying ``decision_id`` makes a
+        retried serving request idempotent: the original decision is returned
+        and never re-sampled or overwritten. ``decision_metadata`` records
+        application-owned immutable context, such as an experiment arm or
+        catalog version, alongside Orchid's derived policy metadata.
         """
         self._require_fitted()
         normalized_timestamp = normalize_timestamp(timestamp)
@@ -722,12 +814,38 @@ class AdaptiveRanker:
         candidates = list(dict.fromkeys(candidate_item_ids))
         if not candidates:
             raise ValueError("recommend_and_log requires an explicit non-empty candidate set")
+        resolved_decision_metadata = _normalize_decision_metadata(decision_metadata)
         ctx = context_hash or stable_context_hash(user_id, concept_goal)
         with self._decision_lock:
             assert self.recommender_ is not None
             resolved_policy_version = self._deployment_version if policy_version is None else str(policy_version)
             if not resolved_policy_version:
                 raise ValueError("policy_version must be non-empty")
+            resolved_decision_id = None if decision_id is None else str(decision_id)
+            if resolved_decision_id == "":
+                raise ValueError("decision_id must be non-empty when supplied")
+            request_fingerprint = _decision_request_fingerprint(
+                user_id=user_id,
+                timestamp=normalized_timestamp,
+                candidate_item_ids=candidates,
+                exploration=exploration,
+                min_item_support=min_item_support,
+                min_outcome_probability=min_outcome_probability,
+                max_outcome_probability=max_outcome_probability,
+                min_difficulty=min_difficulty,
+                max_difficulty=max_difficulty,
+                require_prerequisites=require_prerequisites,
+                allow_unsupported_feedback=allow_unsupported_feedback,
+                policy_version=None if policy_version is None else str(policy_version),
+                context_hash=ctx,
+                concept_goal=concept_goal,
+                decision_metadata=resolved_decision_metadata,
+            )
+            if resolved_decision_id is not None:
+                existing = self.decision_store.get_decision(resolved_decision_id)
+                if existing is not None:
+                    _require_matching_decision_request(existing, request_fingerprint)
+                    return self._recommendations_from_logged_decision(existing, top_k=top_k), existing
             base_ranked = self._base_recommendations(
                 user_id,
                 candidates,
@@ -736,6 +854,7 @@ class AdaptiveRanker:
                 concept_goal=concept_goal,
                 item_query_vec=None,
                 item_query_text=None,
+                enforce_prerequisites=require_prerequisites,
             )
             base_scores = {rec.item_id: float(rec.score) for rec in base_ranked}
             ranked = self._apply_offline_overlay(base_ranked, context_hash=ctx)
@@ -779,6 +898,7 @@ class AdaptiveRanker:
                 policy_version=resolved_policy_version,
                 scores=tuple(float(rec.score) for rec in safe),
                 context_hash=ctx,
+                decision_id=resolved_decision_id or uuid.uuid4().hex,
                 action_probabilities=tuple(float(value) for value in probabilities),
                 predicted_outcomes=tuple(float(rec.outcome_probability) for rec in safe),
                 exploration_rate=epsilon,
@@ -795,12 +915,15 @@ class AdaptiveRanker:
                     "feedback_supported": all(rec.feedback_supported for rec in safe),
                     "base_scores": tuple(base_scores[rec.item_id] for rec in safe),
                     "external_feedback_required": bool(unsupported),
+                    "_orchid_request_fingerprint": request_fingerprint,
+                    "decision_metadata": resolved_decision_metadata,
                 },
             )
-            if decision.decision_id in self._decision_log:
-                raise RuntimeError("generated a duplicate decision_id")
-            self._decision_log[decision.decision_id] = LoggedDecision(**decision.to_dict())
-            return served, decision
+            stored_decision, created = self.decision_store.create_decision(decision)
+            if not created:
+                _require_matching_decision_request(stored_decision, request_fingerprint)
+                return self._recommendations_from_logged_decision(stored_decision, top_k=top_k), stored_decision
+            return served, stored_decision
 
     def observe(
         self,
@@ -810,22 +933,39 @@ class AdaptiveRanker:
         outcome: Any,
         timestamp: Any,
         category_id: Optional[Any] = None,
+        update_global: bool = True,
     ) -> Any:
-        """Observe one user outcome and update live state."""
+        """Observe one user outcome and update live state.
+
+        Set ``update_global=False`` for a frozen experiment: the learner's
+        own adaptive state advances while aggregate item/global statistics
+        remain unchanged.  This is useful when a treatment artifact must not
+        learn from concurrent control or pilot traffic.
+        """
         with self._state_lock:
             self._require_fitted()
             assert self.recommender_ is not None
+            if not isinstance(update_global, (bool, np.bool_)):
+                raise TypeError("update_global must be boolean")
             normalized_outcome = _binary_outcome(outcome)
             normalized_timestamp = normalize_timestamp(timestamp)
             del category_id
-            return self.recommender_.observe(
-                user_id,
-                item_id,
-                normalized_outcome,
+            if bool(update_global):
+                return self.recommender_.observe(
+                    user_id,
+                    item_id,
+                    normalized_outcome,
+                    timestamp=normalized_timestamp,
+                )
+            return _observe_recommender_locally(
+                self.recommender_,
+                user_id=user_id,
+                item_id=item_id,
+                outcome=normalized_outcome,
                 timestamp=normalized_timestamp,
             )
 
-    def observe_decision(
+    def persist_decision_outcome(
         self,
         decision_id: str,
         *,
@@ -833,21 +973,34 @@ class AdaptiveRanker:
         reward: Optional[float] = None,
         timestamp: Optional[Any] = None,
         category_id: Optional[Any] = None,
+        outcome_event_id: Optional[str] = None,
+        apply_state: bool = True,
+        update_global: bool = True,
     ) -> DecisionOutcome:
-        """Attach one delayed outcome to a logged decision and update learner state."""
+        """Attach one delayed outcome without changing live learner state.
+
+        This is the persistence half of the durable outcome protocol. Most
+        integrations should use :meth:`observe_decision`; the method is
+        public so a lifecycle adapter can persist all score evidence before
+        rebuilding a fresh ranker state projection.
+        """
         self._require_fitted()
         with self._decision_lock:
-            if decision_id not in self._decision_log:
+            decision = self.decision_store.get_decision(decision_id)
+            if decision is None:
                 raise KeyError(f"unknown decision_id: {decision_id}")
-            if decision_id in self._outcome_log:
-                raise ValueError(f"decision_id already has an outcome: {decision_id}")
             if outcome is None and reward is None:
                 raise ValueError("observe_decision requires outcome or reward")
+            if outcome_event_id is not None and not str(outcome_event_id):
+                raise ValueError("outcome_event_id must be non-empty when supplied")
+            if not isinstance(apply_state, (bool, np.bool_)):
+                raise TypeError("apply_state must be boolean")
+            if not isinstance(update_global, (bool, np.bool_)):
+                raise TypeError("update_global must be boolean")
             normalized_outcome = None if outcome is None else _binary_outcome(outcome)
             if reward is not None and not np.isfinite(float(reward)):
                 raise ValueError("reward must be finite")
 
-            decision = self._decision_log[decision_id]
             outcome_timestamp = decision.timestamp if timestamp is None else normalize_timestamp(timestamp)
             if outcome_timestamp < decision.timestamp:
                 raise ValueError("timestamp must not precede the serving decision")
@@ -867,28 +1020,113 @@ class AdaptiveRanker:
                 outcome=normalized_outcome,
                 reward=resolved_reward,
                 category_id=resolved_category,
+                outcome_event_id=None if outcome_event_id is None else str(outcome_event_id),
+                apply_state=bool(apply_state),
+                update_global=bool(update_global),
             )
             validate_decision_outcomes(pd.DataFrame([linked_outcome.to_dict()]))
-            if normalized_outcome is not None:
-                self.observe(
-                    user_id=decision.user_id,
-                    timestamp=outcome_timestamp,
-                    item_id=decision.chosen_item_id,
-                    category_id=resolved_category,
-                    outcome=normalized_outcome,
-                )
-            self._outcome_log[decision_id] = linked_outcome
-            return linked_outcome
+            stored_outcome, _created = self.decision_store.attach_outcome(linked_outcome)
+            return stored_outcome
+
+    def observe_decision(
+        self,
+        decision_id: str,
+        *,
+        outcome: Optional[Any] = None,
+        reward: Optional[float] = None,
+        timestamp: Optional[Any] = None,
+        category_id: Optional[Any] = None,
+        outcome_event_id: Optional[str] = None,
+        apply_state: bool = True,
+        update_global: bool = True,
+    ) -> DecisionOutcome:
+        """Attach one delayed outcome and apply it to live learner state.
+
+        Outcome evidence is durably attached before it is applied. If the
+        application raises, the outcome remains pending and can be repaired by
+        retrying this exact call or by :meth:`replay_pending_outcomes`.
+        """
+        stored_outcome = self.persist_decision_outcome(
+            decision_id,
+            outcome=outcome,
+            reward=reward,
+            timestamp=timestamp,
+            category_id=category_id,
+            outcome_event_id=outcome_event_id,
+            apply_state=apply_state,
+            update_global=update_global,
+        )
+        with self._decision_lock:
+            self._apply_stored_outcome(stored_outcome)
+        return stored_outcome
+
+    def replay_pending_outcomes(self) -> list[DecisionOutcome]:
+        """Apply durable outcomes that were stored before live-state application.
+
+        Call this after restoring a ranker from the same baseline/model-state
+        checkpoint following a crash.  Applied outcomes are durably marked, so
+        repeated recovery calls are no-ops.  Outcomes are replayed in
+        chronological order within each learner.
+        """
+        self._require_fitted()
+        with self._decision_lock:
+            pending = self.decision_store.pending_outcomes()
+            pending.sort(key=lambda value: (str(value.user_id), value.outcome_timestamp, value.decision_id))
+            for stored_outcome in pending:
+                self._apply_stored_outcome(stored_outcome)
+            return pending
+
+    def replay_all_outcomes_from_baseline(self) -> list[DecisionOutcome]:
+        """Reapply all stateful durable outcomes to a fresh model baseline.
+
+        The store's application checkpoints describe a previous in-memory
+        projection, so they are deliberately ignored here. Only call this on
+        a newly restored/fitted baseline; calling it on a live projection
+        would apply the same outcomes twice.
+        """
+        self._require_fitted()
+        with self._decision_lock:
+            outcomes = self.decision_store.outcomes()
+            outcomes.sort(key=lambda value: (str(value.user_id), value.outcome_timestamp, value.decision_id))
+            for stored_outcome in outcomes:
+                if stored_outcome.apply_state and stored_outcome.outcome is not None:
+                    self.observe(
+                        user_id=stored_outcome.user_id,
+                        timestamp=stored_outcome.outcome_timestamp,
+                        item_id=stored_outcome.item_id,
+                        category_id=stored_outcome.category_id,
+                        outcome=stored_outcome.outcome,
+                        update_global=stored_outcome.update_global,
+                    )
+                self.decision_store.mark_outcome_applied(stored_outcome.decision_id)
+            return outcomes
+
+    def _apply_stored_outcome(self, stored_outcome: DecisionOutcome) -> bool:
+        """Apply one pending durable outcome, then checkpoint its application."""
+        if self.decision_store.is_outcome_applied(stored_outcome.decision_id):
+            return False
+        if stored_outcome.apply_state and stored_outcome.outcome is not None:
+            self.observe(
+                user_id=stored_outcome.user_id,
+                timestamp=stored_outcome.outcome_timestamp,
+                item_id=stored_outcome.item_id,
+                category_id=stored_outcome.category_id,
+                outcome=stored_outcome.outcome,
+                update_global=stored_outcome.update_global,
+            )
+        self.decision_store.mark_outcome_applied(stored_outcome.decision_id)
+        return True
 
     def decision_log_frame(self, *, completed_only: bool = False) -> pd.DataFrame:
         """Return immutable serving decisions, optionally joined to delayed outcomes."""
         with self._decision_lock:
-            decisions = pd.DataFrame([decision.to_dict() for decision in self._decision_log.values()])
+            decisions = pd.DataFrame([decision.to_dict() for decision in self.decision_store.decisions()])
             if decisions.empty:
                 return decisions
-            if not self._outcome_log:
+            stored_outcomes = self.decision_store.outcomes()
+            if not stored_outcomes:
                 return decisions.iloc[0:0].copy() if completed_only else decisions.copy()
-            outcomes = pd.DataFrame([outcome.to_dict() for outcome in self._outcome_log.values()]).rename(
+            outcomes = pd.DataFrame([outcome.to_dict() for outcome in stored_outcomes]).rename(
                 columns={"reward": "__outcome_reward__"}
             )
             joined = decisions.merge(
@@ -899,6 +1137,9 @@ class AdaptiveRanker:
                         "outcome",
                         "__outcome_reward__",
                         "category_id",
+                        "outcome_event_id",
+                        "apply_state",
+                        "update_global",
                     ]
                 ],
                 on="decision_id",
@@ -1067,12 +1308,66 @@ class AdaptiveRanker:
             "rolling_policy_update": (
                 None if self.rolling_policy_report_ is None else self.rolling_policy_report_.to_dict()
             ),
-            "logged_decisions": len(self._decision_log),
-            "linked_outcomes": len(self._outcome_log),
+            "logged_decisions": len(self.decision_store.decisions()),
+            "linked_outcomes": len(self.decision_store.outcomes()),
             "has_sketch_generator": self.sketch_generator_ is not None,
             "semantic_encoder": None if self.semantic_encoder_ is None else self.semantic_encoder_.diagnostics(),
         }
         return data
+
+    def learning_readiness(self) -> dict[str, Any]:
+        """Return the data-readiness assessment for the fitted learning policy.
+
+        Small pilots automatically use Orchid's empirical adaptive baseline by
+        default. The report explains what support is still needed before a
+        knowledge-tracing model is selected.
+        """
+        self._require_fitted()
+        assert self.recommender_ is not None
+        return self.recommender_.readiness_report().to_dict()
+
+    def _recommendations_from_logged_decision(
+        self,
+        decision: LoggedDecision,
+        *,
+        top_k: int,
+    ) -> list[AdaptiveLearningRecommendation]:
+        """Reconstruct a stable serving response for an idempotent retry.
+
+        Scores and correctness predictions come from the immutable decision,
+        not from the mutable current learner state.  Current catalog metadata
+        fills the descriptive fields because it does not alter the action that
+        was already logged.
+        """
+        assert self.recommender_ is not None
+        candidates = list(decision.candidate_item_ids)
+        predictions = list(decision.predicted_outcomes or ())
+        if len(predictions) != len(candidates):
+            predictions = [0.5] * len(candidates)
+        metadata = decision.policy_metadata or {}
+        external_feedback_required = bool(metadata.get("external_feedback_required", False))
+        recommendation_by_item: dict[Any, AdaptiveLearningRecommendation] = {}
+        for item_id, score, outcome_probability in zip(candidates, decision.scores, predictions):
+            category_id = self.recommender_.concept_by_item_.get(item_id)
+            recommendation_by_item[item_id] = AdaptiveLearningRecommendation(
+                item_id=item_id,
+                score=float(score),
+                outcome_probability=float(outcome_probability),
+                policy=decision.policy_name,
+                difficulty=self.recommender_.difficulty_by_item_.get(item_id),
+                category_id=category_id,
+                expected_reward=float(score),
+                model_prediction=float(outcome_probability),
+                item_support=float(self.recommender_.item_support_.get(item_id, 0.0)),
+                concept_support=float(self.recommender_.concept_support_.get(category_id, 0.0)),
+                feedback_supported=not external_feedback_required
+                and self.recommender_.feedback_supported(item_id),
+            )
+        ordered = [
+            recommendation_by_item[decision.chosen_item_id],
+            *(recommendation_by_item[item_id] for item_id in candidates if item_id != decision.chosen_item_id),
+        ]
+        return ordered[: min(int(top_k), len(ordered))]
 
     @staticmethod
     def _is_safe_exploration_candidate(
@@ -1214,6 +1509,11 @@ class AdaptiveRanker:
             mastery_threshold=self.config.mastery_threshold,
             enforce_prerequisites=self.config.enforce_prerequisites,
             allow_prerequisite_fallback=self.config.allow_prerequisite_fallback,
+            fallback_to_empirical=self.config.fallback_to_empirical,
+            min_kt_events=self.config.min_kt_events,
+            min_kt_users=self.config.min_kt_users,
+            min_kt_items=self.config.min_kt_items,
+            min_kt_median_events_per_user=self.config.min_kt_median_events_per_user,
             device=self.config.device,
             random_state=self.config.random_state,
         )
@@ -1398,6 +1698,242 @@ class AdaptiveRanker:
     def _require_fitted(self) -> None:
         if not self.is_fitted:
             raise RuntimeError("AdaptiveRanker.fit must be called before serving")
+
+
+def _require_decision_store(store: Any) -> None:
+    """Fail early when a custom decision store misses the persistence contract."""
+    required = (
+        "get_decision",
+        "get_outcome",
+        "get_outcome_by_event_id",
+        "create_decision",
+        "attach_outcome",
+        "is_outcome_applied",
+        "mark_outcome_applied",
+        "pending_outcomes",
+        "decisions",
+        "outcomes",
+    )
+    missing = [name for name in required if not callable(getattr(store, name, None))]
+    if missing:
+        raise TypeError(f"decision_store is missing required methods: {missing}")
+
+
+def _observe_recommender_locally(
+    recommender: AdaptiveLearningRecommender,
+    *,
+    user_id: Any,
+    item_id: Any,
+    outcome: int,
+    timestamp: float,
+) -> Any:
+    """Advance learner-specific state while restoring aggregate counters.
+
+    Tracer-based policies keep a learner history in their tracer, whereas the
+    recommender also maintains aggregate item/concept counters used for future
+    fitting and diagnostics.  Frozen pilots need the former but must retain the
+    latter exactly.  ``EmpiricalTracer`` additionally owns aggregate
+    global/item counts, so those are restored while its user and user-item
+    counts remain advanced.
+    """
+    aggregate_mappings = (
+        "item_support_",
+        "item_correct_",
+        "concept_support_",
+        "concept_correct_",
+    )
+    mapping_snapshot = {
+        name: dict(getattr(recommender, name))
+        for name in aggregate_mappings
+        if isinstance(getattr(recommender, name, None), dict)
+    }
+    scalar_names = ("_global_correct_total", "_global_outcome_count", "global_correct_")
+    scalar_snapshot = {
+        name: getattr(recommender, name)
+        for name in scalar_names
+        if hasattr(recommender, name)
+    }
+    tracer = recommender.tracer_
+    empirical_mapping_names = ("_item_successes", "_item_count")
+    empirical_mapping_snapshot = {
+        name: dict(getattr(tracer, name))
+        for name in empirical_mapping_names
+        if isinstance(getattr(tracer, name, None), dict)
+    }
+    empirical_scalar_names = ("_global_successes", "_global_count")
+    empirical_scalar_snapshot = {
+        name: getattr(tracer, name)
+        for name in empirical_scalar_names
+        if hasattr(tracer, name)
+    }
+    try:
+        return recommender.observe(user_id, item_id, outcome, timestamp=timestamp)
+    finally:
+        for name, snapshot in mapping_snapshot.items():
+            target = getattr(recommender, name)
+            target.clear()
+            target.update(snapshot)
+        for name, snapshot in scalar_snapshot.items():
+            setattr(recommender, name, snapshot)
+        for name, snapshot in empirical_mapping_snapshot.items():
+            target = getattr(tracer, name)
+            target.clear()
+            target.update(snapshot)
+        for name, snapshot in empirical_scalar_snapshot.items():
+            setattr(tracer, name, snapshot)
+
+
+def _decision_request_fingerprint(
+    *,
+    user_id: Any,
+    timestamp: float,
+    candidate_item_ids: Sequence[Any],
+    exploration: float,
+    min_item_support: float,
+    min_outcome_probability: float,
+    max_outcome_probability: float,
+    min_difficulty: Optional[float],
+    max_difficulty: Optional[float],
+    require_prerequisites: bool,
+    allow_unsupported_feedback: bool,
+    policy_version: Optional[str],
+    context_hash: str,
+    concept_goal: Optional[Any],
+    decision_metadata: Optional[Mapping[str, Any]],
+) -> str:
+    """Hash all inputs that determine a logged serving decision."""
+    payload = _fingerprint_value(
+        {
+            "user_id": user_id,
+            "timestamp": timestamp,
+            "candidate_item_ids": list(candidate_item_ids),
+            "exploration": float(exploration),
+            "min_item_support": float(min_item_support),
+            "min_outcome_probability": float(min_outcome_probability),
+            "max_outcome_probability": float(max_outcome_probability),
+            "min_difficulty": min_difficulty,
+            "max_difficulty": max_difficulty,
+            "require_prerequisites": bool(require_prerequisites),
+            "allow_unsupported_feedback": bool(allow_unsupported_feedback),
+            "policy_version": policy_version,
+            "context_hash": context_hash,
+            "concept_goal": concept_goal,
+            "decision_metadata": decision_metadata,
+        }
+    )
+    encoded = json.dumps(payload, sort_keys=True, separators=(",", ":"), default=str)
+    return hashlib.sha256(encoded.encode("utf-8")).hexdigest()
+
+
+def _normalize_decision_metadata(value: Optional[Mapping[str, Any]]) -> Optional[dict[str, Any]]:
+    """Return a deeply JSON-compatible immutable-decision metadata payload."""
+    if value is None:
+        return None
+    if not isinstance(value, Mapping):
+        raise TypeError("decision_metadata must be a mapping")
+    return _json_metadata_mapping(value)
+
+
+def _json_metadata_value(value: Any) -> Any:
+    """Validate the portable metadata shape used by durable decision stores."""
+    if isinstance(value, np.generic):
+        return _json_metadata_value(value.item())
+    if value is None or isinstance(value, (str, bool, int)):
+        return value
+    if isinstance(value, float):
+        if not np.isfinite(value):
+            raise ValueError("decision_metadata numbers must be finite")
+        return value
+    if isinstance(value, Mapping):
+        return _json_metadata_mapping(value)
+    if isinstance(value, (list, tuple)):
+        return [_json_metadata_value(item) for item in value]
+    raise TypeError("decision_metadata values must be JSON-compatible")
+
+
+def _json_metadata_mapping(value: Mapping[Any, Any]) -> dict[str, Any]:
+    result: dict[str, Any] = {}
+    for key, item in value.items():
+        if not isinstance(key, str):
+            raise TypeError("decision_metadata mapping keys must be strings")
+        result[key] = _json_metadata_value(item)
+    return result
+
+
+def _require_matching_decision_request(decision: LoggedDecision, request_fingerprint: str) -> None:
+    """Reject accidental reuse of an idempotency key for a different request."""
+    metadata = decision.policy_metadata or {}
+    stored_fingerprint = metadata.get("_orchid_request_fingerprint")
+    if stored_fingerprint != request_fingerprint:
+        raise ValueError(f"decision_id already exists for a different serving request: {decision.decision_id}")
+
+
+def _prepare_learning_catalog(
+    events: pd.DataFrame,
+    *,
+    item_col: str,
+    category_col: Optional[str],
+    difficulty_col: Optional[str],
+    catalog: Optional[pd.DataFrame],
+    catalog_item_col: str,
+    catalog_category_col: str,
+    catalog_difficulty_col: str,
+) -> tuple[pd.DataFrame, Optional[str], Optional[str], Optional[pd.DataFrame]]:
+    """Attach authoritative catalog metadata to historical learning attempts.
+
+    Event-level category/difficulty columns remain supported for compatibility.
+    When absent, a catalog becomes the canonical source for those values and
+    also registers exercises that have not yet received learner feedback.
+    """
+    if catalog is None:
+        return events, category_col, difficulty_col, None
+    if catalog_item_col not in catalog.columns:
+        raise ValueError(f"catalog must include item column {catalog_item_col!r}")
+    prepared_catalog = catalog.copy()
+    if prepared_catalog[catalog_item_col].isna().any():
+        raise ValueError("catalog item identifiers must not be missing")
+    if prepared_catalog[catalog_item_col].duplicated().any():
+        raise ValueError("catalog must contain one canonical row per item")
+    catalog_ids = set(prepared_catalog[catalog_item_col].tolist())
+    missing_items = [item_id for item_id in events[item_col].drop_duplicates().tolist() if item_id not in catalog_ids]
+    if missing_items:
+        preview = ", ".join(repr(item_id) for item_id in missing_items[:5])
+        raise ValueError(f"catalog is missing historical item IDs: {preview}")
+
+    prepared_events = events.copy()
+    lookup = prepared_catalog.set_index(catalog_item_col)
+    resolved_category_col = category_col
+    if resolved_category_col is None and catalog_category_col in prepared_catalog.columns:
+        generated_category_col = _generated_catalog_column(prepared_events, "__orchid_catalog_category__")
+        categories = prepared_events[item_col].map(lookup[catalog_category_col])
+        if categories.isna().any():
+            missing = prepared_events.loc[categories.isna(), item_col].drop_duplicates().tolist()
+            preview = ", ".join(repr(item_id) for item_id in missing[:5])
+            raise ValueError(f"catalog category metadata is missing for historical item IDs: {preview}")
+        prepared_events[generated_category_col] = categories
+        resolved_category_col = generated_category_col
+
+    resolved_difficulty_col = difficulty_col
+    if resolved_difficulty_col is None and catalog_difficulty_col in prepared_catalog.columns:
+        generated_difficulty_col = _generated_catalog_column(prepared_events, "__orchid_catalog_difficulty__")
+        difficulties = prepared_events[item_col].map(lookup[catalog_difficulty_col])
+        if difficulties.isna().any():
+            missing = prepared_events.loc[difficulties.isna(), item_col].drop_duplicates().tolist()
+            preview = ", ".join(repr(item_id) for item_id in missing[:5])
+            raise ValueError(f"catalog difficulty metadata is missing for historical item IDs: {preview}")
+        prepared_events[generated_difficulty_col] = difficulties
+        resolved_difficulty_col = generated_difficulty_col
+    return prepared_events, resolved_category_col, resolved_difficulty_col, prepared_catalog
+
+
+def _generated_catalog_column(events: pd.DataFrame, base: str) -> str:
+    """Choose an internal metadata column that cannot overwrite caller data."""
+    candidate = base
+    suffix = 1
+    while candidate in events.columns:
+        candidate = f"{base}{suffix}"
+        suffix += 1
+    return candidate
 
 
 def _first_metadata_value(metadata: dict[str, Any], keys: Sequence[str]) -> Any:

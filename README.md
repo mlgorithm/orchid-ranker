@@ -5,13 +5,16 @@
 [![Python](https://img.shields.io/pypi/pyversions/orchid-ranker.svg)](https://pypi.org/project/orchid-ranker/)
 [![License](https://img.shields.io/badge/license-Apache%202.0-blue.svg)](LICENSE)
 
-Orchid Ranker is an outcome-driven adaptive recommender.
+Orchid Ranker is an adaptive-practice engine for learning products.
 
-It does one thing: choose the next item from a candidate set, observe what
-happened, and adapt the next recommendation.
+It chooses the next eligible exercise, observes the learner's result, and
+adapts the next recommendation. It is designed for assessed practice,
+technical-skills training, test preparation, and professional certification—
+not generic feed or product recommendation.
 
-Use it for exercises, onboarding steps, training modules, practice tasks,
-gameplay challenges, or any other sequence with a measurable positive outcome.
+Your platform owns the curriculum, content, safety rules, and learner
+experience. Orchid owns the adaptive decision loop and the evidence needed to
+test whether it improves retained mastery.
 
 ## Install
 
@@ -23,20 +26,24 @@ Python 3.11–3.13 is supported.
 
 ## Use it
 
-You need four columns: user, item, outcome, and timestamp.
+You need four columns: learner, exercise, outcome, and timestamp. In the API
+these stay domain-neutral as `user_id`, `item_id`, `outcome`, and `timestamp`.
 
 ```python
 import pandas as pd
 from orchid_ranker import AdaptiveRanker
 
 history = pd.DataFrame({
-    "user_id":   ["a", "a", "a", "b", "b", "b"],
+    "user_id":   ["learner-a", "learner-a", "learner-a", "learner-b", "learner-b", "learner-b"],
     "item_id":   [101, 102, 201, 101, 102, 201],
-    "outcome":   [1,   1,   0,   1,   0,   0],
+    "outcome":   [1,   1,   0,   1,   0,   0],  # correct / not yet correct
     "timestamp": [1,   2,   3,   1,   2,   3],
 })
 
 ranker = AdaptiveRanker().fit(history)
+
+# Inspect whether this pilot has enough support for knowledge tracing.
+print(ranker.learning_readiness())
 
 ranked = ranker.recommend(
     user_id="a",
@@ -52,20 +59,24 @@ ranker.observe(
 )
 ```
 
-This is the complete loop. Orchid selects its internal policy; you do not
-choose a model. `outcome` is binary: `1` for the result you want and `0` for
-everything else.
+This is the complete loop. Small pilots automatically use a transparent
+empirical learner; Orchid uses knowledge tracing only when basic support checks
+are met. `outcome` is binary: `1` for a completed/correct practice result and
+`0` otherwise. Do not use clicks as a learning outcome.
 
-Your application supplies only eligible items. Orchid orders them; it does not
-override availability, safety, licensing, or business rules.
+Your application supplies only pedagogically eligible items. It should enforce
+availability, prerequisites, assessment holdouts, accommodations, and any
+other hard curriculum rules; Orchid only orders that set.
 
 ## Learn more
 
 - [Quickstart](docs/quickstart.md)
 - [How Orchid works](docs/overview.md)
+- [Adaptive-practice data readiness](docs/guides/00-adaptive-practice.md)
 - [API](docs/api_reference.md)
 - [Production serving and decision logging](docs/guides/02-serve-streaming.md)
-- [Reference pilots](docs/examples.md)
+- [Run a learning-efficacy pilot](docs/guides/03-learning-pilot.md)
+- [Pilot integration contract](docs/guides/04-pilot-integration.md)
 - [Validate an adaptive rollout](docs/benchmarks/credibility.md)
 
 ## Development

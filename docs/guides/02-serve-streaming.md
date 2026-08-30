@@ -17,6 +17,7 @@ ranked, decision = ranker.recommend_and_log(
     timestamp=123456,
     top_k=3,
     exploration=0.05,
+    decision_id="request-8c87",  # a stable application idempotency key
 )
 ```
 
@@ -24,8 +25,27 @@ The chosen item is first in `ranked`. The decision is deeply immutable and
 records the exact candidate set, scores, action probabilities, chosen
 propensity, resolved policy, and deployment-specific policy version.
 
-Persist the decision in an append-only store before returning the response.
-Without that record, randomized traffic cannot be evaluated reliably.
+Supplying a stable `decision_id` makes delivery retries safe: the same request
+returns the original immutable decision instead of resampling. Reusing that ID
+for different inputs fails explicitly.
+
+For a single-host pilot, attach the supplied SQLite store when constructing the
+ranker. It transactionally persists immutable decisions and their one linked
+outcome without adding a runtime dependency:
+
+```python
+from orchid_ranker import AdaptiveRanker
+from orchid_ranker.decision_store import SQLiteDecisionStore
+
+store = SQLiteDecisionStore("orchid-pilot.sqlite")
+ranker = AdaptiveRanker(decision_store=store).fit(history)
+```
+
+This store is the durable decision/outcome audit boundary. It does **not**
+persist a fitted model or live learner state: persist and restore those through
+your application's model-artifact and event-replay workflow before serving
+across restarts or workers. For a larger deployment, implement the same
+`DecisionOutcomeStore` contract against the application's event store.
 
 ## Link the outcome
 
@@ -34,12 +54,14 @@ linked = ranker.observe_decision(
     decision.decision_id,
     outcome=1,
     timestamp=123500,
+    outcome_event_id="score-event-842",
 )
 ```
 
 The decision ID prevents an outcome from being attached to the wrong
-recommendation. Duplicate outcomes and timestamps earlier than the decision
-are rejected.
+recommendation. Retrying the exact same linked outcome is a no-op; a conflicting
+second outcome and a timestamp earlier than the decision are rejected. Retain
+the original outcome payload on retries, including its timestamp.
 
 If a request does not need an immutable decision record, the ordinary update
 is:
@@ -147,8 +169,10 @@ policy, but they do not replace a controlled live rollout.
 ## Operational checklist
 
 - Preserve event order for every user.
-- Make decision writes idempotent.
-- Reject duplicate linked outcomes.
+- Use an application-generated `decision_id` as the request idempotency key.
+- Retry an identical linked outcome safely; reject conflicting outcomes.
+- Persist model artifacts and rebuild learner state from events—the decision
+  store alone is not serving-state recovery.
 - Version deployments and retain a known fallback.
 - Monitor missing and delayed outcomes.
 - Refit on chronological windows rather than random row splits.

@@ -1,5 +1,5 @@
 site_name: Orchid Ranker
-site_description: Outcome-driven adaptive recommender with one fit, recommend, and observe workflow.
+site_description: Adaptive-practice engine for learning products with one fit, recommend, and observe workflow.
 site_url: https://mlgorithm.github.io/orchid-ranker/
 repo_url: https://github.com/mlgorithm/orchid-ranker
 repo_name: mlgorithm/orchid-ranker
@@ -52,11 +52,16 @@ nav:
   - Quickstart: quickstart.md
   - How Orchid works: overview.md
   - Guides:
+    - Adaptive-practice data readiness: guides/00-adaptive-practice.md
     - Fit historical outcomes: guides/01-fit-offline.md
     - Production serving: guides/02-serve-streaming.md
+    - Run a learning-efficacy pilot: guides/03-learning-pilot.md
+    - Pilot integration contract: guides/04-pilot-integration.md
     - Reference pilots: examples.md
   - API: api_reference.md
   - Validate a rollout: benchmarks/credibility.md
+  - Design-partner council: design-partner-council.md
+  - Product roadmap: roadmap.md
   - Contributing:
     - Contribution guide: contributing.md
     - Coding standards: coding-standards.md

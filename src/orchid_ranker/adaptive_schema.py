@@ -106,7 +106,14 @@ class LoggedDecision:
 
 @dataclass(frozen=True)
 class DecisionOutcome:
-    """One delayed outcome linked immutably to a serving decision."""
+    """One delayed outcome linked immutably to a serving decision.
+
+    ``apply_state`` records whether the event is allowed to change adaptive
+    learner/model state at all. ``update_global`` further records whether an
+    allowed state change may update shared aggregate statistics. Together they
+    let a controlled pilot retain outcome evidence for every arm without
+    letting control or shadow traffic alter the frozen treatment artifact.
+    """
 
     decision_id: str
     user_id: Any
@@ -115,6 +122,9 @@ class DecisionOutcome:
     outcome: Optional[int] = None
     reward: Optional[float] = None
     category_id: Optional[Any] = None
+    outcome_event_id: Optional[str] = None
+    apply_state: bool = True
+    update_global: bool = True
 
     def to_dict(self) -> dict[str, Any]:
         return dict(asdict(self))
@@ -295,6 +305,18 @@ def validate_decision_outcomes(outcomes: pd.DataFrame) -> pd.DataFrame:
             raise ValueError("outcome values must be binary 0 or 1 or missing")
     if work[["outcome", "reward"]].isna().all(axis=1).any():
         raise ValueError("each decision outcome requires outcome or reward")
+    if "outcome_event_id" in work.columns:
+        outcome_ids = work["outcome_event_id"].dropna().astype(str)
+        if (outcome_ids.str.len() == 0).any() or outcome_ids.duplicated().any():
+            raise ValueError("outcome_event_id values must be non-empty and unique when supplied")
+    if "update_global" in work.columns:
+        values = work["update_global"]
+        if values.isna().any() or not values.map(lambda value: isinstance(value, (bool, np.bool_))).all():
+            raise ValueError("update_global values must be boolean")
+    if "apply_state" in work.columns:
+        values = work["apply_state"]
+        if values.isna().any() or not values.map(lambda value: isinstance(value, (bool, np.bool_))).all():
+            raise ValueError("apply_state values must be boolean")
     return work
 
 

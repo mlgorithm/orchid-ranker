@@ -2,6 +2,33 @@
 
 ## Unreleased
 
+### Adaptive-practice foundation
+
+- Repositioned Orchid around adaptive practice for assessed learning rather
+  than generic recommendation. The primary product outcome is retained mastery,
+  not click-through or next-attempt correctness.
+- Added an adaptive-learning readiness report with learner, exercise, sequence,
+  outcome-balance, and curriculum-metadata diagnostics.
+- Added a transparent empirical tracer for sparse pilots. By default, Orchid
+  selects it until configurable basic support checks justify evaluating the
+  configured knowledge tracer.
+- Added a catalog-aware learning fit path. Canonical exercise metadata now
+  supplies category/difficulty during training and registers unseen catalog
+  exercises for safe serving.
+- Added a versioned learning-catalog validator for authoring imports. It
+  diagnoses metadata gaps, conflicting exercise versions, invalid/dangling
+  prerequisites, and prerequisite cycles before a catalog reaches serving.
+- Added idempotent immutable decision/outcome stores, including a transactional
+  SQLite implementation for single-host pilots. `recommend_and_log()` accepts
+  an application decision ID so retries return the original action; exact
+  outcome retries are no-ops while conflicts remain errors.
+- Added a reference adaptive-practice pilot adapter with catalog eligibility,
+  assessment holdouts, required authored items, sticky learner-level arm
+  assignment, static-control routing, and immutable experiment metadata.
+- Added an adaptive-practice integration guide, a learning-efficacy pilot
+  guide, and a product roadmap covering curriculum metadata, durable state,
+  authored baselines, and controlled evaluation.
+
 ### Serving safety
 
 - Made offline-policy promotion evaluate the exact adaptive-base+CQL action

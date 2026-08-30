@@ -1,10 +1,11 @@
 # Quickstart
 
-Orchid has one workflow:
+Orchid has one adaptive-practice workflow:
 
-1. Fit historical outcomes.
-2. Recommend from eligible candidates.
-3. Observe the result.
+1. Fit completed learner attempts.
+2. Inspect data readiness.
+3. Recommend from pedagogically eligible exercises.
+4. Observe the scored result.
 
 ## Install
 
@@ -16,10 +17,10 @@ python -m pip install orchid-ranker
 
 | Column | Meaning |
 |--------|---------|
-| `user_id` | The person, account, or agent receiving the item |
-| `item_id` | The exercise, step, task, or content identifier |
-| `outcome` | Binary result: `1` for success, `0` otherwise |
-| `timestamp` | A non-negative time or sequence number |
+| `user_id` | The learner receiving practice |
+| `item_id` | The exercise identifier (and ideally content version) |
+| `outcome` | Binary result: `1` for correct/completed, `0` for not yet correct |
+| `timestamp` | A non-negative attempt time or sequence number |
 
 ```python
 import pandas as pd
@@ -32,8 +33,8 @@ history = pd.DataFrame({
 })
 ```
 
-Rows represent completed interactions with meaningful outcomes, not
-impressions. Timestamps must preserve each user's event order.
+Rows represent completed practice attempts, not impressions. Timestamps must
+preserve each learner's event order.
 
 ## Fit, recommend, observe
 
@@ -41,6 +42,8 @@ impressions. Timestamps must preserve each user's event order.
 from orchid_ranker import AdaptiveRanker
 
 ranker = AdaptiveRanker().fit(history)
+readiness = ranker.learning_readiness()
+print(readiness["active_tracer"])
 
 ranked = ranker.recommend(
     user_id="a",
@@ -63,16 +66,19 @@ ranker.observe(
 )
 ```
 
-The new outcome updates that user immediately. Call `recommend` again to get
-the adapted ranking.
+The new outcome updates that learner immediately. Call `recommend` again to
+get the adapted ranking. On sparse pilot data, `active_tracer` is `empirical`:
+a transparent, smoothed learner/exercise baseline. Orchid moves to knowledge
+tracing only after its configurable data-support checks pass.
 
-Your application must construct the candidate set using its hard constraints.
-Pass only items that are available, safe, licensed, or otherwise eligible.
+Your application must construct the candidate set using authored curriculum
+rules. Pass only exercises that are available, appropriate, prerequisite-ready,
+and not reserved for assessment.
 
 ## Optional information
 
-If you already have a meaningful category or difficulty column, identify it
-while fitting:
+If you already have a real skill/category or author-reviewed difficulty column,
+identify it while fitting:
 
 ```python
 ranker.fit(
@@ -82,7 +88,8 @@ ranker.fit(
 )
 ```
 
-These fields are optional. Do not invent them merely to use Orchid.
+These fields are optional for a pilot. Do not invent them merely to use Orchid;
+an outcome-derived difficulty is a proxy, not an instructional-design fact.
 
 ## Production logging
 
@@ -105,7 +112,8 @@ ranker.observe_decision(
 
 Persist the decision before returning the recommendation. See
 [Production serving](guides/02-serve-streaming.md) for the operational
-contract.
+contract. For a real learning pilot, also persist an independent delayed
+assessment outcome; see [Run a learning-efficacy pilot](guides/03-learning-pilot.md).
 
 ## Common issues
 

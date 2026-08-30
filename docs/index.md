@@ -1,9 +1,10 @@
 # Orchid Ranker
 
-Orchid is an outcome-driven adaptive recommender.
+Orchid is an adaptive-practice engine for learning products.
 
-It ranks an eligible candidate set, observes the result, and adapts what it
-recommends next. The public interface is one class: `AdaptiveRanker`.
+It ranks an eligible set of exercises, observes the learner's result, and
+adapts what it recommends next. The public interface is one class:
+`AdaptiveRanker`.
 
 ## Install
 
@@ -35,22 +36,36 @@ ranker.observe(
 )
 ```
 
-Orchid chooses its internal adaptive policy. Users do not select from a model
-catalog.
+Orchid chooses the appropriate starting learner: a transparent empirical
+baseline for sparse pilots and knowledge tracing only after data-support checks
+pass. Users do not select from a model catalog.
+
+```python
+print(ranker.learning_readiness())
+```
 
 ## Where it fits
 
-Orchid works when:
+Orchid works best when:
 
-- interactions happen in a sequence;
-- each completed interaction produces a meaningful outcome;
-- the next recommendation should react to prior outcomes; and
-- the application can provide an eligible candidate set.
+- learners complete multiple scored practice attempts;
+- an existing curriculum supplies multiple pedagogically valid next exercises;
+- the next exercise should react to prior attempts; and
+- success can be measured later through retained mastery, a post-test, or a
+  certification outcome.
 
-Adaptive practice is one use case, not the product boundary. The same loop can
-support onboarding, training, coaching, games, and other outcome-bearing
-sequences.
+It is not a generic content feed, product recommender, LMS, or curriculum
+authoring system. Your learning product owns the content, eligibility rules,
+and learner experience; Orchid supplies adaptive practice sequencing and the
+decision evidence for a controlled evaluation.
 
 Start with the [quickstart](quickstart.md), then read
 [how Orchid works](overview.md), the small [API reference](api_reference.md),
-or [how to validate a rollout](benchmarks/credibility.md).
+[adaptive-practice data readiness](guides/00-adaptive-practice.md), or
+[how to run a learning-efficacy pilot](guides/03-learning-pilot.md). The
+[pilot integration contract](guides/04-pilot-integration.md) defines the
+handoff between Orchid and a learning platform. The
+[product roadmap](roadmap.md) describes the path from a single-course pilot to
+an evidence-backed integration. The [design-partner council](design-partner-council.md)
+keeps that roadmap grounded in simulated customer review without claiming any
+real-company affiliation.

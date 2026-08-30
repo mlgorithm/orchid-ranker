@@ -71,6 +71,28 @@ Use these only when they already have a defensible domain meaning. Categories
 can connect related items. Difficulty can distinguish trivial success from an
 appropriate challenge. Neither is required.
 
+For adaptive practice, prefer a separate exercise catalog over copying
+curriculum metadata onto every attempt row. It also registers exercises that
+are new to the historical table:
+
+```python
+catalog = pd.DataFrame({
+    "item_id": [101, 102, 201],
+    "category_id": ["basics", "basics", "advanced"],
+    "difficulty": [0.2, 0.3, 0.7],
+})
+
+ranker = AdaptiveRanker().fit(
+    events,
+    catalog=catalog,
+    prerequisite_by_concept={"advanced": ["basics"]},
+)
+```
+
+The catalog must contain one canonical row for every historical exercise. See
+[Adaptive-practice data readiness](00-adaptive-practice.md) for the full
+learning contract and readiness assessment.
+
 ## Verify the fit
 
 ```python
