@@ -165,3 +165,4 @@ jobs:
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           VERSION=${GITHUB_REF_NAME#v}
           mike deploy --push --update-aliases $VERSION latest
+          mike set-default --push latest
