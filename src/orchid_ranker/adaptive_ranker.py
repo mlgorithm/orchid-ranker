@@ -240,6 +240,8 @@ class AdaptiveRanker:
         difficulty metadata for both historical and newly registered exercises.
         """
         with self._state_lock:
+            if not isinstance(events, pd.DataFrame):
+                raise TypeError("events must be a pandas DataFrame")
             for role, column in (
                 ("user", user_col),
                 ("item", item_col),

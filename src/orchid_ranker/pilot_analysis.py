@@ -20,6 +20,8 @@ SECONDS_PER_DAY = 86_400
 
 
 def _require_columns(frame: pd.DataFrame, columns: set[str], name: str) -> None:
+    if not isinstance(frame, pd.DataFrame):
+        raise TypeError(f"{name} must be a pandas DataFrame")
     missing = columns - set(frame.columns)
     if missing:
         raise ValueError(f"{name} is missing required columns: {sorted(missing)}")
@@ -203,8 +205,10 @@ def analyze_pilot_retention(
         "arms": arms,
         "strata_without_both_arms": strata_without_both_arms,
         "treatment_minus_control": difference,
+        "bootstrap_samples": bootstrap_samples,
+        "random_seed": random_seed,
         "bootstrap_95_percent_interval": interval,
-        "missing_score_bounds": [difference - missing_control, difference + missing_treatment],
+        "treatment_minus_control_missing_bounds": [difference - missing_control, difference + missing_treatment],
         "assessment_rate_difference": float(
             arms["treatment"]["assessment_rate"] - arms["control"]["assessment_rate"]
         ),

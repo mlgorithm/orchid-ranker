@@ -17,6 +17,7 @@ python scripts/analyze_pilot_retention.py \
   /tmp/networking-routing-pilot/assessments.csv \
   --window-days 3 \
   --analysis-timestamp 1781468800 \
+  --bootstrap-samples 2000 --random-seed 42 \
   --delivery-audit /tmp/networking-routing-pilot/delivery-audit.jsonl \
   --output /tmp/networking-routing-pilot/reanalyzed.json
 ```

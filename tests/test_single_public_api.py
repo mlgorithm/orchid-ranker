@@ -96,6 +96,11 @@ def test_fit_rejects_missing_required_columns() -> None:
         _ranker().fit(events)
 
 
+def test_fit_rejects_non_dataframe_with_a_public_type_error() -> None:
+    with pytest.raises(TypeError, match="events must be a pandas DataFrame"):
+        _ranker().fit(None)  # type: ignore[arg-type]
+
+
 @pytest.mark.parametrize("invalid_outcome", [0.5, None, "yes"])
 def test_fit_requires_a_complete_binary_outcome(invalid_outcome: object) -> None:
     events = _neutral_events()

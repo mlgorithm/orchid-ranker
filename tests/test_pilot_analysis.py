@@ -39,9 +39,19 @@ def test_retention_analysis_counts_every_randomized_learner_once() -> None:
     assert report["arms"]["control"]["assessed_in_window"] == 1
     assert report["arms"]["treatment"]["out_of_window"] == 1
     assert report["treatment_minus_control"] == pytest.approx(0.2)
-    assert report["missing_score_bounds"] == pytest.approx([-0.3, 0.7])
+    assert report["treatment_minus_control_missing_bounds"] == pytest.approx([-0.3, 0.7])
+    assert report["bootstrap_samples"] == 100
+    assert report["random_seed"] == 42
     assert report["assessment_rate_difference"] == 0
     assert report["strata_without_both_arms"] == []
+
+
+def test_retention_analysis_rejects_non_dataframe_input() -> None:
+    enrollment, assessments = _inputs()
+    with pytest.raises(TypeError, match="enrollment must be a pandas DataFrame"):
+        analyze_pilot_retention(None, assessments)  # type: ignore[arg-type]
+    with pytest.raises(TypeError, match="assessments must be a pandas DataFrame"):
+        analyze_pilot_retention(enrollment, None)  # type: ignore[arg-type]
 
 
 def test_retention_analysis_waits_for_every_assessment_window_to_close() -> None:

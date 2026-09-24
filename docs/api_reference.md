@@ -29,6 +29,22 @@ All timestamps must be finite, non-negative numeric values in one consistent
 application-defined unit. Outcomes are binary `0` or `1`; do not turn missing,
 abandoned, or unscored work into `0`.
 
+Orchid is an in-process Python library. It does not expose HTTP endpoints or
+manage authentication, authorization, rate limits, or learner-data access.
+The application must enforce those controls before calling Orchid. Keep stable
+user and item IDs across fit, serving, and feedback; durable decision IDs and
+event IDs must be unique in the application's namespace.
+
+| Failure | Exception | Caller action |
+| --- | --- | --- |
+| Invalid schema, candidate set, timestamp, or conflicting retry | `ValueError` | Correct the request or reconcile the original immutable event. |
+| Unknown decision or learner assignment during outcome import | `KeyError` | Restore the missing decision or assignment before retrying. |
+| Operation attempted before fit or before a required lifecycle step | `RuntimeError` | Complete the prerequisite operation, then retry. |
+| Wrong object type or unknown configuration field | `TypeError` | Correct the integration code. |
+
+These exception categories are part of the documented integration contract;
+message text is diagnostic and may improve between versions.
+
 ## AdaptiveRanker
 
 ### Construct and fit
@@ -313,6 +329,26 @@ database path. The in-memory variants are for tests and one-process prototypes.
 
 ### Serve an LMS request
 
+For an efficacy study, enroll the complete assigned cohort before any practice
+request. This creates a durable course-run record for learners who never
+request an exercise:
+
+```python
+assignment = pilot.enroll(
+    learner_id,
+    course_run_id=cohort_id,
+    timestamp=enrolled_at,
+    stratum=baseline_band,
+)
+roster = pilot.enrollment_frame()
+```
+
+`enroll` is idempotent for the same immutable learner, run, timestamp, and
+stratum. The assignment is sticky across course runs. Add the assessment due
+date from the pre-declared course calendar to the exported roster. `serve`
+can assign on demand for ordinary usage, but an efficacy roster must include
+all learners assigned before practice, including those with no decision.
+
 ```python
 served = pilot.serve(PilotRequest(
     request_id=lms_request_id,
@@ -422,13 +458,30 @@ analysis = pilot.analysis_frame()
 `import_delayed_assessments` requires a pandas DataFrame with
 `assessment_event_id`, `user_id`, `course_run_id`, `assessment_form_version`,
 `timestamp`, `score`, and `independent`. `independent` must be literal `True`;
-the method rejects an assessment for a learner/course run without pilot
-participation and never feeds it into adaptive state.
+the method accepts a matching practice decision or an explicit course-run
+enrollment, including an enrolled learner who never practiced. It rejects
+unassigned learners and unrelated runs, and never feeds assessments into
+adaptive state.
 
-Use `assessment_frame()` for imported assessments,
+Use `enrollment_frame()` for the complete randomized roster,
+`assessment_frame()` for imported assessments,
 `decision_frame(completed_only=False)` for joined delivery decisions/outcomes,
 and `analysis_frame()` for decisions plus rendered/submitted/scored IDs and
 timestamps, fallback/shadow/explanation evidence, and matching assessments.
+`analysis_frame()` has one row per decision and must not be the denominator for
+a learner-level efficacy estimate.
+
+`orchid_ranker.pilot_analysis.analyze_pilot_retention(...)` is an experimental
+reference analysis for one course run. It joins the frozen enrollment roster
+to independent assessments, waits for every assessment window to close, and
+reports assigned-arm composite scores, assessment coverage, bounds on the
+treatment-minus-control difference under missing scores, and delivery-audit
+checks. It records the bootstrap seed and sample count so a report can be
+reproduced. Its exact report fields may change in a
+minor release; pre-register the outcome and analysis plan before using it for
+a real study. Unlike the general ranker, this day-based analysis requires
+Unix-second timestamps for enrollment due dates and assessments. See the
+[one-course sample study](guides/06-one-course-study.md).
 
 ## Offline policy and evaluation APIs
 

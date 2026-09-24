@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## Unreleased (1.0.1.dev0)
 
 - Fixed empirical delayed-gain replay chronology and preserved live learner
   observations and catalog changes across reward-model refits.

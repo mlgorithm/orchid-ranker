@@ -23,6 +23,9 @@ pip install orchid-ranker
 ```
 
 Python 3.11–3.13 is supported.
+The `main` branch may contain unreleased APIs. To use the code and guides from
+this checkout, run `python -m pip install -e .`; the command above installs
+the latest published release.
 
 ## Use it
 

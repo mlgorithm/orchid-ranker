@@ -4,7 +4,7 @@
 
 1. Start from a reviewed release candidate. Development work uses a PEP 440
    development version; the release candidate must use the final version that
-   will appear on its tag (for this release, `1.0.0`).
+   will appear on its tag.
 2. Update `pyproject.toml`, `src/orchid_ranker/__init__.py`, and `CHANGELOG.md`
    together; all three identifiers must match for a tagged release.
 3. Run the complete local gate:
