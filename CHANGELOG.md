@@ -2,6 +2,10 @@
 
 ## Unreleased (1.0.1.dev0)
 
+- Made PyTorch optional through the `[kt]` extra. Base installs now run the
+  empirical workflow and report when missing PyTorch prevents neural tracing.
+- Split AdaptiveRanker helpers and pilot contracts/stores from their public
+  facade modules while preserving documented import paths.
 - Fixed empirical delayed-gain replay chronology and preserved live learner
   observations and catalog changes across reward-model refits.
 - Tightened offline-policy promotion against stale model and catalog state.

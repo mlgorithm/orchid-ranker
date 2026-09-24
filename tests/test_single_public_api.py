@@ -20,7 +20,7 @@ def _neutral_events() -> pd.DataFrame:
 
 def _ranker() -> AdaptiveRanker:
     return AdaptiveRanker(
-        kt_backbone="sakt",
+        kt_backbone="empirical",
         epochs=1,
         d_model=8,
         n_heads=2,

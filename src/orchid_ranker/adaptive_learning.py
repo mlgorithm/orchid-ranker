@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import math
 from dataclasses import asdict, dataclass, fields, replace
+from importlib.util import find_spec
 from typing import Any, Dict, Mapping, Optional, Sequence
 
 import numpy as np
@@ -246,8 +247,16 @@ class AdaptiveLearningRecommender:
             difficulty_col=item_difficulty_col,
             config=self.config,
         )
-        active_tracer = self._resolve_active_tracer(readiness)
-        self.readiness_report_ = replace(readiness, active_tracer=active_tracer)
+        active_tracer, dependency_reason = self._resolve_active_tracer(readiness)
+        reasons = readiness.reasons + ((dependency_reason,) if dependency_reason is not None else ())
+        recommendations = readiness.recommendations + (
+            ("Install orchid-ranker[kt] to evaluate neural knowledge tracing.",)
+            if dependency_reason is not None
+            else ()
+        )
+        self.readiness_report_ = replace(
+            readiness, active_tracer=active_tracer, reasons=reasons, recommendations=recommendations
+        )
 
         self.tracer_ = self._fit_tracer(
             work,
@@ -566,6 +575,15 @@ class AdaptiveLearningRecommender:
                 correct_col=correct_col,
                 timestamp_col=timestamp_col,
             )
+        if normalized not in {"sakt", "dkt", "dkvmn", "dkvmn-style", "akt", "akt-inspired", "saint", "saint+", "saint-plus"}:
+            raise ValueError("tracer_model must be one of 'empirical', 'akt', 'sakt', 'dkt', 'dkvmn', 'saint', or 'saint+'")
+        try:
+            import torch  # noqa: F401
+        except ImportError as error:
+            raise ImportError(
+                "neural knowledge tracing requires PyTorch; install orchid-ranker[kt] "
+                "or use kt_backbone='empirical'"
+            ) from error
         if normalized == "sakt":
             from .kt import SAKTTracer
 
@@ -696,14 +714,16 @@ class AdaptiveLearningRecommender:
             )
         raise ValueError("tracer_model must be one of 'empirical', 'akt', 'sakt', 'dkt', 'dkvmn', 'saint', or 'saint+'")
 
-    def _resolve_active_tracer(self, readiness: AdaptiveLearningReadinessReport) -> str:
+    def _resolve_active_tracer(self, readiness: AdaptiveLearningReadinessReport) -> tuple[str, Optional[str]]:
         """Select the transparent pilot baseline unless KT has adequate support."""
         requested = self.config.tracer_model.lower().replace("_", "-")
         if requested in {"empirical", "baseline"}:
-            return "empirical"
+            return "empirical", None
         if self.config.fallback_to_empirical and not readiness.knowledge_tracing_ready:
-            return "empirical"
-        return requested
+            return "empirical", None
+        if self.config.fallback_to_empirical and find_spec("torch") is None:
+            return "empirical", "PyTorch is not installed; using the empirical tracer"
+        return requested, None
 
     def _resolve_policy(self, *, has_concept_signal: bool) -> str:
         policy = self.config.policy.lower()

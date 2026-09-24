@@ -22,7 +22,7 @@ and research, but they are not separate product surfaces.
 - Keep `orchid_ranker.__all__` limited to `AdaptiveRanker`.
 - Treat lower-level modules as implementation details, not alternate products.
 - Keep the normal install complete: `pip install orchid-ranker` must run the
-  supported workflow without an extra.
+  empirical workflow without an extra; neural knowledge tracing uses `[kt]`.
 - Do not add compatibility aliases. For a stable documented API, follow the
   [API support policy](api-support-policy.md): announce a deprecation before
   removal, then make breaking changes only in a major release unless a

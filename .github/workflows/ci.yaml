@@ -61,7 +61,26 @@ jobs:
           /tmp/orchid-wheel/bin/python -m pip install --upgrade pip
           /tmp/orchid-wheel/bin/python -m pip install dist/*.whl
           cd /tmp
-          /tmp/orchid-wheel/bin/python -c "import importlib.metadata as md; import orchid_ranker; from orchid_ranker import AdaptiveRanker; assert orchid_ranker.__version__ == md.version('orchid-ranker'); assert AdaptiveRanker"
+          /tmp/orchid-wheel/bin/python - <<'PY'
+          import importlib.metadata as md
+          import sys
+
+          import pandas as pd
+          import orchid_ranker
+          from orchid_ranker import AdaptiveRanker
+
+          assert orchid_ranker.__version__ == md.version("orchid-ranker")
+          assert "torch" not in sys.modules
+          events = pd.DataFrame({
+              "user_id": ["a", "a", "b", "b"],
+              "item_id": [1, 2, 1, 2],
+              "outcome": [1, 0, 0, 1],
+              "timestamp": [1, 2, 1, 2],
+          })
+          ranker = AdaptiveRanker().fit(events)
+          assert ranker.recommend("a", [1, 2])
+          assert "torch" not in sys.modules
+          PY
 
   platforms:
     name: ${{ matrix.os }} / Python ${{ matrix.python-version }}
@@ -93,11 +112,11 @@ jobs:
       - name: Install declared lower bounds
         run: |
           python -m pip install --upgrade pip
-          python -m pip install "numpy==1.23.5" "pandas==1.5.3" "scikit-learn==1.2.0" "scipy==1.9.3" "torch==2.0.0"
+          python -m pip install "numpy==1.23.5" "pandas==1.5.3" "scikit-learn==1.2.0" "scipy==1.9.3"
           python -m pip install --no-deps .
           python -m pip install "pytest>=7.0,<9"
       - name: Verify lower-bound install
-        run: python -m pytest tests/test_publish_readiness.py tests/test_single_public_api.py -q
+        run: python -m pytest tests/test_publish_readiness.py tests/test_single_public_api.py tests/test_optional_torch.py -q
 
   dependency-audit:
     runs-on: ubuntu-latest

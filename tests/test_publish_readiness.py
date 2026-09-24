@@ -60,10 +60,11 @@ def test_version_matches_package_metadata() -> None:
     assert orchid_ranker.__version__ == metadata["project"]["version"]
 
 
-def test_torch_core_dependency_is_available() -> None:
-    import torch
-
-    assert torch.__version__
+def test_torch_is_an_optional_knowledge_tracing_dependency() -> None:
+    with Path("pyproject.toml").open("rb") as fh:
+        project = tomllib.load(fh)["project"]
+    assert not any(dependency.startswith("torch") for dependency in project["dependencies"])
+    assert any(dependency.startswith("torch") for dependency in project["optional-dependencies"]["kt"])
 
 
 def test_adaptive_ranker_smoke() -> None:
@@ -85,8 +86,13 @@ def test_adaptive_ranker_smoke() -> None:
         n_heads=2,
         batch_size=4,
         device="cpu",
+        min_kt_events=1,
+        min_kt_users=1,
+        min_kt_items=1,
+        min_kt_median_events_per_user=1,
     ).fit(events)
 
+    assert ranker.learning_readiness()["active_tracer"] == "sakt"
     ranked = ranker.recommend(user_id=1, candidate_item_ids=[101, 201, 202], top_k=2)
     assert ranked
     ranker.observe(

@@ -59,7 +59,9 @@ ranking order, scores, or learned model parameters across patch versions.
 
 Orchid 1.0 supports Python 3.11, 3.12, and 3.13. The continuous-integration
 matrix tests each version; supported dependency ranges are declared in the
-repository's `pyproject.toml`. New Python support or the retirement of an
+repository's `pyproject.toml`. The base installation supports empirical
+adaptive practice without PyTorch; the optional `[kt]` extra supplies PyTorch
+for neural knowledge tracing. New Python support or the retirement of an
 upstream end-of-life Python version is announced in the changelog.
 The `main` branch uses a development version between releases; the versioned
 published documentation describes the matching released distribution.

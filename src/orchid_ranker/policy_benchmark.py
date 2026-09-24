@@ -2,14 +2,13 @@
 from __future__ import annotations
 
 from dataclasses import asdict, dataclass
-from typing import Any, Dict, Optional, Sequence
+from typing import TYPE_CHECKING, Any, Dict, Optional, Sequence
 
 import numpy as np
 import pandas as pd
 
 from .adaptive_schema import normalize_timestamps, parse_candidate_list
 from .delayed_gain import fit_delayed_gain_reward_model
-from .kt import AKTTracer, SAKTTracer
 from .kt_benchmark import (
     KTHoldoutSplit,
     _binary_labels,
@@ -25,6 +24,9 @@ from .learning_policy import (
 )
 from .ope import bootstrap_compare_logged_policies, compare_logged_policies
 from .progression_reward import ProgressionRewardConfig, observed_progression_reward
+
+if TYPE_CHECKING:
+    from .kt import SAKTTracer
 
 __all__ = [
     "KTPolicyOPEReport",
@@ -1224,6 +1226,8 @@ def _fit_tracer(
     random_state: Optional[int],
     device: Optional[str],
 ) -> SAKTTracer:
+    from .kt import AKTTracer, SAKTTracer
+
     normalized = model.lower().replace("_", "-")
     if normalized == "sakt":
         return SAKTTracer(

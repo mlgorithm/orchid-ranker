@@ -12,6 +12,9 @@ adapts what it recommends next. The public interface is one class:
 pip install orchid-ranker
 ```
 
+This base install runs the empirical learner without PyTorch. Install
+`orchid-ranker[kt]` for neural knowledge tracing.
+
 ## Complete example
 
 ```python
@@ -38,7 +41,7 @@ ranker.observe(
 
 Orchid chooses the appropriate starting learner: a transparent empirical
 baseline for sparse pilots and knowledge tracing only after data-support checks
-pass. Users do not select from a model catalog.
+pass when PyTorch is available. Users do not select from a model catalog.
 
 ```python
 print(ranker.learning_readiness())

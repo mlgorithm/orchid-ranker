@@ -3,13 +3,15 @@ from __future__ import annotations
 
 import inspect
 from dataclasses import asdict, dataclass
-from typing import Any, Dict, Optional, Sequence
+from typing import TYPE_CHECKING, Any, Dict, Optional, Sequence
 
 import numpy as np
 import pandas as pd
 
 from .adaptive_schema import normalize_timestamps
-from .kt import AKTTracer, SAKTTracer
+
+if TYPE_CHECKING:
+    from .kt import AKTTracer, SAKTTracer
 
 __all__ = [
     "KTHoldoutSplit",
@@ -381,6 +383,8 @@ def run_kt_benchmark(
     device: Optional[str] = None,
 ) -> Dict[str, Any]:
     """Fit a KT model on a time split and compare against an item-mean baseline."""
+    from .kt import AKTTracer, SAKTTracer
+
     split = time_ordered_user_split(
         interactions,
         user_col=user_col,

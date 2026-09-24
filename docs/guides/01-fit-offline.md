@@ -9,6 +9,9 @@ This guide covers the one required preparation step: fitting
 pip install orchid-ranker
 ```
 
+The base install supports empirical practice without PyTorch. Use
+`pip install 'orchid-ranker[kt]'` to evaluate neural knowledge tracing.
+
 ## Required data
 
 ```python

@@ -13,6 +13,9 @@ Orchid has one adaptive-practice workflow:
 python -m pip install orchid-ranker
 ```
 
+This base install supports the empirical learner without PyTorch. Install
+`orchid-ranker[kt]` if you plan to evaluate neural knowledge tracing.
+
 ## Prepare four columns
 
 | Column | Meaning |
@@ -69,7 +72,9 @@ ranker.observe(
 The new outcome updates that learner immediately. Call `recommend` again to
 get the adapted ranking. On sparse pilot data, `active_tracer` is `empirical`:
 a transparent, smoothed learner/exercise baseline. Orchid moves to knowledge
-tracing only after its configurable data-support checks pass.
+tracing only after its configurable data-support checks pass and PyTorch is
+installed. If PyTorch is absent, the default fallback remains empirical and
+`learning_readiness()` explains why.
 
 Your application must construct the candidate set using authored curriculum
 rules. Pass only exercises that are available, appropriate, prerequisite-ready,

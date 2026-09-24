@@ -22,6 +22,12 @@ test whether it improves retained mastery.
 pip install orchid-ranker
 ```
 
+The base install runs the empirical learner without PyTorch. To evaluate
+neural knowledge tracing on a sufficiently supported course, install
+`orchid-ranker[kt]` instead. With the default fallback enabled, a base install
+uses the empirical learner when PyTorch is unavailable and reports that choice
+in `learning_readiness()`.
+
 Python 3.11–3.13 is supported.
 The `main` branch may contain unreleased APIs. To use the code and guides from
 this checkout, run `python -m pip install -e .`; the command above installs
@@ -63,9 +69,10 @@ ranker.observe(
 ```
 
 This is the complete loop. Small pilots automatically use a transparent
-empirical learner; Orchid uses knowledge tracing only when basic support checks
-are met. `outcome` is binary: `1` for a completed/correct practice result and
-`0` otherwise. Do not use clicks as a learning outcome.
+empirical learner; Orchid uses knowledge tracing when basic support checks
+are met and PyTorch is installed. `outcome` is binary: `1` for a
+completed/correct practice result and `0` otherwise. Do not use clicks as a
+learning outcome.
 
 Your application supplies only pedagogically eligible items. It should enforce
 availability, prerequisites, assessment holdouts, accommodations, and any

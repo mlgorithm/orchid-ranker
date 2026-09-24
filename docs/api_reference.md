@@ -35,6 +35,13 @@ The application must enforce those controls before calling Orchid. Keep stable
 user and item IDs across fit, serving, and feedback; durable decision IDs and
 event IDs must be unique in the application's namespace.
 
+The base `orchid-ranker` install runs the empirical learner without PyTorch.
+Install `orchid-ranker[kt]` for neural knowledge tracing. When PyTorch is
+unavailable, the default fallback uses the empirical learner and records the
+reason in `learning_readiness()`. If `fallback_to_empirical=False` requests a
+neural tracer without PyTorch, fitting raises `ImportError` with installation
+guidance.
+
 | Failure | Exception | Caller action |
 | --- | --- | --- |
 | Invalid schema, candidate set, timestamp, or conflicting retry | `ValueError` | Correct the request or reconcile the original immutable event. |
