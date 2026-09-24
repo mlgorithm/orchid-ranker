@@ -78,6 +78,7 @@ other hard curriculum rules; Orchid only orders that set.
 - [Run a learning-efficacy pilot](docs/guides/03-learning-pilot.md)
 - [Pilot integration contract](docs/guides/04-pilot-integration.md)
 - [End-to-end reference-pilot workflow](docs/guides/05-pilot-workflow.md)
+- [One-course sample study](docs/guides/06-one-course-study.md)
 - [1.x API support policy](docs/api-support-policy.md)
 - [Validate an adaptive rollout](docs/benchmarks/credibility.md)
 

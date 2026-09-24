@@ -149,11 +149,15 @@ ranker.fit_policy(
 ```
 
 The evaluation window must be strictly later, disjoint by both decision ID and
-event content, and contain at least 30 events from 30 users by default. Orchid
-uses a user-cluster bootstrap by default and preserves the unblended base scores
-in every new decision record so the future evaluation can replay the actual
-deployment rule. A successful promotion is logged as a distinct `hybrid+cql`
-policy name and learned-state version.
+event content, later than the base-model fitting data, and contain at least 30
+events from 30 users by default. Orchid uses a user-cluster bootstrap and
+preserves the unblended base scores
+and base-policy version in every new decision record. The evaluation records
+must match the current base-policy version so the gate assesses the overlay on
+the same base artifact that will serve it. Registering a new item changes that
+version and clears an existing CQL overlay until it is evaluated again. A
+successful promotion is logged as a distinct `hybrid+cql` policy name and
+learned-state version.
 
 ## Monitor
 

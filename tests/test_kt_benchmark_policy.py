@@ -682,6 +682,61 @@ def test_delayed_gain_training_frame_can_use_tracer_replay_predictions():
     assert tracer._history_times == {"existing": [123.0]}
 
 
+def test_delayed_gain_replay_does_not_mutate_or_leak_empirical_tracer_state():
+    from orchid_ranker.empirical import EmpiricalTracer
+
+    train = pd.DataFrame(
+        [
+            {"user_id": "u1", "item_id": 10, "correct": 1, "skill_id": "a", "timestamp": 0},
+            {"user_id": "u1", "item_id": 10, "correct": 1, "skill_id": "a", "timestamp": 1},
+            {"user_id": "u1", "item_id": 10, "correct": 1, "skill_id": "a", "timestamp": 2},
+        ]
+    )
+    split = KTHoldoutSplit(
+        train=train,
+        test=train.iloc[0:0].copy(),
+        user_col="user_id",
+        item_col="item_id",
+        correct_col="correct",
+        timestamp_col="timestamp",
+    )
+    tracer = EmpiricalTracer().fit(train)
+    before = (tracer._global_count, dict(tracer._user_count), dict(tracer._item_count))
+
+    examples = build_delayed_gain_training_frame(split, concept_col="skill_id", future_window=1, tracer=tracer)
+
+    assert examples["p_correct"].iloc[0] == 0.5
+    assert (tracer._global_count, tracer._user_count, tracer._item_count) == before
+
+
+def test_empirical_replay_does_not_use_another_users_future_outcome():
+    from orchid_ranker.empirical import EmpiricalTracer
+
+    train = pd.DataFrame(
+        [
+            {"user_id": "u1", "item_id": 10, "correct": 1, "skill_id": "a", "timestamp": 0},
+            {"user_id": "u1", "item_id": 10, "correct": 1, "skill_id": "a", "timestamp": 1},
+            {"user_id": "u2", "item_id": 10, "correct": 0, "skill_id": "a", "timestamp": 0},
+            {"user_id": "u2", "item_id": 10, "correct": 0, "skill_id": "a", "timestamp": 1},
+        ]
+    )
+    split = KTHoldoutSplit(
+        train=train,
+        test=train.iloc[0:0].copy(),
+        user_col="user_id",
+        item_col="item_id",
+        correct_col="correct",
+        timestamp_col="timestamp",
+    )
+    tracer = EmpiricalTracer().fit(train)
+
+    examples = build_delayed_gain_training_frame(split, concept_col="skill_id", future_window=1, tracer=tracer)
+
+    first_attempts = examples.set_index("user_id")["p_correct"]
+    assert first_attempts["u1"] == 0.5
+    assert first_attempts["u2"] == 0.5
+
+
 def test_run_kt_policy_ope_benchmark_supports_delayed_gain_reward():
     metrics = run_kt_policy_ope_benchmark(
         _delayed_gain_events(),

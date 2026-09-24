@@ -10,6 +10,7 @@ records its chosen action.
 | Record | Minimum fields |
 | --- | --- |
 | Catalog import | `catalog_version`, `course_id`, `module_id`, `item_id`, `content_version`, skill/category, difficulty, prerequisites, `assessment_only` |
+| Randomized enrollment | learner, course run, assigned arm, pre-assignment stratum, enrollment timestamp, fixed assessment due date |
 | Recommendation request | `request_id`, learner, course run, catalog version, experiment arm, eligibility-rule version, exact eligible IDs, timestamp |
 | Served decision | `request_id`/`decision_id`, chosen and actually rendered item, Orchid policy/model artifact ID, catalog and eligibility versions, candidate IDs, fallback/reason code |
 | Practice outcome | unique outcome-event ID, `decision_id`, item/content version, rendered/submitted/scored timestamps, binary result, invalid/abandoned status |
@@ -79,6 +80,15 @@ pilot = AdaptivePracticePilot(
     lifecycle_store=SQLitePilotLifecycleStore(database),
 )
 
+assignment = pilot.enroll(
+    learner_id,
+    course_run_id=cohort_id,
+    timestamp=enrolled_at,
+    stratum=baseline_mastery_band,
+)
+# Save this assignment and the pre-declared assessment due date in the
+# learning product's complete randomized enrollment roster.
+
 served = pilot.serve(PilotRequest(
     request_id=lms_request_id,
     user_id=learner_id,
@@ -135,6 +145,16 @@ version was recorded as both rendered and submitted. Pass the LMS's globally
 unique outcome-event ID when a score arrives; Orchid rejects any attempt to
 reuse it for another decision.
 
+`pilot.enroll(...)` persists a course-run enrollment event even if the learner
+never requests practice. `pilot.enrollment_frame()` exports those durable
+records, including any QA or pre-study enrollments. Select only the
+pre-declared efficacy cohort, join its fixed assessment due dates from the
+course calendar, and freeze that roster for the learner-level analysis. Do not
+filter by later practice or assessment completion. `pilot.analysis_frame()`
+has one row per decision and omits nonparticipants. Independent assessments
+for enrolled learners without practice can still be imported if their
+course-run linkage matches.
+
 The treatment’s learner state may adapt, but its aggregate empirical model is
 kept frozen for the study; control, A/A, shadow, and halted outcomes are kept
 as audit evidence only. If score persistence succeeds but the process fails
@@ -177,12 +197,17 @@ fallback code in your integration record, such as `AUTHORED_REQUIRED`,
    decisions to the authored control with `KILL_SWITCH` evidence. A halted
    experiment cannot be re-enabled; start a new experiment ID for a later run.
 
+Use QA traffic or an earlier cohort for A/A and shadow validation. Define the
+efficacy cohort before active delivery and enroll every eligible learner in
+its frozen roster. Keep learners in that roster if their assigned treatment
+later falls back or the kill switch activates; report those delivery failures
+separately.
+
 Use `pilot.import_delayed_assessments(...)` only for explicitly independent
 assessment events, then use `pilot.analysis_frame()` as the joined delivery
-export. The adapter does not calculate a causal effect or replace a
-pre-registered analysis plan.
-5. **Replication:** Re-run the fixed protocol in a second course before making
-   a broad product claim.
+export. The [one-course study guide](06-one-course-study.md) shows the
+roster-based analysis. Replicate a promising result in another course before
+making a broad product claim.
 
 Keep a one-action kill switch that routes all future treatment requests to the
 authored fallback. Log each fallback or rollback and preserve learners in an
@@ -191,9 +216,10 @@ intention-to-treat analysis.
 ## Decide success before launch
 
 The primary outcome should be retained mastery on an independently authored,
-delayed assessment using unserved or isomorphic items—for example, 14 or 28
-days after module completion. Immediate exercise correctness informs
-adaptation, but it is not the efficacy claim.
+delayed assessment using unserved or isomorphic items. Schedule the assessment
+from a course calendar fixed before assignment, rather than from each
+learner's completion date, which treatment may change. Immediate exercise
+correctness informs adaptation, but it is not the efficacy claim.
 
 Pre-specify sample size, minimum detectable effect, missing-data handling,
 randomization unit/strata, stop rules, and subgroups. Monitor candidate,

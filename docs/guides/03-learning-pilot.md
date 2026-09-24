@@ -36,56 +36,39 @@ study.
 
 ## Stage the rollout
 
-1. Run an A/A logging check. Verify the candidate list, selected and actually
-   rendered exercise, content version, model version, submission, score, and
-   delayed outcome can be joined for every learner.
-2. Shadow Orchid beside the authored path. Inspect its logged proposal,
-   challenge probabilities,
-   support, prerequisite decisions, and learner-designer explanations.
-3. Randomize treatment and control. Start the reference pilot with its fixed
-   empirical path (`kt_backbone="empirical"`); do not make CQL, delayed-gain
-   policy learning, or exploration the pilot intervention.
+1. Run an A/A logging check on QA traffic or a separate pre-study cohort.
+   Verify that the candidate list, selected and actually rendered exercise,
+   content version, model version, submission, score, and delayed outcome can
+   be joined for every learner.
+2. Shadow Orchid beside the authored path on pre-study traffic. Inspect its
+   logged proposal, challenge probabilities, support, prerequisite decisions,
+   and learner-designer explanations.
+3. Define the efficacy cohort and freeze its enrollment roster before active
+   exposure. Activate the reference pilot after A/A and shadow checks. It
+   assigns learners once and serves its fixed empirical path
+   (`kt_backbone="empirical"`) only to the treatment arm. Keep CQL,
+   delayed-gain policy learning, and exploration out of this intervention.
 4. Retain the static control for the whole experiment. Do not replace it after
    observing early favorable results.
-5. Introduce small exploration only after logging is trustworthy, and only
-   among exercises already approved by curriculum rules. Its purpose is later
-   policy evaluation, not the primary causal estimate.
+5. Consider exploration in a separately specified later study, only among
+   exercises already approved by curriculum rules. Its purpose is later
+   policy evaluation, not the primary causal estimate here.
 
 ## Persist decision evidence
 
-Use the decision loop for treatment decisions and persist the returned record
-before showing the exercise. Give each request a stable application-generated
-decision ID so a timeout/retry does not change the selected item:
+Use the reference adapter's `pilot.enroll(...)` to freeze a complete learner
+roster before practice begins, including learners who later never request an
+exercise. Use `pilot.serve(...)` with a stable product request ID for each
+eligible request. Record the returned item and content version at render,
+submission, and scoring through the adapter's lifecycle methods. The
+[end-to-end workflow](05-pilot-workflow.md) shows this path with the durable
+assignment, decision, and lifecycle stores.
 
-```python
-ranked, decision = ranker.recommend_and_log(
-    user_id=learner.id,
-    candidate_item_ids=eligible_exercise_ids,
-    timestamp=attempt_time,
-    exploration=0.0,
-    policy_version="certification-practice-v1",
-    decision_id=request_id,
-)
-
-show_exercise(ranked[0].item_id)
-
-# Later, when the exercise is scored:
-ranker.observe_decision(
-    decision.decision_id,
-    outcome=correct,
-    timestamp=scored_at,
-    outcome_event_id=lms_score_event_id,
-)
-```
-
-`SQLiteDecisionStore` plus `SQLitePilotLifecycleStore` are sufficient for a
-single-host prototype, but the learning product must also persist experiment
-assignment, mode transitions, model artifact ID, catalog/eligibility versions,
-the exact item version actually rendered and submitted, and a globally unique
-outcome-event ID. Log authored-control selections in that same application
-schema. Keep the independent delayed assessment in a separate stream and do
-not feed it into the live learner state before the primary analysis. See the
-[pilot integration contract](04-pilot-integration.md).
+Keep the independent delayed assessment in a separate stream and do not feed
+it into the live learner state before the primary analysis. The decision-level
+`pilot.analysis_frame()` is useful for delivery audits; the [one-course study
+guide](06-one-course-study.md) shows the separate frozen roster needed for a
+learner-level assigned-arm analysis.
 
 ## Interpret results carefully
 

@@ -543,6 +543,23 @@ def _replay_tracer_predictions(
     if not hasattr(tracer, "observe"):
         raise ValueError("tracer must expose observe() for delayed-gain feature replay")
 
+    # The empirical tracer has no separate sequence history: its fitted counts
+    # contain every training label. Replaying into that object would both leak
+    # future outcomes into early features and count the training set twice.
+    from .empirical import EmpiricalTracer
+
+    empirical_replay = isinstance(tracer, EmpiricalTracer)
+    if empirical_replay:
+        empty_tracer = EmpiricalTracer(
+            correct_threshold=tracer.correct_threshold,
+            item_prior_strength=tracer.item_prior_strength,
+            user_prior_strength=tracer.user_prior_strength,
+            user_item_prior_strength=tracer.user_item_prior_strength,
+        )
+        empty_tracer.item_ids_ = list(tracer.item_ids_)
+        empty_tracer.is_fitted = True
+        tracer = empty_tracer
+
     original_histories = None
     if hasattr(tracer, "_histories"):
         original_histories = {
@@ -558,19 +575,38 @@ def _replay_tracer_predictions(
         }
         setattr(tracer, "_history_times", {})
     predictions: dict[int, float] = {}
+
+    def predict_row(row: Mapping[str, Any]) -> None:
+        user_id = row[user_col]
+        item_id = row[item_col]
+        if hasattr(tracer, "predict_correct"):
+            pred = tracer.predict_correct(user_id, item_id)
+        else:
+            pred = tracer.predict_many(user_id, [item_id])[item_id]
+        predictions[int(row["__orchid_row_id__"])] = _clamp01(pred)
+
+    def observe_row(row: Mapping[str, Any]) -> None:
+        user_id = row[user_col]
+        item_id = row[item_col]
+        if timestamp_col is not None and timestamp_col in row:
+            _observe_tracer_for_replay(tracer, user_id, item_id, int(row[label_col]), timestamp=row[timestamp_col])
+        else:
+            tracer.observe(user_id, item_id, int(row[label_col]))
+
     try:
-        for user_id, group in train.groupby(user_col, sort=False):
-            for row in group.to_dict("records"):
-                item_id = row[item_col]
-                if hasattr(tracer, "predict_correct"):
-                    pred = tracer.predict_correct(user_id, item_id)
-                else:
-                    pred = tracer.predict_many(user_id, [item_id])[item_id]
-                predictions[int(row["__orchid_row_id__"])] = _clamp01(pred)
-                if timestamp_col is not None and timestamp_col in row:
-                    _observe_tracer_for_replay(tracer, user_id, item_id, int(row[label_col]), timestamp=row[timestamp_col])
-                else:
-                    tracer.observe(user_id, item_id, int(row[label_col]))
+        if empirical_replay and timestamp_col is not None:
+            ordered = train.sort_values([timestamp_col, "__orchid_row_id__"], kind="mergesort")
+            for _, group in ordered.groupby(timestamp_col, sort=False):
+                rows = group.to_dict("records")
+                for row in rows:
+                    predict_row(row)
+                for row in rows:
+                    observe_row(row)
+        else:
+            for _, group in train.groupby(user_col, sort=False):
+                for row in group.to_dict("records"):
+                    predict_row(row)
+                    observe_row(row)
     finally:
         if original_histories is not None:
             setattr(tracer, "_histories", original_histories)

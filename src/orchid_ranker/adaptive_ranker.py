@@ -193,6 +193,8 @@ class AdaptiveRanker:
         self._events: Optional[pd.DataFrame] = None
         self._fit_kwargs: dict[str, Any] = {}
         self._catalog_registration: Optional[tuple[pd.DataFrame, str, Optional[str], Optional[str]]] = None
+        self._additional_catalog_registrations: list[tuple[pd.DataFrame, str, Optional[str], Optional[str]]] = []
+        self._live_observations: list[tuple[Any, Any, int, float, bool]] = []
         self.decision_store: DecisionOutcomeStore = decision_store or InMemoryDecisionStore()
         _require_decision_store(self.decision_store)
         # One ranker owns mutable learner state, decision records, and deployed
@@ -201,6 +203,7 @@ class AdaptiveRanker:
         self._state_lock = threading.RLock()
         self._decision_lock = self._state_lock
         self._rng = np.random.default_rng(self.config.random_state)
+        self._base_deployment_version: Optional[str] = None
         self._deployment_version: Optional[str] = None
 
     @property
@@ -355,6 +358,8 @@ class AdaptiveRanker:
             self._catalog_registration = None
         self.recommender_ = candidate_recommender
         self._events = work.copy()
+        self._additional_catalog_registrations = []
+        self._live_observations = []
         self._fit_kwargs = {
             "user_col": user_col,
             "item_col": item_col,
@@ -368,30 +373,51 @@ class AdaptiveRanker:
         self.offline_policy_gate_ = None
         self.offline_policy_bootstrap_ = None
         self.rolling_policy_report_ = None
-        self._deployment_version = self._derive_deployment_version()
+        self._base_deployment_version = self._derive_deployment_version(include_offline_policy=False)
+        self._deployment_version = self._base_deployment_version
         return self
 
     def fit_reward_model(self) -> "AdaptiveRanker":
-        """Refit the adaptive stack with support-constrained delayed-gain modeling."""
+        """Refit delayed-gain modeling, then replay live observations into learner state."""
         with self._state_lock:
             if self._events is None:
                 raise RuntimeError("fit must be called before fit_reward_model")
             if self._fit_kwargs.get("concept_col") is None:
                 raise ValueError("fit_reward_model requires category data")
             adaptive_config = self._adaptive_config(policy="support_delayed_gain")
-            self.recommender_ = AdaptiveLearningRecommender(adaptive_config).fit(self._events, **self._fit_kwargs)
+            candidate_recommender = AdaptiveLearningRecommender(adaptive_config).fit(self._events, **self._fit_kwargs)
             if self._catalog_registration is not None:
                 catalog, item_col, category_col, difficulty_col = self._catalog_registration
-                self.recommender_.register_items(
+                candidate_recommender.register_items(
                     catalog,
                     item_col=item_col,
                     category_col=category_col,
                     difficulty_col=difficulty_col,
                 )
+            for catalog, item_col, category_col, difficulty_col in self._additional_catalog_registrations:
+                candidate_recommender.register_items(
+                    catalog,
+                    item_col=item_col,
+                    category_col=category_col,
+                    difficulty_col=difficulty_col,
+                )
+            for user_id, item_id, outcome, timestamp, update_global in self._live_observations:
+                if update_global:
+                    candidate_recommender.observe(user_id, item_id, outcome, timestamp=timestamp)
+                else:
+                    _observe_recommender_locally(
+                        candidate_recommender,
+                        user_id=user_id,
+                        item_id=item_id,
+                        outcome=outcome,
+                        timestamp=timestamp,
+                    )
+            self.recommender_ = candidate_recommender
             self.offline_policy_ = None
             self.offline_policy_gate_ = None
             self.offline_policy_bootstrap_ = None
-            self._deployment_version = self._derive_deployment_version()
+            self._base_deployment_version = self._derive_deployment_version(include_offline_policy=False)
+            self._deployment_version = self._base_deployment_version
             return self
 
     def fit_policy(
@@ -411,7 +437,8 @@ class AdaptiveRanker:
 
         Promotion always requires chronologically held-out logs. The candidate
         is compared with the explicit historical logging-policy baseline and
-        replaces the active policy only when the rollout gate passes.
+        replaces the active policy only when the rollout gate passes. Evaluation
+        logs must identify the current base artifact used for serving.
         """
         normalized = algo.lower()
         if normalized not in {"cql", "conservative", "tabular_cql"}:
@@ -440,6 +467,24 @@ class AdaptiveRanker:
         if training["timestamp"].max() >= evaluation["timestamp"].min():
             raise ValueError("evaluation_decisions must be strictly later than policy training")
         _require_disjoint_policy_logs(training, evaluation)
+        with self._state_lock:
+            base_version = self._base_deployment_version
+            fit_events = self._events
+            fit_timestamp_col = self._fit_kwargs.get("timestamp_col", "timestamp")
+        if base_version is None:
+            raise RuntimeError("fit must establish a base deployment version before policy promotion")
+        if fit_events is not None and fit_events[fit_timestamp_col].max() >= evaluation["timestamp"].min():
+            raise ValueError("evaluation_decisions must be strictly later than base-model fitting events")
+        mismatched = [
+            row_id
+            for row_id, row in evaluation.iterrows()
+            if _base_policy_version_for_logged_row(row) != base_version
+        ]
+        if mismatched:
+            raise ValueError(
+                "evaluation_decisions must use the current base policy version; "
+                f"mismatched rows: {mismatched[:5]}"
+            )
 
         candidate_policy = CQLDiscretePolicy(
             random_state=self.config.random_state,
@@ -460,6 +505,8 @@ class AdaptiveRanker:
             max_clipped_fraction=self.config.offline_policy_max_clipped_fraction,
         )
         with self._state_lock:
+            if self._base_deployment_version != base_version:
+                raise RuntimeError("base policy changed during offline-policy evaluation")
             self.last_policy_evidence_ = evidence
             self.last_policy_gate_ = gate
             if gate.allowed:
@@ -628,12 +675,31 @@ class AdaptiveRanker:
         with self._state_lock:
             self._require_fitted()
             assert self.recommender_ is not None
+            previous_items = set(self.recommender_.item_ids_)
             self.recommender_.register_items(
                 catalog,
                 item_col=item_col,
                 category_col=category_col if category_col in catalog.columns else None,
                 difficulty_col=difficulty_col if difficulty_col in catalog.columns else None,
             )
+            if set(self.recommender_.item_ids_) == previous_items:
+                return self
+            self._additional_catalog_registrations.append(
+                (
+                    catalog.copy(),
+                    item_col,
+                    category_col if category_col in catalog.columns else None,
+                    difficulty_col if difficulty_col in catalog.columns else None,
+                )
+            )
+            base_version = self._derive_deployment_version(include_offline_policy=False)
+            if base_version != self._base_deployment_version:
+                # The overlay gate covered the previous candidate universe.
+                self.offline_policy_ = None
+                self.offline_policy_gate_ = None
+                self.offline_policy_bootstrap_ = None
+                self._base_deployment_version = base_version
+                self._deployment_version = base_version
             return self
 
     def attach_semantic_encoder(self, encoder: Any) -> "AdaptiveRanker":
@@ -905,6 +971,7 @@ class AdaptiveRanker:
                 was_exploration=was_exploration,
                 exploration_bonus=tuple([epsilon / len(safe)] * len(safe)),
                 policy_metadata={
+                    "base_policy_version": self._base_deployment_version,
                     "concept_goal": concept_goal,
                     "min_item_support": float(min_item_support),
                     "min_outcome_probability": float(min_outcome_probability),
@@ -951,19 +1018,24 @@ class AdaptiveRanker:
             normalized_timestamp = normalize_timestamp(timestamp)
             del category_id
             if bool(update_global):
-                return self.recommender_.observe(
+                result = self.recommender_.observe(
                     user_id,
                     item_id,
                     normalized_outcome,
                     timestamp=normalized_timestamp,
                 )
-            return _observe_recommender_locally(
-                self.recommender_,
-                user_id=user_id,
-                item_id=item_id,
-                outcome=normalized_outcome,
-                timestamp=normalized_timestamp,
+            else:
+                result = _observe_recommender_locally(
+                    self.recommender_,
+                    user_id=user_id,
+                    item_id=item_id,
+                    outcome=normalized_outcome,
+                    timestamp=normalized_timestamp,
+                )
+            self._live_observations.append(
+                (user_id, item_id, normalized_outcome, normalized_timestamp, bool(update_global))
             )
+            return result
 
     def persist_decision_outcome(
         self,
@@ -1663,11 +1735,21 @@ class AdaptiveRanker:
         )
         return f"{base}+cql" if self.offline_policy_ is not None and self._offline_policy_allowed() else base
 
-    def _derive_deployment_version(self) -> str:
+    def _derive_deployment_version(self, *, include_offline_policy: bool = True) -> str:
         """Create a deployment fingerprint from learned state, not input tables."""
+        base_name = (
+            str(self.recommender_.policy_name_)
+            if self.recommender_ is not None and self.recommender_.policy_name_ is not None
+            else str(self.config.policy)
+        )
+        policy_name = (
+            f"{base_name}+cql"
+            if include_offline_policy and self.offline_policy_ is not None and self._offline_policy_allowed()
+            else base_name
+        )
         digest = hashlib.sha256()
         digest.update(repr(self.config).encode("utf-8"))
-        digest.update(self._resolved_policy_name().encode("utf-8"))
+        digest.update(policy_name.encode("utf-8"))
         if self.recommender_ is not None:
             digest.update(repr(self.recommender_.config).encode("utf-8"))
             digest.update(str(self.recommender_.policy_name_).encode("utf-8"))
@@ -1691,9 +1773,9 @@ class AdaptiveRanker:
                     digest.update(str(values.dtype).encode("utf-8"))
                     digest.update(repr(values.shape).encode("utf-8"))
                     digest.update(values.tobytes())
-        if self.offline_policy_ is not None:
+        if include_offline_policy and self.offline_policy_ is not None:
             digest.update(self.offline_policy_.state_fingerprint().encode("utf-8"))
-        return f"orchid-{self._resolved_policy_name()}-{digest.hexdigest()[:12]}"
+        return f"orchid-{policy_name}-{digest.hexdigest()[:12]}"
 
     def _require_fitted(self) -> None:
         if not self.is_fitted:
@@ -1989,18 +2071,7 @@ def _base_scores_for_logged_row(row: pd.Series) -> list[float]:
     overlay without this field cannot be evaluated exactly and is rejected.
     """
     candidates = parse_candidate_list(row["candidate_item_ids"])
-    metadata_raw = row.get("policy_metadata")
-    metadata: Mapping[str, Any] = {}
-    if isinstance(metadata_raw, Mapping):
-        metadata = metadata_raw
-    elif isinstance(metadata_raw, str) and metadata_raw.strip():
-        try:
-            decoded = json.loads(metadata_raw)
-        except json.JSONDecodeError as exc:
-            raise ValueError("policy_metadata must be a JSON object when serialized") from exc
-        if not isinstance(decoded, dict):
-            raise ValueError("policy_metadata must decode to an object")
-        metadata = decoded
+    metadata = _logged_policy_metadata(row)
     if "base_scores" in metadata:
         values = [float(value) for value in parse_candidate_list(metadata["base_scores"])]
         if len(values) != len(candidates) or not np.all(np.isfinite(values)):
@@ -2014,6 +2085,32 @@ def _base_scores_for_logged_row(row: pd.Series) -> list[float]:
     if len(values) != len(candidates) or not np.all(np.isfinite(values)):
         raise ValueError("scores must be finite and align with candidate_item_ids")
     return values
+
+
+def _base_policy_version_for_logged_row(row: pd.Series) -> Optional[str]:
+    metadata = _logged_policy_metadata(row)
+    if "base_policy_version" in metadata:
+        return str(metadata["base_policy_version"])
+    # Before the first CQL overlay, the recorded policy version identifies the
+    # base itself. Overlay logs need their explicit base identity.
+    if "+cql" not in str(row.get("policy_name", "")):
+        return str(row["policy_version"])
+    return None
+
+
+def _logged_policy_metadata(row: pd.Series) -> Mapping[str, Any]:
+    metadata_raw = row.get("policy_metadata")
+    if isinstance(metadata_raw, Mapping):
+        return metadata_raw
+    if isinstance(metadata_raw, str) and metadata_raw.strip():
+        try:
+            decoded = json.loads(metadata_raw)
+        except json.JSONDecodeError as exc:
+            raise ValueError("policy_metadata must be a JSON object when serialized") from exc
+        if not isinstance(decoded, dict):
+            raise ValueError("policy_metadata must decode to an object")
+        return decoded
+    return {}
 
 
 def _update_digest_with_mapping(digest: Any, value: Any) -> None:

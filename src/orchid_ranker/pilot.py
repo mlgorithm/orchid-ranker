@@ -53,6 +53,7 @@ PilotEventType = Literal[
     "shadow_proposal",
     "explanation",
     "mode_change",
+    "enrollment",
     "assessment",
 ]
 
@@ -99,6 +100,7 @@ class PilotDeliveryEvent:
             "shadow_proposal",
             "explanation",
             "mode_change",
+            "enrollment",
             "assessment",
         }:
             raise ValueError("unsupported pilot delivery event type")
@@ -1125,8 +1127,10 @@ class AdaptivePracticePilot:
             self._record_automatic_lifecycle_events(existing, metadata)
             return self._pilot_decision_from_logged(existing, metadata, eligibility=eligibility)
 
-        assignment = self._assignment_for(request)
         mode = self.mode
+        if timestamp < self.operation.timestamp:
+            raise ValueError("new pilot request timestamp precedes the current delivery mode transition")
+        assignment = self._assignment_for(request)
         effective_arm: PilotArm = "treatment" if mode == "active" and assignment.arm == "treatment" else "control"
         metadata = self._decision_metadata(
             request,
@@ -1393,13 +1397,30 @@ class AdaptivePracticePilot:
         ]
         return pd.DataFrame(records)
 
+    def enrollment_frame(self) -> pd.DataFrame:
+        """Export durable course-run enrollment, including nonparticipants."""
+        records = [
+            {
+                "enrollment_event_id": event.event_id,
+                "enrollment_timestamp": event.timestamp,
+                "user_id": event.payload["user_id"],
+                "course_run_id": event.payload["course_run_id"],
+                "assigned_arm": event.payload["experiment_arm"],
+                "stratum": event.payload["stratum"],
+            }
+            for event in self.lifecycle_store.events(self.experiment_id)
+            if event.event_type == "enrollment"
+        ]
+        return pd.DataFrame(records)
+
     def import_delayed_assessments(self, assessments: pd.DataFrame) -> pd.DataFrame:
         """Import independent delayed outcomes without feeding adaptive state.
 
         The assessment importer deliberately requires an explicit independence
         flag. A practice item or a score that has already influenced the
         treatment ranker cannot be used as the pilot's retained-mastery
-        outcome.
+        outcome. A learner assigned at enrollment can be assessed even if they
+        never requested practice; keep those learners in the study roster.
         """
         required = {
             "assessment_event_id",
@@ -1425,21 +1446,32 @@ class AdaptivePracticePilot:
             assignment = self.assignment_store.get_assignment(self.experiment_id, row["user_id"])
             if assignment is None:
                 raise KeyError("delayed assessment belongs to a learner without a pilot assignment")
+            assessment_timestamp = normalize_timestamp(row["timestamp"])
             participated = any(
                 decision.user_id == row["user_id"]
-                and _pilot_metadata_or_none(decision) is not None
-                and _pilot_metadata(decision).get("experiment_id") == self.experiment_id
-                and _canonical_json(_pilot_metadata(decision).get("course_run_id"))
-                == _canonical_json(row["course_run_id"])
+                and (metadata := _pilot_metadata_or_none(decision)) is not None
+                and metadata.get("experiment_id") == self.experiment_id
+                and _analysis_grouping_key(metadata.get("course_run_id"))
+                == _analysis_grouping_key(row["course_run_id"])
+                and decision.timestamp <= assessment_timestamp
                 for decision in self.ranker.decision_store.decisions()
             )
-            if not participated:
-                raise ValueError("delayed assessment course_run_id has no matching pilot participation")
+            enrolled = any(
+                event.event_type == "enrollment"
+                and _analysis_grouping_key(event.payload.get("user_id"))
+                == _analysis_grouping_key(row["user_id"])
+                and _analysis_grouping_key(event.payload.get("course_run_id"))
+                == _analysis_grouping_key(row["course_run_id"])
+                and event.timestamp <= assessment_timestamp
+                for event in self.lifecycle_store.events(self.experiment_id)
+            )
+            if not participated and not enrolled:
+                raise ValueError("delayed assessment course_run_id has no matching pilot participation or enrollment")
             event = PilotDeliveryEvent(
                 event_id=event_id,
                 experiment_id=self.experiment_id,
                 event_type="assessment",
-                timestamp=normalize_timestamp(row["timestamp"]),
+                timestamp=assessment_timestamp,
                 payload={
                     "user_id": row["user_id"],
                     "course_run_id": row["course_run_id"],
@@ -1607,17 +1639,67 @@ class AdaptivePracticePilot:
             self._create_single_delivery_event(event)
 
     def _assignment_for(self, request: PilotRequest) -> ExperimentAssignment:
-        existing = self.assignment_store.get_assignment(self.experiment_id, request.user_id)
+        return self.assign(request.user_id, stratum=request.stratum)
+
+    def assign(self, user_id: Any, *, stratum: Optional[Any] = None) -> ExperimentAssignment:
+        """Persist a sticky arm at enrollment, before the first practice request.
+
+        Keep an external enrollment roster for analysis, including learners who
+        never request an exercise. Assignment is learner-level across course runs.
+        """
+        existing = self.assignment_store.get_assignment(self.experiment_id, user_id)
         if existing is not None:
-            if existing.stratum != request.stratum:
+            if existing.stratum != stratum:
                 raise ValueError("learner already has a sticky assignment with a different stratum")
             return existing
-        arm: PilotArm = "treatment" if self._is_treatment(request.user_id, request.stratum) else "control"
-        proposed = ExperimentAssignment(self.experiment_id, request.user_id, arm, request.stratum)
+        arm: PilotArm = "treatment" if self._is_treatment(user_id, stratum) else "control"
+        proposed = ExperimentAssignment(self.experiment_id, user_id, arm, stratum)
         stored, _ = self.assignment_store.create_assignment(proposed)
-        if stored.stratum != request.stratum:
+        if stored.stratum != stratum:
             raise ValueError("learner already has a sticky assignment with a different stratum")
         return stored
+
+    def enroll(
+        self,
+        user_id: Any,
+        *,
+        course_run_id: Any,
+        timestamp: Any,
+        stratum: Optional[Any] = None,
+    ) -> ExperimentAssignment:
+        """Persist assignment and immutable course-run enrollment before practice.
+
+        Enrollment lets the assessment importer recognize randomized learners
+        who never received a practice decision. The external study roster must
+        still include every enrolled learner for intention-to-treat analysis.
+        """
+        if course_run_id is None or _analysis_grouping_key(course_run_id) == "null":
+            raise ValueError("course_run_id is required for explicit enrollment")
+        event_id = _system_event_id(self.experiment_id, "enrollment", user_id, course_run_id)
+        if self.lifecycle_store.get_event(event_id) is None and any(
+            decision.user_id == user_id
+            and (metadata := _pilot_metadata_or_none(decision)) is not None
+            and metadata.get("experiment_id") == self.experiment_id
+            and _analysis_grouping_key(metadata.get("course_run_id")) == _analysis_grouping_key(course_run_id)
+            for decision in self.ranker.decision_store.decisions()
+        ):
+            raise ValueError("course-run enrollment must precede the first pilot practice decision")
+        assignment = self.assign(user_id, stratum=stratum)
+        self.lifecycle_store.create_event(
+            PilotDeliveryEvent(
+                event_id=event_id,
+                experiment_id=self.experiment_id,
+                event_type="enrollment",
+                timestamp=normalize_timestamp(timestamp),
+                payload={
+                    "user_id": user_id,
+                    "course_run_id": course_run_id,
+                    "experiment_arm": assignment.arm,
+                    "stratum": assignment.stratum,
+                },
+            )
+        )
+        return assignment
 
     def _persist_assignment(self, request: PilotRequest, arm: PilotArm) -> None:
         stored, _ = self.assignment_store.create_assignment(

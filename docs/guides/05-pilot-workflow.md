@@ -157,6 +157,29 @@ start a new experiment instead.
 
 ## 2. Serve one idempotent decision
 
+Enroll a learner in a specific course run before their first practice request.
+The enrollment event survives even if they never practice. The product must
+also save the assigned arm, pre-assignment stratum, and assessment due date in
+its own frozen roster for the pre-defined efficacy cohort:
+
+~~~python
+assignment = pilot.enroll(
+    "learner-17",
+    course_run_id="networking-2026q3-cohort-a",
+    timestamp=1_724_999_000,
+    stratum="baseline-low",
+)
+print(assignment.arm)
+~~~
+
+This request is an A/A logging example because the pilot starts in `aa` mode.
+Do not add this QA learner to the efficacy roster. After validation, enroll a
+distinct active-phase cohort with the same API and freeze its full roster
+before serving its first practice request. `pilot.enrollment_frame()` exports
+all explicit enrollments, including learners with no decisions; select the
+pre-declared efficacy cohort and join the fixed assessment due dates before
+writing its roster CSV.
+
 Your LMS calculates the exact approved candidate set before calling Orchid.
 Apply accommodations, pacing and attempt limits, availability, prerequisites,
 and other course rules here. Do not hand the ranker a broad catalog and expect
@@ -253,7 +276,9 @@ A/A, shadow, and halted scores are audit-only.
 
 The efficacy outcome should be a later assessment with unserved or isomorphic
 content. Import it separately and explicitly mark it independent. The importer
-does not use assessment scores to update the live ranker.
+does not use assessment scores to update the live ranker. It also accepts an
+assessment from a correctly enrolled learner who never requested practice;
+the course run and assessment timestamp must match the enrollment record.
 
 ~~~python
 pilot.import_delayed_assessments(
@@ -275,19 +300,30 @@ pilot.import_delayed_assessments(
 # One row per served decision, with joined delivery evidence, immutable policy
 # metadata, explanations/shadow proposals, and independent assessment records.
 analysis = pilot.analysis_frame()
-analysis.to_csv("networking-routing-2026q3-analysis.csv", index=False)
+analysis.to_json("networking-routing-2026q3-delivery-audit.jsonl", orient="records", lines=True)
+
+# The independent assessment export includes correctly enrolled learners who
+# never practiced; analysis_frame() does not.
+pilot.assessment_frame().to_csv("networking-routing-2026q3-assessments.csv", index=False)
 ~~~
 
 Use this export to check linkage and protocol health by assigned arm before
 running the pre-registered analysis: candidate-set violations, missing render
 or submission evidence, outcome coverage, fallbacks, difficulty jumps, and
-assessment completion. It intentionally is not a causal-estimation API.
+decision-linked assessment completion. The JSONL file can be passed as
+`--delivery-audit` to the [retention analyzer](06-one-course-study.md). It
+intentionally is not a causal-estimation API.
+For a runnable learner-level comparison and a frozen enrollment roster, see
+the [one-course sample study](06-one-course-study.md).
 
 ## 5. Roll out deliberately
 
 Pilot mode is durable operational state. Set it through a privileged service
 path with a unique operation event ID; never infer it from deployment
 configuration.
+Use QA traffic or an earlier cohort to validate A/A and shadow mode. Freeze
+the randomized efficacy cohort before active exposure; the mode examples below
+show the API transitions and are not one learner's study timeline.
 
 ~~~python
 # 1. initial_mode="aa" already routes both assigned arms to authored control.

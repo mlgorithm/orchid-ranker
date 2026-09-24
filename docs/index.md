@@ -67,6 +67,7 @@ decision evidence for a controlled evaluation.
 | Check whether your data and catalog are ready | [Adaptive-practice data readiness](guides/00-adaptive-practice.md) |
 | Add durable decisions and delayed outcomes to an existing product | [Production serving](guides/02-serve-streaming.md) |
 | Run an evidence-oriented controlled pilot | [Pilot workflow](guides/05-pilot-workflow.md) |
+| Run the synthetic one-course study | [Sample study](guides/06-one-course-study.md) |
 | Look up a class or method | [API reference](api_reference.md) |
 | Check compatibility guarantees | [API support policy](api-support-policy.md) |
 
@@ -78,6 +79,8 @@ Start with the [quickstart](quickstart.md), then read
 handoff between Orchid and a learning platform. The
 [end-to-end reference-pilot workflow](guides/05-pilot-workflow.md) turns that
 contract into a runnable sequence. The
+[one-course sample study](guides/06-one-course-study.md) shows the frozen
+learner roster and delayed-outcome analysis. The
 [product roadmap](roadmap.md) describes the path from a single-course pilot to
 an evidence-backed integration. The [design-partner council](design-partner-council.md)
 keeps that roadmap grounded in simulated customer review without claiming any

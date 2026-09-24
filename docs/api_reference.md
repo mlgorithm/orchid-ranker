@@ -445,8 +445,11 @@ report = ranker.fit_policy(
 `fit_policy` trains tabular CQL from a training decision log and promotes it
 only if a strictly later, disjoint evaluation log passes the
 user-cluster-bootstrap rollout gate. By default it requires at least 30
-evaluation events and 30 users. `fit_policy_rolling(...)` creates the same
-strict chronological split from a trailing source window.
+evaluation events and 30 users. The evaluation window must also follow the
+base-model fitting data. Evaluation decisions must carry the current
+base-policy version; Orchid records it in `policy_metadata` during
+`recommend_and_log`. `fit_policy_rolling(...)` creates the same strict
+chronological split from a trailing source window.
 
 Use `ope_report(...)` or `bootstrap_ope_report(...)` for logged-policy
 evaluation and `shadow_report()` to summarize traffic, outcome coverage,

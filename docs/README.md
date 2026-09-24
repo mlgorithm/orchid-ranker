@@ -11,6 +11,7 @@
 - `guides/03-learning-pilot.md` – controlled learning-efficacy study design.
 - `guides/04-pilot-integration.md` – exact LMS/pilot integration contract.
 - `guides/05-pilot-workflow.md` – end-to-end reference pilot walkthrough.
+- `guides/06-one-course-study.md` – reproducible sample study and learner-level retention analysis.
 - `examples.md` – three runnable reference-pilot integrations.
 - `benchmarks/credibility.md` – reproducible logged-policy validation and rollout claims.
 - `coding-standards.md` – public API, testing, docs, and review standards.

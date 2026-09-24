@@ -594,6 +594,147 @@ def test_analysis_grouping_key_normalizes_pandas_missing_values() -> None:
     assert _analysis_grouping_key(np.nan) == "null"
 
 
+def test_delayed_assessment_accepts_preassigned_learner_without_practice() -> None:
+    catalog = _catalog(required_first=False)
+    pilot = AdaptivePracticePilot(
+        _ranker(catalog),
+        PilotCatalog.from_frame(catalog, catalog_version="networking-2026.1"),
+        experiment_id="assigned-nonparticipant-pilot",
+        model_artifact_id="orchid-empirical-2026-08-30",
+        authored_policy_version="routing-authored-v1",
+    )
+    assigned = pilot.enroll(
+        "nonparticipant", course_run_id="run-1", timestamp=100, stratum="baseline-low"
+    )
+    assert pilot.enroll(
+        "nonparticipant", course_run_id="run-1", timestamp=100, stratum="baseline-low"
+    ) == assigned
+    enrollment = pilot.enrollment_frame()
+    assert enrollment["user_id"].tolist() == ["nonparticipant"]
+    assert enrollment["assigned_arm"].tolist() == [assigned.arm]
+    assessment = pd.DataFrame(
+        {
+            "assessment_event_id": ["nonparticipant-assessment"],
+            "user_id": ["nonparticipant"],
+            "course_run_id": ["run-1"],
+            "assessment_form_version": ["assessment-v1"],
+            "timestamp": [200],
+            "score": [0.75],
+            "independent": [True],
+        }
+    )
+
+    imported = pilot.import_delayed_assessments(assessment)
+    assert imported["user_id"].tolist() == ["nonparticipant"]
+    assert imported["experiment_arm"].tolist() == [assigned.arm]
+    assert pilot.decision_frame().empty
+    assert pilot.import_delayed_assessments(assessment).shape[0] == 1
+
+    wrong_run = assessment.assign(
+        assessment_event_id="wrong-run-assessment",
+        course_run_id="run-2",
+    )
+    with pytest.raises(ValueError, match="no matching pilot participation or enrollment"):
+        pilot.import_delayed_assessments(wrong_run)
+
+    before_enrollment = assessment.assign(
+        assessment_event_id="early-assessment",
+        timestamp=99,
+    )
+    with pytest.raises(ValueError, match="no matching pilot participation or enrollment"):
+        pilot.import_delayed_assessments(before_enrollment)
+
+    unassigned = assessment.assign(
+        assessment_event_id="unassigned-assessment",
+        user_id="unassigned",
+    )
+    with pytest.raises(KeyError, match="without a pilot assignment"):
+        pilot.import_delayed_assessments(unassigned)
+
+
+def test_new_decision_cannot_precede_current_mode_transition() -> None:
+    catalog = _catalog(required_first=False)
+    pilot = AdaptivePracticePilot(
+        _ranker(catalog),
+        PilotCatalog.from_frame(catalog, catalog_version="networking-2026.1"),
+        experiment_id="mode-chronology-pilot",
+        model_artifact_id="orchid-empirical-2026-08-30",
+        authored_policy_version="routing-authored-v1",
+        treatment_fraction=1.0,
+    )
+    pilot.set_mode("shadow", event_id="shadow-at-100", timestamp=100)
+    stale = PilotRequest(
+        request_id="stale-before-shadow",
+        user_id="learner",
+        course_id="networking",
+        module_id="routing",
+        course_run_id="run-1",
+        timestamp=99,
+        candidate_item_ids=("net-1",),
+    )
+    with pytest.raises(ValueError, match="precedes the current delivery mode transition"):
+        pilot.serve(stale)
+    assert pilot.assignment_store.get_assignment(pilot.experiment_id, "learner") is None
+
+    request = replace(stale, request_id="shadow-request", timestamp=100)
+    first = pilot.serve(request)
+    assert first.mode == "shadow"
+    pilot.set_mode("active", event_id="active-at-200", timestamp=200)
+    assert pilot.serve(request).decision == first.decision
+    with pytest.raises(ValueError, match="precedes the current delivery mode transition"):
+        pilot.serve(replace(stale, request_id="stale-before-active", timestamp=199))
+    assert pilot.serve(replace(stale, request_id="active-request", timestamp=200)).mode == "active"
+    with pytest.raises(ValueError, match="must precede the first pilot practice decision"):
+        pilot.enroll("learner", course_run_id="run-1", timestamp=50)
+
+
+def test_preassigned_nonparticipant_enrollment_survives_sqlite_restart(tmp_path: Path) -> None:
+    database = tmp_path / "enrollment.sqlite"
+    catalog = _catalog(required_first=False)
+    snapshot = PilotCatalog.from_frame(catalog, catalog_version="networking-2026.1")
+    assignments = SQLiteExperimentAssignmentStore(database)
+    lifecycle = SQLitePilotLifecycleStore(database)
+    try:
+        pilot = AdaptivePracticePilot(
+            _ranker(catalog), snapshot,
+            experiment_id="durable-enrollment-pilot",
+            model_artifact_id="orchid-empirical-2026-08-30",
+            authored_policy_version="routing-authored-v1",
+            assignment_store=assignments,
+            lifecycle_store=lifecycle,
+        )
+        pilot.enroll("never-practiced", course_run_id="run-1", timestamp=100)
+    finally:
+        lifecycle.close()
+        assignments.close()
+
+    reopened_assignments = SQLiteExperimentAssignmentStore(database)
+    reopened_lifecycle = SQLitePilotLifecycleStore(database)
+    try:
+        restarted = AdaptivePracticePilot(
+            _ranker(catalog), snapshot,
+            experiment_id="durable-enrollment-pilot",
+            model_artifact_id="orchid-empirical-2026-08-30",
+            authored_policy_version="routing-authored-v1",
+            assignment_store=reopened_assignments,
+            lifecycle_store=reopened_lifecycle,
+        )
+        assert restarted.enrollment_frame()["user_id"].tolist() == ["never-practiced"]
+        imported = restarted.import_delayed_assessments(pd.DataFrame([{
+            "assessment_event_id": "retention-after-restart",
+            "user_id": "never-practiced",
+            "course_run_id": "run-1",
+            "assessment_form_version": "assessment-v1",
+            "timestamp": 200,
+            "score": 0.75,
+            "independent": True,
+        }]))
+        assert imported["user_id"].tolist() == ["never-practiced"]
+    finally:
+        reopened_lifecycle.close()
+        reopened_assignments.close()
+
+
 def test_sqlite_lifecycle_and_operating_mode_survive_restart(tmp_path: Path) -> None:
     database = tmp_path / "operations.sqlite"
     catalog = _catalog(required_first=False)

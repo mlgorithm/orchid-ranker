@@ -1,5 +1,16 @@
 # Changelog
 
+## Unreleased
+
+- Fixed empirical delayed-gain replay chronology and preserved live learner
+  observations and catalog changes across reward-model refits.
+- Tightened offline-policy promotion against stale model and catalog state.
+- Added durable course-run enrollment, assessment import for assigned learners
+  who never practiced, and a mode-transition chronology guard for pilot serving.
+- Added a synthetic one-course pilot, learner-level retained-mastery analysis,
+  and explicit checks for assessment maturity, missing outcomes, and delivery
+  records. The sample does not establish learning efficacy.
+
 ## 1.0.0 - 2026-08-30
 
 ### Stable adaptive-practice API

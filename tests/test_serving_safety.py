@@ -149,6 +149,7 @@ def test_failed_policy_gate_does_not_install_the_candidate_policy() -> None:
     ranker = _ranker(offline_policy_min_effect=1.0)
     training = _logged_rows("train", 0)
     evaluation = _logged_rows("evaluation", 100)
+    evaluation["policy_version"] = ranker._base_deployment_version
 
     report = ranker.fit_policy(
         training,
@@ -244,6 +245,7 @@ def test_successful_policy_promotion_versions_the_hybrid_cql_action_rule() -> No
     ranker = _ranker(offline_policy_min_effect=-0.01)
     training = _logged_rows("train", 0)
     evaluation = _logged_rows("evaluation", 100)
+    evaluation["policy_version"] = ranker._base_deployment_version
     before = ranker._deployment_version
 
     ranker.fit_policy(
@@ -264,6 +266,62 @@ def test_successful_policy_promotion_versions_the_hybrid_cql_action_rule() -> No
     assert decision.policy_version.startswith("orchid-hybrid+cql-")
     assert decision.policy_metadata is not None
     assert len(decision.policy_metadata["base_scores"]) == len(decision.candidate_item_ids)
+    assert decision.policy_metadata["base_policy_version"] == before
+
+    ranker.register_items(pd.DataFrame({"item_id": [999], "category_id": ["advance"]}))
+    assert ranker.offline_policy_ is None
+    assert ranker._deployment_version != decision.policy_version
+
+
+def test_policy_promotion_rejects_a_different_base_policy_version() -> None:
+    ranker = _ranker()
+    training = _logged_rows("train", 0)
+    evaluation = _logged_rows("evaluation", 100)
+
+    with pytest.raises(ValueError, match="current base policy version"):
+        ranker.fit_policy(
+            training,
+            evaluation_decisions=evaluation,
+            cluster_bootstrap_samples=5,
+            min_evaluation_events=1,
+            min_evaluation_users=1,
+        )
+
+
+def test_policy_promotion_rejects_base_fit_on_evaluation_period() -> None:
+    history = _history().copy()
+    history["timestamp"] += 200
+    ranker = AdaptiveRanker(kt_backbone="empirical").fit(history, category_col="category_id")
+    training = _logged_rows("train", 0)
+    evaluation = _logged_rows("evaluation", 100)
+    evaluation["policy_version"] = ranker._base_deployment_version
+
+    with pytest.raises(ValueError, match="later than base-model fitting events"):
+        ranker.fit_policy(
+            training,
+            evaluation_decisions=evaluation,
+            cluster_bootstrap_samples=5,
+            min_evaluation_events=1,
+            min_evaluation_users=1,
+        )
+
+
+def test_registering_an_item_changes_the_logged_deployment_version() -> None:
+    ranker = _ranker()
+    before = ranker._deployment_version
+
+    ranker.register_items(pd.DataFrame({"item_id": [999], "category_id": ["advance"], "difficulty": [0.5]}))
+    _, decision = ranker.recommend_and_log(
+        "a", [999], timestamp=5, min_outcome_probability=0.0, max_outcome_probability=1.0
+    )
+
+    assert ranker._deployment_version != before
+    assert decision.policy_version == ranker._deployment_version
+
+    registered_version = ranker._deployment_version
+    ranker.observe(user_id="a", item_id=999, outcome=1, timestamp=6)
+    ranker.register_items(pd.DataFrame({"item_id": [999], "category_id": ["advance"], "difficulty": [0.5]}))
+    assert ranker._deployment_version == registered_version
 
 
 def test_exploration_support_override_is_respected() -> None:

@@ -38,6 +38,40 @@ def test_supported_loop_uses_neutral_fields_only():
     ranker.observe(user_id="a", item_id=ranked[0].item_id, outcome=1, timestamp=5)
 
 
+def test_reward_model_refit_preserves_live_observations_and_registered_items():
+    rows = [
+        {
+            "user_id": f"u{user}",
+            "item_id": step % 4,
+            "outcome": int((user + step) % 3 != 0),
+            "timestamp": step,
+            "category_id": "skill",
+        }
+        for user in range(8)
+        for step in range(12)
+    ]
+    ranker = AdaptiveRanker(kt_backbone="empirical", reward_model_cross_fit_folds=1).fit(
+        pd.DataFrame(rows), category_col="category_id"
+    )
+    ranker.register_items(pd.DataFrame({"item_id": [99], "category_id": ["skill"]}))
+    ranker.observe(user_id="u0", item_id=0, outcome=0, timestamp=12, update_global=False)
+    ranker.observe(user_id="u0", item_id=99, outcome=1, timestamp=13)
+    assert ranker.recommender_ is not None
+    before = (
+        ranker.recommender_.tracer_._user_count["u0"],
+        ranker.recommender_.tracer_._global_count,
+        ranker.recommender_.item_support_[99],
+    )
+
+    ranker.fit_reward_model()
+
+    assert ranker.recommender_ is not None
+    assert ranker.recommender_.policy_name_ == "support_delayed_gain"
+    assert ranker.recommender_.tracer_._user_count["u0"] == before[0]
+    assert ranker.recommender_.tracer_._global_count == before[1]
+    assert ranker.recommender_.item_support_[99] == before[2]
+
+
 def test_legacy_schema_and_aliases_are_rejected():
     ranker = AdaptiveRanker(epochs=1, d_model=8, n_heads=2, batch_size=4, device="cpu")
     legacy = _history().rename(columns={"user_id": "learner_id", "outcome": "correct", "timestamp": "ts"})
